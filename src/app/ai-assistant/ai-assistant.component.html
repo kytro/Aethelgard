@@ -1,0 +1,48 @@
+<div class="ai-assistant">
+  <h2 class="text-3xl font-bold text-white mb-6">AI Assistant</h2>
+
+  <div class="space-y-6">
+    <!-- Query Input -->
+    <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6">
+      <h3 class="text-xl font-semibold text-white mb-3">1. Enter Your Command</h3>
+      <p class="text-gray-400 mb-4">
+        Describe the change you want to make. Include the collection name, the document's `_id`, the field to change, and the new value.
+      </p>
+      <textarea
+        [(ngModel)]="query"
+        [disabled]="isLoading()"
+        class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white font-mono h-24 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+        placeholder="e.g., 'In deities_pf1e, update document de_asmodeus to set alignment to Lawful Good'"
+      ></textarea>
+      <button (click)="generateUpdate()" [disabled]="isLoading() || !query()" class="mt-4 bg-yellow-600 hover:bg-yellow-500 text-gray-900 font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed">
+        {{ isLoading() && !proposedUpdate() ? 'Generating...' : 'Generate Update Plan' }}
+      </button>
+    </div>
+
+    <!-- Confirmation Step -->
+    @if (proposedUpdate()) {
+      <div class="border border-yellow-600 rounded-lg bg-yellow-900/30 p-6">
+        <h3 class="text-xl font-semibold text-yellow-300 mb-3">2. Confirm Update Plan</h3>
+        <p class="text-gray-400 mb-4">
+          The AI has proposed the following MongoDB update. Review it carefully before confirming.
+        </p>
+        <pre class="bg-black/50 p-4 rounded-md text-sm text-gray-300 overflow-x-auto"><code>{{ objectToJson(proposedUpdate()) }}</code></pre>
+        <div class="mt-4 flex items-center space-x-4">
+          <button (click)="confirmUpdate()" [disabled]="isLoading()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600">
+             {{ isLoading() ? 'Confirming...' : 'Confirm and Execute' }}
+          </button>
+          <button (click)="cancelUpdate()" [disabled]="isLoading()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md">
+            Cancel
+          </button>
+        </div>
+      </div>
+    }
+
+    <!-- Result Message -->
+    @if (updateResult(); as result) {
+       <div class="mt-4 px-4 py-3 rounded-lg text-sm" [ngClass]="{'bg-green-900/50 border border-green-700 text-green-300': !result.isError, 'bg-red-900/50 border border-red-700 text-red-300': result.isError}">
+        <p>{{ result.message }}</p>
+      </div>
+    }
+  </div>
+</div>

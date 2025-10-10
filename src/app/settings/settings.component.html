@@ -1,0 +1,94 @@
+<div class="settings">
+  <h2 class="text-3xl font-bold text-white mb-6">Settings</h2>
+
+  @if (apiKeysDoc(); as doc) {
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      
+      <!-- Left Side: Add and List Keys -->
+      <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6">
+        <h3 class="text-xl font-semibold text-white mb-3">API Key Management</h3>
+        <p class="text-gray-400 mb-4">
+          Add named API keys below. You can select which key is active for AI features from the dropdown on the right.
+        </p>
+
+        <!-- Add Key Form -->
+        <div class="flex items-start gap-4 mb-6">
+          <div class="flex-grow">
+            <label for="new-key-name" class="block text-sm font-medium text-gray-400">Key Name</label>
+            <input 
+              type="text" 
+              id="new-key-name"
+              [(ngModel)]="newKeyName"
+              [disabled]="isLoading()"
+              placeholder="e.g., 'Default Key'"
+              class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+            />
+          </div>
+          <div class="flex-grow">
+            <label for="new-key-value" class="block text-sm font-medium text-gray-400">API Key</label>
+            <input 
+              type="password" 
+              id="new-key-value"
+              [(ngModel)]="newKeyValue"
+              [disabled]="isLoading()"
+              placeholder="Enter the new API key"
+              class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white font-mono mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+            />
+          </div>
+          <button (click)="addApiKey()" [disabled]="isLoading()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed mt-6">
+            {{ isLoading() ? 'Adding...' : 'Add Key' }}
+          </button>
+        </div>
+
+        <!-- Key List -->
+        <div class="space-y-2">
+          @if (doc.keys) {
+            @for (key of doc.keys; track key.id) {
+              <div class="flex items-center justify-between bg-gray-900/70 p-3 rounded-md">
+                <span class="text-white font-mono">{{ key.name }}</span>
+                <button (click)="deleteApiKey(key.id)" [disabled]="isLoading()" class="text-red-500 hover:text-red-400 disabled:text-gray-500">
+                  Delete
+                </button>
+              </div>
+            }
+          }
+          @if (!doc.keys || doc.keys.length === 0) {
+            <p class="text-gray-500 text-center py-4">No API keys have been added yet.</p>
+          }
+        </div>
+      </div>
+
+      <!-- Right Side: Select Active Key -->
+      <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6 h-fit">
+        <h3 class="text-xl font-semibold text-white mb-3">Active Key</h3>
+        <p class="text-gray-400 mb-4">
+          Select the API key to be used for all AI-powered features.
+        </p>
+        <select 
+          [(ngModel)]="doc.active_key_id" 
+          (ngModelChange)="setActiveKey()"
+          [disabled]="isLoading() || !doc.keys || doc.keys.length === 0"
+          class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700"
+        >
+          @if (doc.keys && doc.keys.length > 0) {
+            @for (key of doc.keys; track key.id) {
+              <option [value]="key.id">{{ key.name }}</option>
+            }
+          } @else {
+            <option [value]="null" disabled>Add a key to get started</option>
+          }
+        </select>
+      </div>
+
+    </div>
+
+    @if (message(); as msg) {
+      <div class="mt-6 px-4 py-3 rounded-lg text-sm max-w-2xl" [ngClass]="{'bg-green-900/50 border border-green-700 text-green-300': !msg.isError, 'bg-red-900/50 border border-red-700 text-red-300': msg.isError}">
+        <p>{{ msg.text }}</p>
+      </div>
+    }
+
+  } @else if (isLoading()) {
+    <p class="text-white">Loading settings...</p>
+  }
+</div>

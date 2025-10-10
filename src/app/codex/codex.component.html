@@ -1,0 +1,217 @@
+<div class="codex-browser relative">
+  @if (isLoading()) {
+    <p class="text-gray-500">Loading Codex...</p>
+  } @else if (error()) {
+    <div class="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg">
+      <p>{{ error() }}</p>
+    </div>
+  } @else {
+    <!-- Breadcrumb and Edit Controls -->
+    <div class="flex justify-between items-center mb-6">
+      <nav class="flex items-center text-sm text-gray-400 flex-wrap">
+        <a (click)="goHome()" class="hover:text-yellow-400 cursor-pointer">Codex</a>
+        @for (segment of currentPath(); track segment; let i = $index) {
+          <span class="mx-2">/</span>
+          <a (click)="navigateToBreadcrumb(i)" class="hover:text-yellow-400 cursor-pointer">
+            {{ formatName(segment) }}
+          </a>
+        }
+      </nav>
+      <div class="flex items-center gap-4">
+        @if (isEditMode()) {
+          <button (click)="saveChanges()" class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors">
+            Save Changes
+          </button>
+        }
+        <button (click)="isEditMode.set(!isEditMode())" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+          {{ isEditMode() ? 'Cancel' : 'Edit Mode' }}
+        </button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <!-- Navigation Panel -->
+      <div class="lg:col-span-2">
+        <h3 class="text-2xl font-bold text-white mb-4">Entries</h3>
+        <ul class="space-y-2">
+          @for (entry of currentView().entries; track entry) {
+            <li>
+              <a (click)="navigateTo(entry)" 
+                 class="block p-3 rounded-lg bg-gray-800/50 hover:bg-gray-700 transition-colors cursor-pointer"
+                 [ngClass]="{'bg-yellow-500/20 border border-yellow-700': currentView().activeEntry === entry}">
+                {{ formatName(entry) }}
+              </a>
+            </li>
+          } @empty {
+            <p class="text-gray-500">No further entries.</p>
+          }
+        </ul>
+      </div>
+
+      <!-- Content Panel -->
+      <div class="lg:col-span-10">
+        @if (currentView().content; as content) {
+          <div class="space-y-4">
+            @for (block of content; track $index) {
+              <div class="relative group">
+                @switch (block.type) {
+                  @case ('heading') { <h3 class="text-xl font-semibold text-yellow-500 border-b border-gray-700 pb-2" [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}</h3> }
+                  @case ('paragraph') { <p class="text-gray-300 leading-relaxed" [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}</p> }
+                  @case ('table') {
+                    <div class="bg-gray-800/50 border border-gray-700 rounded-lg overflow-hidden">
+                       @if(block.title) { <h4 class="font-bold text-lg text-white p-4" [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'title', $event)">{{ block.title }}</h4> }
+                      <table class="w-full text-sm">
+                        <thead class="bg-black/20">
+                          <tr>
+                            @for(header of block.headers; track header; let hIndex = $index) { <th class="p-3 text-left font-semibold" [attr.contenteditable]="isEditMode()" (blur)="handleHeaderUpdate(block, hIndex, $event)">{{ header }}</th> }
+                            @if(isEditMode()) { <th class="p-3"></th> }
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for(row of block.rows; track row; let rIndex = $index) {
+                            <tr class="border-t border-gray-700">
+                               @for(header of block.headers; track header) { <td class="p-3" [attr.contenteditable]="isEditMode()" (blur)="handleCellUpdate(row, header, $event)">{{ row[header] }}</td> }
+                               @if(isEditMode()) { <td class="p-3"><button (click)="removeRow(block, rIndex)" class="text-red-500 hover:text-red-400">Remove</button></td> }
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                      @if(isEditMode()) {
+                        <div class="p-4 bg-black/20 flex gap-4">
+                          <button (click)="addRow(block)" class="text-green-500 hover:text-green-400">+ Add Row</button>
+                          <button (click)="addColumn(block)" class="text-blue-500 hover:text-blue-400">+ Add Column</button>
+                        </div>
+                      }
+                    </div>
+                  }
+                }
+                @if(isEditMode()) {
+                  <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button (click)="removeBlock(block)" class="bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center">&times;</button>
+                  </div>
+                }
+              </div>
+            }
+
+            @if(isEditMode()) {
+              <div class="mt-8 border-t border-gray-700 pt-6">
+                <h4 class="text-lg font-semibold text-white mb-4">Add New Section</h4>
+                <div class="flex gap-4">
+                  <button (click)="addBlock('heading')" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">+ Heading</button>
+                  <button (click)="addBlock('paragraph')" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">+ Paragraph</button>
+                  <button (click)="addBlock('table')" class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded">+ Table</button>
+                </div>
+              </div>
+            }
+
+            <!-- Linked Entity Details Section -->
+            @if(linkedEntities().length > 0) {
+              <div class="mt-8">
+                 <h3 class="text-2xl font-semibold text-yellow-500 border-b border-gray-700 pb-2 mb-4">Linked Entity Details</h3>
+                 @for(entity of linkedEntities(); track entity._id) {
+                   <div class="mb-6 bg-gray-900/50 p-4 rounded-xl border-2 border-yellow-500/50 shadow-2xl shadow-yellow-500/10">
+                      <div class="bg-black/20 p-4 rounded-lg">
+                        <h4 class="font-bold text-lg mb-3 text-white" [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'name', $event)">{{ entity.name }}</h4>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.ac', $event)"><strong class="font-semibold text-gray-400">AC:</strong> {{entity.baseStats?.ac ?? '10'}}</p>
+                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.hp', $event)"><strong class="font-semibold text-gray-400">HP:</strong> {{entity.baseStats?.hp ?? '1d8'}}</p>
+                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.saves', $event)"><strong class="font-semibold text-gray-400">Saves:</strong> {{entity.baseStats?.saves ?? 'Fort +0, Ref +0, Will +0'}}</p>
+                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.combat.bab', $event)"><strong class="font-semibold text-gray-400">BAB/CMB/CMD:</strong> {{ formatModifier(entity.baseStats?.combat?.bab) }} / {{entity.baseStats?.combat?.cmb ?? '-'}} / {{entity.baseStats?.combat?.cmd ?? '-'}}</p>
+                            <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                            <div class="grid grid-cols-3 gap-2 col-span-1 md:col-span-2">
+                                @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
+                                  <div class="text-center bg-gray-900/50 p-1 rounded">
+                                      <span class="font-semibold">{{ability}}</span>
+                                      <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.' + ability, $event)">{{ getCaseInsensitiveProp(entity.baseStats, ability) ?? 10 }} ({{getAbilityModifier(getCaseInsensitiveProp(entity.baseStats, ability))}})</p>
+                                  </div>
+                                }
+                            </div>
+                            
+                            <!-- Equipment Section -->
+                            <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                            <div class="col-span-1 md:col-span-2">
+                              <p class="font-semibold text-white">Equipment:</p>
+                              <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-green-400">
+                                @for(equipId of entity.equipment; track equipId) {
+                                  <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
+                                    <span class="cursor-pointer hover:text-green-300" (mouseenter)="showTooltip($event, equipId)" (mouseleave)="hideTooltip()">
+                                      {{ equipmentCache().get(equipId)?.name || formatItemId(equipId) }}
+                                    </span>
+                                    @if(isEditMode()) {
+                                      <button (click)="removeLinkedItem(entity, equipId, 'equipment')" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
+                                    }
+                                  </span>
+                                }
+                                @if(!entity.equipment || entity.equipment.length === 0) {
+                                  <span class="text-gray-500 italic">None</span>
+                                }
+                              </div>
+                              @if(isEditMode()) {
+                                <div class="mt-2 flex items-center gap-2">
+                                  <input #addEquipmentInput list="equipment-datalist" placeholder="Add equipment by ID..." class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full">
+                                  <datalist id="equipment-datalist">
+                                    @for(item of equipmentCache().entries(); track item[0]) {
+                                      <option value="{{item[0]}}">{{item[1].name}}</option>
+                                    }
+                                  </datalist>
+                                  <button (click)="addLinkedItem(entity, addEquipmentInput, 'equipment')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded">+</button>
+                                </div>
+                              }
+                            </div>
+
+                            <!-- Rules Section -->
+                            <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                            <div class="col-span-1 md:col-span-2">
+                              <p class="font-semibold text-white">Rules:</p>
+                              <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-indigo-400">
+                                @for(ruleId of entity.rules; track ruleId) {
+                                  <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
+                                    <span class="cursor-pointer hover:text-indigo-300" (mouseenter)="showTooltip($event, ruleId)" (mouseleave)="hideTooltip()">
+                                      {{ rulesCache().get(ruleId)?.name || formatItemId(ruleId) }}
+                                    </span>
+                                    @if(isEditMode()) {
+                                      <button (click)="removeLinkedItem(entity, ruleId, 'rules')" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
+                                    }
+                                  </span>
+                                }
+                                @if(!entity.rules || entity.rules.length === 0) {
+                                  <span class="text-gray-500 italic">None</span>
+                                }
+                              </div>
+                               @if(isEditMode()) {
+                                <div class="mt-2 flex items-center gap-2">
+                                  <input #addRuleInput list="rules-datalist" placeholder="Add rule by ID..." class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full">
+                                  <datalist id="rules-datalist">
+                                     @for(item of rulesCache().entries(); track item[0]) {
+                                      <option value="{{item[0]}}">{{item[1].name}}</option>
+                                    }
+                                  </datalist>
+                                  <button (click)="addLinkedItem(entity, addRuleInput, 'rules')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded">+</button>
+                                </div>
+                              }
+                            </div>
+                        </div>
+                      </div>
+                    </div>
+                 }
+              </div>
+            }
+          </div>
+        } @else {
+          <div class="text-gray-500">Select an entry to view its content.</div>
+        }
+      </div>
+    </div>
+  }
+  
+  <!-- Global Tooltip -->
+  @if(tooltipContent(); as content) {
+    <div 
+      class="fixed bg-gray-900 border border-indigo-700 text-white text-sm rounded-lg px-3 py-2 w-max max-w-md z-50 shadow-lg pointer-events-none"
+      [style.top]="tooltipPosition().top"
+      [style.left]="tooltipPosition().left">
+        <span class="font-bold block mb-1 text-yellow-400">{{ content.title }}</span>
+        <span class="whitespace-pre-wrap text-gray-300">{{ content.description || 'No description found.' }}</span>
+    </div>
+  }
+</div>

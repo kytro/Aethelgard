@@ -1,0 +1,74 @@
+<div class="p-4 md:p-6 bg-gray-900 text-gray-200 min-h-screen font-mono">
+  <div class="max-w-4xl mx-auto">
+
+    <h1 class="text-3xl font-bold mb-2 text-purple-400">Data Integrity Center</h1>
+    <p class="mb-6 text-gray-400">Run jobs to ensure consistency and correctness of your data.</p>
+
+    <!-- Controls -->
+    <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-6">
+      <h2 class="text-xl font-semibold mb-4 text-gray-300">Jobs</h2>
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        
+        <!-- Process Codex -->
+        <button (click)="triggerBackendJob('data-integrity', 'process-codex')" [disabled]="isLoading()" 
+                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+          Process Codex
+        </button>
+
+        <!-- Link Equipment -->
+        <button (click)="triggerBackendJob('data-integrity', 'link-equipment')" [disabled]="isLoading()" 
+                class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+          Link Equipment
+        </button>
+
+        <!-- Link Rules -->
+        <button (click)="triggerBackendJob('data-integrity', 'link-rules')" [disabled]="isLoading()" 
+                class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+          Link Rules
+        </button>
+
+        <!-- Cleanup Orphans -->
+        <div class="flex items-center">
+          <input type="checkbox" id="dryRun" name="dryRun" [ngModel]="dryRun()" (ngModelChange)="dryRun.set($event)">
+          <label for="dryRun" class="ml-2 text-sm text-gray-400">Dry Run</label>
+        </div>
+        <button (click)="triggerBackendJob('data-integrity', 'cleanup-orphans', { dryRun: dryRun() })" [disabled]="isLoading()" 
+                class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+          Cleanup Orphans
+        </button>
+
+        <!-- Create Missing Entities -->
+        <button (click)="triggerBackendJob('data-integrity', 'create-missing-entities')" [disabled]="isLoading()" 
+                class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+          Create Missing Entities
+        </button>
+
+        <!-- Get Status -->
+        <button (click)="getDataIntegrityStatus()" [disabled]="isLoading()" 
+                class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+          Get Status
+        </button>
+
+      </div>
+    </div>
+
+    <!-- Logs -->
+    <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
+      <div class="flex justify-between items-center mb-4">
+        <h2 class="text-xl font-semibold text-gray-300">Logs</h2>
+        <button (click)="clearLogs()" class="text-sm text-purple-400 hover:text-purple-300">Clear</button>
+      </div>
+      <div class="h-96 bg-gray-900 rounded p-3 overflow-y-auto text-sm">
+        @for (log of logs(); track log) {
+          <div class="log-entry" [class.error]="log.isError">
+            <span class="time">[{{ log.time }}]</span>
+            <span class="message">{{ log.message }}</span>
+          </div>
+        } @empty {
+          <div class="text-gray-500">Logs will appear here...</div>
+        }
+      </div>
+    </div>
+
+  </div>
+</div>

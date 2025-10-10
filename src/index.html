@@ -6,6 +6,18 @@
   <base href="/">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
+
+  <!-- BOOT PROBE: runs the instant the browser parses the tag -->
+  <script>
+    window.gsiLoadState = 'loading';
+    window.gsiError = null;
+  </script>
+
+  <!-- REAL GOOGLE SCRIPT -->
+  <script src="https://accounts.google.com/gsi/client"
+          onload ="window.gsiLoadState='loaded';  console.log('[GSI] script onload fired');"
+          onerror="window.gsiLoadState='failed';  console.error('[GSI] script onerror fired'); window.gsiError='network';">
+  </script>
 </head>
 <body>
   <app-root></app-root>

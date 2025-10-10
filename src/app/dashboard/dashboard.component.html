@@ -1,0 +1,44 @@
+<div class="dashboard">
+  <h2 class="text-3xl font-bold text-white mb-6">Admin Dashboard</h2>
+
+  @if (isLoading()) {
+    <p class="text-gray-400">Loading statistics...</p>
+  } @else if (error()) {
+    <div class="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg">
+      <p>{{ error() }}</p>
+    </div>
+  } @else if (stats(); as s) {
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+      <!-- Entities Card -->
+      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+        <h3 class="text-lg font-semibold text-green-400">Entities</h3>
+        <p class="text-4xl font-bold mt-2">{{ s.entityCount }}</p>
+        <p class="text-gray-400 text-sm mt-1">Characters & Monsters</p>
+      </div>
+      <!-- Rules Card -->
+      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+        <h3 class="text-lg font-semibold text-cyan-400">Rules</h3>
+        <p class="text-4xl font-bold mt-2">{{ s.ruleCount }}</p>
+        <p class="text-gray-400 text-sm mt-1">Feats & Abilities</p>
+      </div>
+      <!-- Items Card -->
+      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+        <h3 class="text-lg font-semibold text-purple-400">Items</h3>
+        <p class="text-4xl font-bold mt-2">{{ s.itemCound }}</p>
+        <p class="text-gray-400 text-sm mt-1">Equipment & Magic</p>
+      </div>
+      <!-- Spells Card -->
+      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+        <h3 class="text-lg font-semibold text-blue-400">Spells</h3>
+        <p class="text-4xl font-bold mt-2">{{ s.spellCount }}</p>
+        <p class="text-gray-400 text-sm mt-1">Arcane & Divine Magic</p>
+      </div>
+      <!-- Deities Card -->
+      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+        <h3 class="text-lg font-semibold text-orange-400">Deities</h3>
+        <p class="text-4xl font-bold mt-2">{{ s.deityCount }}</p>
+        <p class="text-gray-400 text-sm mt-1">Gods & Pantheons</p>
+      </div>
+    </div>
+  }
+</div>

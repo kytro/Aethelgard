@@ -1,6 +1,8 @@
 import { bootstrapApplication } from '@angular/platform-browser';
+import { AppComponent } from './app/app';
 import { appConfig } from './app/app.config';
-import { App } from './app/app';
 
-bootstrapApplication(App, appConfig)
-  .catch((err) => console.error(err));
+// The bootstrapApplication function should ONLY take the AppComponent and the appConfig.
+// The duplicate providers array has been removed.
+bootstrapApplication(AppComponent, appConfig)
+  .catch(err => console.error(err));

@@ -1,0 +1,81 @@
+<div class="data-browser text-gray-300">
+  <h2 class="text-3xl font-bold text-white mb-6">Data Browser</h2>
+
+  @if (error()) {
+    <div class="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg mb-4">
+      <p>{{ error() }}</p>
+    </div>
+  }
+
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <!-- Collections List -->
+    <div class="md:col-span-1 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-xl font-semibold text-yellow-500">Collections</h3>
+        <button (click)="loadCollections()" [disabled]="isLoading()" class="p-1 rounded-full hover:bg-gray-700 disabled:opacity-50">
+          <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0011.667 0l3.181-3.183m-4.991-2.691V5.25a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v4.992" />
+          </svg>
+        </button>
+      </div>
+      <ul class="space-y-2">
+        @for (collection of collections(); track collection) {
+          <li (click)="selectCollection(collection)" class="flex justify-between items-center p-3 rounded-lg cursor-pointer transition-colors" [ngClass]="{'bg-yellow-500 text-gray-900 font-bold': selectedCollection() === collection, 'hover:bg-gray-700': selectedCollection() !== collection}">
+            <span>{{ collection }}</span>
+            <button (click)="deleteCollection(collection, $event)" [disabled]="isLoading()" class="p-1 rounded-full text-red-400 hover:bg-red-900/50 disabled:opacity-50" [ngClass]="{'bg-red-500 text-white': confirmingDeleteCollection() === collection}">
+              <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+              </svg>
+            </button>
+          </li>
+        }
+      </ul>
+    </div>
+
+    <!-- Documents List / Document View -->
+    <div class="md:col-span-2 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+      @if (selectedCollection()) {
+        <div>
+           @if (!selectedDocument()) {
+            <!-- Document List -->
+            <div class="flex items-center mb-4">
+               <button (click)="backToCollections()" class="p-1 mr-2 rounded-full hover:bg-gray-700">
+                  <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                </button>
+                <h3 class="text-xl font-semibold text-cyan-400">Documents in '{{ selectedCollection() }}'</h3>
+            </div>
+             <input type="text" [ngModel]="filterTerm()" (ngModelChange)="filterTerm.set($event)" placeholder="Filter by ID or name..." class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 mb-4 text-white">
+            <div class="max-h-[60vh] overflow-y-auto pr-2">
+              <ul class="space-y-2">
+                @for (doc of filteredDocuments(); track doc._id) {
+                  <li (click)="selectDocument(doc)" class="flex justify-between items-center p-3 rounded-lg cursor-pointer hover:bg-gray-700 transition-colors">
+                    <span class="font-mono text-sm truncate">{{ doc._id }} - <span class="font-sans font-bold text-gray-300">{{ doc.name }}</span></span>
+                    <button (click)="deleteDocument(doc._id, $event)" [disabled]="isLoading()" class="p-1 rounded-full text-red-400 hover:bg-red-900/50 disabled:opacity-50" [ngClass]="{'bg-red-500 text-white': confirmingDeleteDoc() === doc._id}">
+                       <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
+                    </button>
+                  </li>
+                } @empty {
+                  <p class="text-gray-500">No documents found in this collection.</p>
+                }
+              </ul>
+            </div>
+           } @else {
+            <!-- Document Detail View -->
+            <div class="flex items-center mb-4">
+              <button (click)="selectDocument(null)" class="p-1 mr-2 rounded-full hover:bg-gray-700">
+                <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+              </button>
+              <h3 class="text-xl font-semibold text-cyan-400 truncate">{{ selectedDocument()?._id }}</h3>
+            </div>
+            <pre class="bg-black/50 p-4 rounded-md max-h-[60vh] overflow-auto text-xs whitespace-pre-wrap">{{ selectedDocument() | json }}</pre>
+           }
+        </div>
+      } @else {
+        <div class="text-center text-gray-500 pt-10">
+          <p>Select a collection to view its documents.</p>
+        </div>
+      }
+    </div>
+  </div>
+</div>
+

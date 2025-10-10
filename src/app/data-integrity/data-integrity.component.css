@@ -1,0 +1,8 @@
+/* Component-specific styles for Data Integrity can be added here. */
+.log-entry {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 2px 4px;
+}
+.log-entry:last-child {
+  border-bottom: none;
+}

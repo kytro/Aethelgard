@@ -1,0 +1,406 @@
+<div id="dm-toolkit">
+  <div class="flex space-x-2 border-b border-gray-700 mb-6">
+    <button (click)="activeTool.set('assistant')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeTool() === 'assistant', 'text-gray-400': activeTool() !== 'assistant'}">
+      Codex Assistant
+    </button>
+    <button (click)="activeTool.set('npc-generator')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeTool() === 'npc-generator', 'text-gray-400': activeTool() !== 'npc-generator'}">
+      NPC Generator
+    </button>
+    <button (click)="activeTool.set('combat')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeTool() === 'combat', 'text-gray-400': activeTool() !== 'combat'}">
+      Combat Manager ({{fightCount()}})
+    </button>
+    <button (click)="activeTool.set('session')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeTool() === 'session', 'text-gray-400': activeTool() !== 'session'}">
+      Session Logger ({{sessionCount()}})
+    </button>
+  </div>
+
+  @if(activeTool() === 'assistant') {
+    <div id="codex-assistant">
+      <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">Codex Assistant</h2>
+      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+        <p class="text-gray-400 mb-4">Ask a question about your world data. The assistant will answer based on the loaded codex content.</p>
+        <textarea [(ngModel)]="assistantQuery" placeholder="e.g., Who is Captain Valerius and what are his motivations?" class="w-full h-24 bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4"></textarea>
+        <button (click)="handleAskAssistant()" [disabled]="isAskingAssistant()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+          {{ isAskingAssistant() ? 'Thinking...' : 'Ask Assistant' }}
+        </button>
+      </div>
+      @if(assistantResponse() || isAskingAssistant()) {
+        <div class="mt-6 bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+          <h3 class="font-semibold text-xl mb-3 text-yellow-400">Response</h3>
+          <p class="text-gray-300 whitespace-pre-wrap leading-relaxed">{{assistantResponse()}}</p>
+        </div>
+      }
+    </div>
+  } @else if (activeTool() === 'session') {
+     <div id="session-logger">
+       <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">Session Logger</h2>
+       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+         <div class="lg:col-span-1 bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+           <h3 class="font-semibold text-xl mb-3">Sessions</h3>
+           <button (click)="handleAddSession()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold p-2 rounded-md transition-colors mb-4">New Session</button>
+           <div class="space-y-2">
+             @for(s of sessions(); track s._id) {
+               <div
+                 class="flex justify-between items-center p-2 rounded-md"
+                 [ngClass]="{'bg-yellow-600 text-black': currentSession()?._id === s._id, 'bg-gray-700/50': currentSession()?._id !== s._id}">
+                 <button (click)="setCurrentSession(s)" class="flex-grow text-left text-sm">
+                   {{ s.title || formatTime(s.createdAt) }}
+                 </button>
+                 <button (click)="handleDeleteSession(s._id)" class="text-red-400 hover:text-red-300 font-bold">X</button>
+               </div>
+             }
+           </div>
+         </div>
+         <div class="lg:col-span-2">
+           @if(currentSession(); as session) {
+             <div>
+               <h3 class="font-semibold text-2xl mb-4 text-yellow-400">
+                 Session Notes for {{ session.title || formatTime(session.createdAt) }}
+               </h3>
+               <textarea
+                 [ngModel]="sessionNotes()"
+                 (ngModelChange)="onNotesChange($event)"
+                 placeholder="Start typing your session notes here..."
+                 class="w-full h-[60vh] bg-gray-900 border border-gray-600 rounded-md p-4 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
+               ></textarea>
+             </div>
+           } @else {
+             <div class="flex items-center justify-center h-64 text-gray-500">Select or create a session.</div>
+           }
+         </div>
+       </div>
+     </div>
+  } @else if (activeTool() === 'combat') {
+    <div id="combat-manager">
+        <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">Combat Manager</h2>
+         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <div class="lg-col-span-1 bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                <h3 class="font-semibold text-xl mb-3">Encounters</h3>
+                <div class="flex space-x-2 mb-4">
+                    <input type="text" [(ngModel)]="newFightName" placeholder="New fight name..." class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500" />
+                    <button (click)="handleAddFight()" [disabled]="isSavingFight()" class="bg-green-600 hover:bg-green-500 text-white font-bold p-2 rounded-md transition-colors disabled:bg-gray-500">
+                        {{ isSavingFight() ? '...' : 'Add' }}
+                    </button>
+                </div>
+                <div class="space-y-2">
+                    @for(fight of fights(); track fight._id) {
+                        <div
+                         class="flex justify-between items-center p-2 rounded-md"
+                         [ngClass]="{'bg-yellow-600 text-black': currentFight()?._id === fight._id, 'bg-gray-700/50': currentFight()?._id !== fight._id}">
+                            <button (click)="setCurrentFight(fight)" class="flex-grow text-left">{{fight.name}}</button>
+                            <button (click)="handleDeleteFight(fight._id)" class="text-red-400 hover:text-red-300 font-bold">X</button>
+                        </div>
+                    }
+                </div>
+            </div>
+            <div class="lg:col-span-2">
+                @if(currentFight(); as fight) {
+                    <div>
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="font-semibold text-2xl text-yellow-400">{{fight.name}}</h3>
+                            @if(isCombatActive()) {
+                              <button (click)="handleEndCombat()" [disabled]="isTogglingCombatState()" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-500 w-36">
+                                 {{ isTogglingCombatState() ? '...' : 'End Combat' }}
+                              </button>
+                            } @else {
+                              <button (click)="handleStartCombat()" [disabled]="isTogglingCombatState()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-500 w-36">
+                                 {{ isTogglingCombatState() ? '...' : 'Start Combat' }}
+                              </button>
+                            }
+                        </div>
+
+                        @if(isCombatActive()){
+                          <div class="flex justify-between items-center bg-gray-800/50 p-2 rounded-lg border border-gray-700 mb-4">
+                            <div>
+                              <span class="font-bold text-xl">Round: {{roundCounter()}}</span>
+                              <span class="text-gray-400 text-sm ml-4">Started: {{formatTime(fight.combatStartTime)}}</span>
+                            </div>
+                            <button (click)="handleNextTurn()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md">Next Turn</button>
+                          </div>
+                        }
+
+                        <form (submit)="handleAddCombatant($event)" class="bg-gray-800/50 p-4 rounded-lg border border-gray-700 mb-4 flex flex-wrap gap-4 items-end">
+                            <div class="flex-auto min-w-[120px]">
+                                <label class="block text-sm font-medium text-gray-400">Source</label>
+                                <select [ngModel]="addFormSource()" (ngModelChange)="onSourceChange($event)" name="source" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                    <option>Custom</option><option>PC</option><option>NPC</option><option>Bestiary</option><option>Find</option><option>Found</option>
+                                </select>
+                            </div>
+
+                            @if(addFormSource() === 'Custom') {
+                                <div class="flex-auto min-w-[150px]"><label class="block text-sm font-medium text-gray-400">Name</label><input type="text" [ngModel]="customCombatant().name" (ngModelChange)="updateCustomCombatant('name', $event)" name="customName" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                <div class="flex-none"><label class="block text-sm font-medium text-gray-400">HP</label><input type="number" [ngModel]="customCombatant().hp" (ngModelChange)="updateCustomCombatant('hp', $event)" name="customHp" class="w-20 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                <div class="flex-none"><label class="block text-sm font-medium text-gray-400">Init</label><input type="number" [ngModel]="customCombatant().initiative" (ngModelChange)="updateCustomCombatant('initiative', $event)" name="customInit" class="w-20 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                            } @else if (addFormSource() === 'Find') {
+                                <div class="flex-auto min-w-[150px]"><label class="block text-sm font-medium text-gray-400">Find Creature</label><input type="text" [(ngModel)]="findCreatureTerm" name="findTerm" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                <div class="flex-none"><label class="block text-sm font-medium text-gray-400"># PCs</label><input type="number" [(ngModel)]="pcCount" name="pcCount" class="w-16 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                <div class="flex-none"><label class="block text-sm font-medium text-gray-400">Avg Lvl</label><input type="number" [(ngModel)]="pcLevel" name="pcLevel" class="w-16 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                <button type="button" (click)="handleFindCreature()" [disabled]="isFindingCreature()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md">
+                                    {{ isFindingCreature() ? '...' : 'Find' }}
+                                </button>
+                            } @else if (addFormSource() === 'Found') {
+                                <div class="flex-auto min-w-[200px] relative">
+                                    <label class="block text-sm font-medium text-gray-400">Filter Found Creatures</label>
+                                    <input type="text"
+                                           [ngModel]="foundCreatureFilter()"
+                                           (ngModelChange)="foundCreatureFilter.set($event)"
+                                           (focus)="showFoundCreaturesList.set(true)"
+                                           (blur)="hideFoundCreaturesListWithDelay()"
+                                           placeholder="Type to filter..."
+                                           name="foundFilter"
+                                           class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                  @if(showFoundCreaturesList() && filteredFoundCreatures().length > 0) {
+                                      <div class="absolute top-full left-0 right-0 bg-gray-800 border border-gray-700 rounded-b-md max-h-48 overflow-y-auto z-10">
+                                          @for(creature of filteredFoundCreatures(); track creature.id) {
+                                              <button type="button"
+                                                      (click)="selectFoundCreature(creature.name)"
+                                                      class="w-full text-left px-3 py-2 hover:bg-yellow-600">
+                                                {{ creature.name }}
+                                              </button>
+                                          }
+                                      </div>
+                                  }
+                                </div>
+                                <div class="flex-auto min-w-[200px]">
+                                    <label class="block text-sm font-medium text-gray-400">Selected</label>
+                                    <input type="text" [value]="selectedTemplate()" name="selectedFound" disabled class="w-full mt-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-gray-400" />
+                                </div>
+                            } @else {
+                                 <div class="flex-auto min-w-[200px]">
+                                    <label class="block text-sm font-medium text-gray-400">Template</label>
+                                    <select [ngModel]="selectedTemplate()" (ngModelChange)="selectedTemplate.set($event)" name="template" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                        <option value="">Select...</option>
+                                        @for(name of templateOptions(); track name) {
+                                          <option [value]="name">{{name}}</option>
+                                        }
+                                    </select>
+                                </div>
+                            }
+
+                            <button type="submit" [disabled]="isSavingCombatant()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+                                 {{ isSavingCombatant() ? '...' : 'Add to Fight' }}
+                            </button>
+                        </form>
+                        <div class="space-y-2 relative z-10">
+                            @for(c of modifiedCombatants(); track c._id; let i = $index) {
+                                <div
+                                  class="p-2 rounded-md border"
+                                  [ngClass]="{'bg-yellow-800/50 border-yellow-600': isCombatActive() && currentTurnIndex() === i, 'bg-gray-800/50 border-gray-700': !isCombatActive() || currentTurnIndex() !== i }">
+                                  <div class="grid grid-cols-12 gap-2 items-center">
+                                      <div class="col-span-1 text-center font-bold text-xl"><input type="number" [ngModel]="c.initiative" (ngModelChange)="handleUpdateCombatant(c._id, 'initiative', $event)" class="w-12 bg-gray-900 border border-gray-600 rounded-md p-1 text-center"/></div>
+                                      <div class="col-span-5 font-semibold flex items-center">
+                                          <span class="truncate" title="{{c.name}}">{{c.name}}</span>
+                                          <span class="text-xs text-gray-400 font-normal ml-2 whitespace-nowrap">({{ (c.type === 'PC' || c.type === 'NPC') ? 'Lvl' : 'CR' }} {{ c.baseStats.Level || c.baseStats.CR || '?' }})</span>
+                                      </div>
+                                      <div class="col-span-3 flex items-center">
+                                          <input type="number" [ngModel]="c.hp" (ngModelChange)="handleUpdateCombatant(c._id, 'hp', $event)" class="w-16 bg-gray-900 border border-gray-600 rounded-md px-2 py-1 text-white" />
+                                          <span class="ml-2 text-gray-400">/ {{c.modifiedStats.maxHp}}</span>
+                                      </div>
+                                      <div class="col-span-1 text-sm text-gray-300">
+                                          <strong>Spd:</strong> {{ c.modifiedStats?.Speed || 'N/A' }}
+                                      </div>
+                                      <div class="col-span-1 text-center">
+                                          <button (click)="toggleDetails(c._id)" class="text-gray-400 hover:text-white">Details</button>
+                                      </div>
+                                      <div class="col-span-1 text-right">
+                                          <button type="button" (click)="handleRemoveCombatant(c._id)" class="text-red-500 hover:text-red-400 font-bold px-2 text-lg">X</button>
+                                      </div>
+                                  </div>
+
+                                  <div class="mt-2 text-xs flex justify-between items-start">
+                                      <div class="flex flex-wrap gap-2 items-center">
+                                        @for(effect of c.effects; track $index; let effIndex = $index) {
+                                          <span (mouseenter)="showTooltip($event, effect.name, 'effect')" (mouseleave)="hideTooltip()" class="relative group bg-red-900/50 text-red-300 border border-red-700 px-2 py-0.5 rounded-full flex items-center gap-2">
+                                            {{effect.name}}
+                                            @if(effect.unit !== 'permanent') {
+                                                <span>({{effect.remainingRounds}} rounds left)</span>
+                                            }
+                                            <button (click)="$event.stopPropagation(); handleRemoveEffect(c._id, effIndex)" class="text-red-400 hover:text-red-200 -mr-1">x</button>
+                                          </span>
+                                        }
+                                      </div>
+                                  </div>
+
+                                  @if(expandedCombatant() === c._id) {
+                                    <div class="mt-2 p-3 bg-gray-900/50 rounded-lg">
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <h4 class="font-bold mb-2">Combat Stats</h4>
+                                                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                                                    <p class="col-span-2">
+                                                        <span class="font-semibold">AC:</span> {{ c.modifiedStats.AC }} @if(c.modifiedStats.AC !== c.baseStats.AC) { <span class="text-gray-400">({{c.baseStats.AC}})</span> }
+                                                        (T: {{ c.modifiedStats.Touch }} @if(c.modifiedStats.Touch !== c.baseStats.Touch) { <span class="text-gray-400">({{c.baseStats.Touch}})</span> },
+                                                        FF: {{ c.modifiedStats['Flat-Footed'] }} @if(c.modifiedStats['Flat-Footed'] !== c.baseStats['Flat-Footed']) { <span class="text-gray-400">({{c.baseStats['Flat-Footed']}})</span> })
+                                                    </p>
+                                                    <p><span class="font-semibold">Fort:</span> {{ c.modifiedStats.SavesObject.Fort >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Fort }} @if(c.modifiedStats.SavesObject.Fort !== c.baseStats.SavesObject.Fort) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Fort >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Fort }})</span> }</p>
+                                                    <p><span class="font-semibold">Ref:</span> {{ c.modifiedStats.SavesObject.Ref >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Ref }} @if(c.modifiedStats.SavesObject.Ref !== c.baseStats.SavesObject.Ref) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Ref >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Ref }})</span> }</p>
+                                                    <p><span class="font-semibold">Will:</span> {{ c.modifiedStats.SavesObject.Will >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Will }} @if(c.modifiedStats.SavesObject.Will !== c.baseStats.SavesObject.Will) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Will >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Will }})</span> }</p>
+                                                    <p><span class="font-semibold">BAB:</span> {{ c.modifiedStats.BAB }} @if(c.modifiedStats.BAB !== c.baseStats.BAB) { <span class="text-gray-400">({{c.baseStats.BAB}})</span> }</p>
+                                                    <p><span class="font-semibold">CMB:</span> {{ c.modifiedStats.CMB }} @if(c.modifiedStats.CMB !== c.baseStats.CMB) { <span class="text-gray-400">({{c.baseStats.CMB}})</span> }</p>
+                                                    <p><span class="font-semibold">CMD:</span> {{ c.modifiedStats.CMD }} @if(c.modifiedStats.CMD !== c.baseStats.CMD) { <span class="text-gray-400">({{c.baseStats.CMD}})</span> }</p>
+                                                </div>
+
+                                                <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Ability Scores</h4>
+                                                <div class="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                                                    @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
+                                                        <div class="flex items-center justify-between bg-gray-900/50 p-1 rounded cursor-pointer" (click)="openTempModModal(c._id, ability)">
+                                                            <span class="font-bold">{{ ability }}</span>
+                                                            <div>
+                                                                <span>{{ c.modifiedStats[ability] }}</span>
+                                                                <span class="text-gray-400 text-xs ml-1">({{ getAbilityModifier(c.modifiedStats[ability]) }})</span>
+                                                                @if(c.modifiedStats[ability] !== c.baseStats[ability]) {
+                                                                    <span class="text-gray-500 text-xs ml-1">({{ c.baseStats[ability] }})</span>
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </div>
+                                             <div>
+                                                <h4 class="font-semibold text-yellow-400 mb-2">Actions & Gear</h4>
+                                                <div class="space-y-2">
+                                                    @if(c.attacks.length > 0) {
+                                                        <div>
+                                                            <h5 class="text-sm font-bold text-gray-300">Attacks</h5>
+                                                            <div class="p-2 bg-gray-900/50 rounded-md space-y-1 mt-1 text-sm font-mono">
+                                                                @for(attack of c.attacks; track $index) {
+                                                                    <div>
+                                                                        <span class="text-white">{{ attack.name }}</span> <span class="text-green-400">{{ attack.bonus }}</span> <span class="text-gray-400">({{ attack.damage }})</span>
+                                                                    </div>
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                    @if(c.allFeats.length > 0) {
+                                                        <div class="mt-2">
+                                                            <h5 class="text-sm font-bold text-gray-300">Feats</h5>
+                                                            <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2">
+                                                                @for(feat of c.allFeats; track feat.id) {
+                                                                    <button
+                                                                        (click)="toggleActiveFeat(c._id, feat.id)"
+                                                                        [ngClass]="{
+                                                                            'bg-blue-600 text-white border-blue-400 hover:bg-blue-500': (c.activeFeats || []).includes(feat.id),
+                                                                            'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600': !(c.activeFeats || []).includes(feat.id)
+                                                                        }"
+                                                                        (mouseenter)="showTooltip($event, feat.id, 'rule')" (mouseleave)="hideTooltip()"
+                                                                        class="px-2 py-0.5 rounded border text-xs transition-colors">
+                                                                        {{ feat.name }}
+                                                                    </button>
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                    @if(c.equipment.length > 0 || c.magicItems.length > 0) {
+                                                        <div class="mt-2">
+                                                            <h5 class="text-sm font-bold text-gray-300">Equipment</h5>
+                                                            <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2 text-xs">
+                                                                @for(item of c.equipment; track item.id) {
+                                                                    <span (mouseenter)="showTooltip($event, item.id, 'equipment')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 cursor-pointer">{{item.name}}</span>
+                                                                }
+                                                                 @for(item of c.magicItems; track item.id) {
+                                                                    <span (mouseenter)="showTooltip($event, item.id, 'magic-item')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-purple-900/50 text-purple-300 border border-purple-700 cursor-pointer">{{item.name}}</span>
+                                                                }
+                                                            </div>
+                                                        </div>
+                                                    }
+                                                </div>
+                                                
+                                                <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Add Effects</h4>
+                                                <div class="flex items-center gap-2">
+                                                    <div class="relative flex-auto">
+                                                        <input type="text"
+                                                               [ngModel]="newEffectForCombatant(c._id).name"
+                                                               (ngModelChange)="updateNewEffect(c._id, 'name', $event)"
+                                                               (focus)="showEffectList(c._id)"
+                                                               (blur)="hideEffectListWithDelay(c._id)"
+                                                               placeholder="e.g., Bleed"
+                                                               class="w-full bg-gray-800 border-gray-600 rounded p-1 text-sm" />
+                                                        @if(activeEffectDropdown() === c._id && filteredEffects(c._id).length > 0) {
+                                                            <div class="absolute top-full left-0 min-w-max bg-gray-800 border border-gray-700 rounded-b-md max-h-48 overflow-y-auto z-20">
+                                                                @for(effect of filteredEffects(c._id); track effect) {
+                                                                    <button type="button"
+                                                                            (click)="selectEffect(c._id, effect)"
+                                                                            (mouseenter)="showTooltip($event, effect, 'effect')"
+                                                                            (mouseleave)="hideTooltip()"
+                                                                            class="w-full text-left px-3 py-2 hover:bg-yellow-600 relative group whitespace-nowrap">
+                                                                        {{effect}}
+                                                                    </button>
+                                                                }
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                    <input type="number"
+                                                           [ngModel]="newEffectForCombatant(c._id).duration"
+                                                           (ngModelChange)="updateNewEffect(c._id, 'duration', $event)"
+                                                           [disabled]="newEffectForCombatant(c._id).unit === 'permanent'"
+                                                           placeholder="3"
+                                                           class="w-16 bg-gray-800 border-gray-600 rounded p-1 text-sm disabled:bg-gray-700" />
+                                                    <select [ngModel]="newEffectForCombatant(c._id).unit"
+                                                            (ngModelChange)="updateNewEffect(c._id, 'unit', $event)"
+                                                            class="bg-gray-800 border-gray-600 rounded p-1 text-sm">
+                                                        <option value="rounds">Rounds</option>
+                                                        <option value="minutes">Minutes</option>
+                                                        <option value="hours">Hours</option>
+                                                        <option value="days">Days</option>
+                                                        <option value="permanent">Permanent</option>
+                                                    </select>
+                                                    <button (click)="handleAddEffect(c._id)" class="bg-green-600 hover:bg-green-500 text-white font-bold py-1 px-3 rounded text-sm">+</button>
+                                                </div>
+                                             </div>
+                                        </div>
+                                    </div>
+                                  }
+                                </div>
+                            }
+                        </div>
+                    </div>
+                } @else {
+                  <div class="flex items-center justify-center h-64 text-gray-500">Select or create a fight.</div>
+                }
+            </div>
+        </div>
+    </div>
+  } @else if (activeTool() === 'npc-generator') {
+     <div id="npc-generator">
+      <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">NPC Generator</h2>
+      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+          <p class="text-gray-400 mb-4">Describe the NPCs you want to generate. Provide a context (e.g., from a codex entry) and a group name for saving them.</p>
+          
+          <label class="block text-sm font-medium text-gray-400 mb-1">Prompt</label>
+          <textarea [(ngModel)]="npcGenQuery" placeholder="e.g., Give me 3 tough-looking guards for the gate." class="w-full h-24 bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4"></textarea>
+
+          <label class="block text-sm font-medium text-gray-400 mb-1">Group Name</label>
+          <input [(ngModel)]="npcGenGroupName" placeholder="e.g., Market Gate Guards" class="w-full bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4" />
+          
+          <label class="block text-sm font-medium text-gray-400 mb-1">Context</label>
+          <textarea [(ngModel)]="npcGenContext" placeholder="Paste context here, e.g., the description of a city or tavern from the codex." class="w-full h-40 bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4"></textarea>
+          
+          <button (click)="handleGenerateNpcs()" [disabled]="isGeneratingNpcs()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+              {{ isGeneratingNpcs() ? 'Generating...' : 'Generate NPCs' }}
+          </button>
+      </div>
+
+      @if(lastGeneratedNpcs().length > 0) {
+         <div class="mt-6">
+            <h3 class="font-semibold text-xl mb-3 text-yellow-400">Last Generated Group: {{lastGeneratedGroupName()}}</h3>
+             <div class="space-y-4">
+                @for(npc of lastGeneratedNpcs(); track npc.name) {
+                    <div class="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                        <h4 class="font-bold text-lg text-yellow-300">{{npc.name}} ({{npc.race}})</h4>
+                        <p class="text-gray-300 italic my-2">{{npc.description}}</p>
+                        <div class="grid grid-cols-3 md:grid-cols-6 gap-2 text-sm mt-2">
+                            @for(stat of objectKeys(npc.stats || {}); track stat) {
+                                <div class="text-center bg-gray-900/50 p-1 rounded">
+                                    <span class="font-semibold">{{stat}}</span>
+                                    <p>{{npc.stats[stat]}}</p>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                }
+             </div>
+         </div>
+      }
+    </div>
+  }
+</div>
