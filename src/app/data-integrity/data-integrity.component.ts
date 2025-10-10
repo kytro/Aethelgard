@@ -20,19 +20,19 @@ interface LogEntry {
 export class DataIntegrityComponent {
   private http = inject(HttpClient);
 
-  /*  ----------  state  ----------  */
+  /* ----------  state  ----------  */
   isLoading = signal<boolean>(false);
   logs = signal<LogEntry[]>([]);
   reconciliationIterations = signal<number>(5);
   reconciliationBatchSize = signal<number>(20);
   dryRun = signal<boolean>(true);
 
-  /*  ----------  lifecycle  ----------  */
+  /* ----------  lifecycle  ----------  */
   ngOnInit(): void {
     this.getDataIntegrityStatus();
   }
 
-  /*  ----------  public API  ----------  */
+  /* ----------  public API  ----------  */
   async getDataIntegrityStatus(): Promise<void> {
     this.isLoading.set(true);
     this.log('Getting data integrity status...');
@@ -52,17 +52,25 @@ export class DataIntegrityComponent {
     }
   }
 
-  /*  ----------  public API  ----------  */
-  async triggerBackendJob(routePrefix: string, jobName: string, params: any = {}): Promise<void> {
+  /* ----------  public API  ----------  */
+  async triggerBackendJob(routePrefix: string, jobName: string, params: any = {}, method: 'POST' | 'GET' = 'POST'): Promise<void> {
     this.isLoading.set(true);
     this.log(`Starting job: ${jobName}...`);
 
-    // ABSOLUTE path – works from any Angular route
     const url = `/codex/api/${routePrefix}/${jobName}`;
 
     try {
-      const res = await lastValueFrom(this.http.post<any>(url, params));
+      let response$;
+      if (method === 'GET') {
+        response$ = this.http.get<any>(url, { params });
+      } else {
+        response$ = this.http.post<any>(url, params);
+      }
+      const res = await lastValueFrom(response$);
       this.log(res.message || `Job '${jobName}' completed successfully.`, false);
+      if (method === 'GET') {
+        this.log(JSON.stringify(res, null, 2));
+      }
     } catch (err: any) {
       this.log(`Error running job '${jobName}': ${err.error?.error || err.message}`, true);
     } finally {

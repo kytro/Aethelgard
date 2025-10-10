@@ -4,55 +4,108 @@
     <h1 class="text-3xl font-bold mb-2 text-purple-400">Data Integrity Center</h1>
     <p class="mb-6 text-gray-400">Run jobs to ensure consistency and correctness of your data.</p>
 
-    <!-- Controls -->
     <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-6">
-      <h2 class="text-xl font-semibold mb-4 text-gray-300">Jobs</h2>
-      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-        
-        <!-- Process Codex -->
-        <button (click)="triggerBackendJob('data-integrity', 'process-codex')" [disabled]="isLoading()" 
-                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
-          Process Codex
-        </button>
-
-        <!-- Link Equipment -->
-        <button (click)="triggerBackendJob('data-integrity', 'link-equipment')" [disabled]="isLoading()" 
-                class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
-          Link Equipment
-        </button>
-
-        <!-- Link Rules -->
-        <button (click)="triggerBackendJob('data-integrity', 'link-rules')" [disabled]="isLoading()" 
-                class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
-          Link Rules
-        </button>
-
-        <!-- Cleanup Orphans -->
-        <div class="flex items-center">
-          <input type="checkbox" id="dryRun" name="dryRun" [ngModel]="dryRun()" (ngModelChange)="dryRun.set($event)">
-          <label for="dryRun" class="ml-2 text-sm text-gray-400">Dry Run</label>
+      <h2 class="text-xl font-semibold mb-4 text-gray-300">AI Reconciliation Settings</h2>
+      <div class="grid grid-cols-2 gap-4 mb-6 p-4 border border-gray-700 rounded-md">
+        <div>
+            <label for="reconcileIterations" class="block text-sm font-medium text-gray-400">Max Iterations</label>
+            <input type="number" id="reconcileIterations" [ngModel]="reconciliationIterations()" (ngModelChange)="reconciliationIterations.set($event)" min="1" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1">
         </div>
-        <button (click)="triggerBackendJob('data-integrity', 'cleanup-orphans', { dryRun: dryRun() })" [disabled]="isLoading()" 
-                class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
-          Cleanup Orphans
-        </button>
-
-        <!-- Create Missing Entities -->
-        <button (click)="triggerBackendJob('data-integrity', 'create-missing-entities')" [disabled]="isLoading()" 
-                class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
-          Create Missing Entities
-        </button>
-
-        <!-- Get Status -->
-        <button (click)="getDataIntegrityStatus()" [disabled]="isLoading()" 
-                class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
-          Get Status
-        </button>
-
-      </div>
+        <div>
+            <label for="reconcileBatchSize" class="block text-sm font-medium text-gray-400">Batch Size</label>
+            <input type="number" id="reconcileBatchSize" [ngModel]="reconciliationBatchSize()" (ngModelChange)="reconciliationBatchSize.set($event)" min="1" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1">
+        </div>
     </div>
 
-    <!-- Logs -->
+    <h2 class="text-xl font-semibold mb-4 text-gray-300">AI Reconciliation Jobs</h2>
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+        <button (click)="triggerBackendJob('data-integrity', 'reconcile-rules')" [disabled]="isLoading()" 
+                class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Reconcile Rules
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'reconcile-items')" [disabled]="isLoading()" 
+                class="bg-teal-600 hover:bg-teal-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Reconcile Items
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'reconcile-spells')" [disabled]="isLoading()" 
+                class="bg-lime-600 hover:bg-lime-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Reconcile Spells
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'reconcile-deities')" [disabled]="isLoading()" 
+                class="bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Reconcile Deities
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'reconcile-hazards')" [disabled]="isLoading()" 
+                class="bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Reconcile Hazards
+        </button>
+    </div>
+    
+    <h2 class="text-xl font-semibold mb-4 text-gray-300">Core Entity & Linking Jobs</h2>
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+        <button (click)="triggerBackendJob('data-integrity', 'process-codex')" [disabled]="isLoading()" 
+                class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Process Codex
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'create-missing-entities')" [disabled]="isLoading()" 
+                class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Create Missing Entities
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'link-rules')" [disabled]="isLoading()" 
+                class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Link Rules
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'link-equipment')" [disabled]="isLoading()" 
+                class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Link Equipment
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'smart-spell-link')" [disabled]="isLoading()" 
+                class="bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Smart Spell Link
+        </button>
+    </div>
+
+    <h2 class="text-xl font-semibold mb-4 text-gray-300">Maintenance & Cleanup Jobs</h2>
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+        <button (click)="triggerBackendJob('data-integrity', 'prefix-normalization')" [disabled]="isLoading()" 
+                class="bg-yellow-700 hover:bg-yellow-800 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Prefix Normalization
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'scan-for-duplicates')" [disabled]="isLoading()" 
+                class="bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Scan for Duplicates
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'scan-and-fix-data')" [disabled]="isLoading()" 
+                class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Scan & Fix Data
+        </button>
+
+        <div class="col-span-full flex items-center gap-4 border-t border-gray-700 pt-4 mt-4">
+            <div class="flex items-center">
+              <input type="checkbox" id="dryRun" name="dryRun" [ngModel]="dryRun()" (ngModelChange)="dryRun.set($event)" class="h-4 w-4 text-red-600 border-gray-300 rounded focus:ring-red-500">
+              <label for="dryRun" class="ml-2 text-sm text-gray-400">Dry Run</label>
+            </div>
+            <button (click)="triggerBackendJob('data-integrity', 'cleanup-orphans', { dryRun: dryRun() })" [disabled]="isLoading()" 
+                    class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+              Cleanup Orphans
+            </button>
+        </div>
+    </div>
+    
+    <h2 class="text-xl font-semibold mb-4 text-gray-300">Status Check</h2>
+    <div class="grid grid-cols-2 gap-4">
+        <button (click)="getDataIntegrityStatus()" [disabled]="isLoading()" 
+                class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+          Get Current Status
+        </button>
+        <button (click)="triggerBackendJob('data-integrity', 'unlinked-statblocks', {}, 'GET')" [disabled]="isLoading()"
+                class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+          Find Unlinked Statblocks
+        </button>
+    </div>
+</div>
+
+
     <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
       <div class="flex justify-between items-center mb-4">
         <h2 class="text-xl font-semibold text-gray-300">Logs</h2>

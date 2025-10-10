@@ -55,6 +55,21 @@ export class CodexComponent implements OnInit {
     return { entries, content, activeEntry };
   });
 
+  currentCategoryNode = computed(() => {
+    const path = this.currentPath();
+    if (path.length === 0) {
+      return this.codexData();
+    }
+    // If we are at a leaf, we want the parent.
+    const currentNode = this.getNode(path);
+    const hasChildEntries = currentNode && Object.keys(currentNode).some(k => typeof currentNode[k] === 'object' && k !== 'content');
+    if (hasChildEntries) {
+        return currentNode;
+    } else {
+        return this.getNode(path.slice(0, -1));
+    }
+  });
+
   constructor() {
     effect(async () => {
       const content = this.currentView().content;
@@ -339,7 +354,7 @@ export class CodexComponent implements OnInit {
     }
   }
   
-  private getNode(path: string[]): any {
+  public getNode(path: string[]): any {
     let node = this.codexData();
     for (const key of path) {
       if (node && node[key]) node = node[key];
@@ -375,6 +390,57 @@ export class CodexComponent implements OnInit {
     return objKey ? obj[objKey] : undefined;
   }
   formatItemId = (id: string) => this.formatName(id.replace(/^(feat_|sa_|cond_|equip_)/, ''));
+
+  async toggleCompletion(entryKey: string) {
+    const path = [...this.currentPath(), entryKey];
+    const node = this.getNode(path);
+    if (!node) return;
+
+    const isCompleted = !node.isCompleted;
+    try {
+      // Optimistically update the UI
+      node.isCompleted = isCompleted;
+      this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
+
+      await lastValueFrom(this.http.patch('api/codex/item', { path, isCompleted }));
+    } catch (err) {
+      // Revert on error
+      node.isCompleted = !isCompleted;
+      this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
+      console.error('Failed to update completion status', err);
+      this.error.set('Failed to update completion status.');
+    }
+  }
+
+  async toggleCompletionTracking() {
+    const path = this.currentPath();
+    const categoryNode = this.getNode(path);
+    if (!categoryNode) return;
+
+    const enableCompletionTracking = !categoryNode.enableCompletionTracking;
+    try {
+      // Optimistically update the UI
+      categoryNode.enableCompletionTracking = enableCompletionTracking;
+      this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
+
+      const categoryPath = path.join('.');
+      await lastValueFrom(this.http.patch('api/codex/category', { category: categoryPath, enableCompletionTracking }));
+    } catch (err) {
+      // Revert on error
+      categoryNode.enableCompletionTracking = !enableCompletionTracking;
+      this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
+      console.error('Failed to update completion tracking setting', err);
+      this.error.set('Failed to update completion tracking setting.');
+    }
+  }
+
+  isLeaf(entryKey: string): boolean {
+    const path = [...this.currentPath(), entryKey];
+    const node = this.getNode(path);
+    if (!node) return false;
+    const keys = Object.keys(node);
+    return !keys.some(k => typeof node[k] === 'object' && k !== 'content' && k !== 'summary' && k !== 'category' && k !== 'isCompleted' && k !== 'enableCompletionTracking');
+  }
 
   // --- Tooltip Logic ---
   showTooltip(event: MouseEvent, itemId: string) {

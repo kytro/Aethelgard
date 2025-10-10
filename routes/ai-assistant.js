@@ -22,6 +22,7 @@ module.exports = function(db) {
       const activeKeyId = apiKeysDoc?.active_key_id;
       const activeKey = apiKeysDoc?.keys?.find(k => k.id === activeKeyId);
       const apiKey = activeKey?.key;
+      console.log(`[AI] Gemini API key loaded: ${apiKey ? apiKey.substring(0, 4) + '...' + apiKey.substring(apiKey.length - 4) : 'not found'}`);
 
       if (!apiKey) {
         console.error('[AI] Gemini API key not found in database.');
@@ -32,16 +33,39 @@ module.exports = function(db) {
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
       const systemPrompt = `
-        You are a database expert for a MongoDB database. Your task is to convert a natural language command into a MongoDB update operation.
-        The user will provide a command referencing a collection and a document's '_id'.
-        You MUST respond ONLY with a valid JSON object in the following format, with no other text, explanations, or markdown formatting.
+        You are a database expert for a MongoDB database. Your task is to convert a natural language command into a MongoDB database operation.
+        You MUST respond ONLY with a valid JSON object with no other text, explanations, or markdown formatting.
+
+        Two types of operations are supported:
+        1. Update an existing document.
+        2. Insert a new document.
+
+        If the user wants to 'create', 'new', or 'add' a new document (e.g., "create a new session"), respond with an 'insert' operation:
+        {
+          "collection": "collection_name",
+          "insert": { "field1": "value1", "field2": "value2", "createdAt": "$NOW" }
+        }
+        - Always include a "createdAt": "$NOW" field for new documents, which the backend will convert to the current timestamp.
+
+        If the user wants to 'update', 'modify', or 'change' an existing document, respond with an 'update' operation:
         {
           "collection": "collection_name",
           "filter": { "_id": "document_id" },
-          "update": { "$set": { "field.to.update": "new_value" } }
+          "update": { "$operator": { "field.to.update": "new_value" } }
         }
-        If the user's _id looks like a 24-character hex string, assume it is an ObjectId. Otherwise, treat it as a string.
-        Use dot notation for nested fields.
+
+        Available collections are: ["codex", "entities_pf1e", "equipment_pf1e", "rules_pf1e", "spells_pf1e", "deities_pf1e", "hazards_pf1e", "dm_toolkit_sessions", "dm_toolkit_fights", "dm_toolkit_combatants", "settings"].
+        The user might use a shorthand for a collection name. You must choose the best match from the available collections list. For example, if the user says "session notes", you should use "dm_toolkit_sessions".
+
+        For updates, the filter can be based on '_id' or any other field. If the user\'s _id looks like a 24-character hex string, assume it is an ObjectId. Otherwise, treat it as a string.
+
+        For the update operation, you can use the following operators:
+        - "$set": to add a new field or modify an existing one. Use dot notation for nested fields (e.g., "character.stats.strength"). This is the most common operation.
+        - "$unset": to remove a field (e.g., { "$unset": { "temporary_bonus": "" } }).
+        - "$push": to add an item to an array (e.g., { "$push": { "inventory": "item_id" } }).
+        - "$pull": to remove an item from an array based on a condition.
+
+        Always be careful to construct the correct field path using dot notation for nested objects.
       `;
 
       const payload = {
@@ -84,32 +108,52 @@ module.exports = function(db) {
   });
   
   // This endpoint takes the confirmed update object and executes it.
-  router.post('/execute-update', async (req, res) => {
-    const { collection, filter, update } = req.body;
-    if (!collection || !filter || !update) {
-      return res.status(400).json({ error: 'Invalid update payload.' });
+  router.post('/execute-operation', async (req, res) => {
+    const { collection, filter, update, insert } = req.body;
+
+    if (!collection || (!update && !insert)) {
+      return res.status(400).json({ error: 'Invalid operation payload.' });
     }
     if (!db) return res.status(503).json({ error: 'Database not ready' });
 
     try {
-      const collection_ = db.collection(collection);
-      if (filter._id && ObjectId.isValid(filter._id)) {
-        filter._id = new ObjectId(filter._id);
+      const targetCollection = db.collection(collection);
+
+      // Handle INSERT operation
+      if (insert) {
+        if (insert.createdAt === '$NOW') {
+          insert.createdAt = new Date();
+        }
+        const result = await targetCollection.insertOne(insert);
+        const newDoc = await targetCollection.findOne({ _id: result.insertedId });
+        const successMessage = `Successfully inserted document into '${collection}'.`;
+        console.log(`[AI] ${successMessage}`);
+        return res.status(201).json({ message: successMessage, document: newDoc });
       }
-      
-      const result = await collection_.updateOne(filter, update);
-      
-      if (result.matchedCount === 0) {
-        return res.status(404).json({ error: `Document not found in collection '${collection}'.` });
+
+      // Handle UPDATE operation
+      if (update) {
+        if (!filter) {
+          return res.status(400).json({ error: 'Filter is required for an update operation.' });
+        }
+        if (filter._id && ObjectId.isValid(filter._id)) {
+          filter._id = new ObjectId(filter._id);
+        }
+        
+        const result = await targetCollection.updateOne(filter, update);
+        
+        if (result.matchedCount === 0) {
+          return res.status(404).json({ error: `Document not found in collection '${collection}'.` });
+        }
+        
+        const successMessage = `Successfully updated document in '${collection}'.`;
+        console.log(`[AI] ${successMessage}`);
+        res.status(200).json({ message: successMessage });
       }
-      
-      const successMessage = `Successfully updated document in '${collection}'.`;
-      console.log(`[AI] ${successMessage}`);
-      res.status(200).json({ message: successMessage });
 
     } catch (err) {
-      console.error('[AI] Failed to execute update:', err);
-      res.status(500).json({ error: `Update failed: ${err.message}` });
+      console.error('[AI] Failed to execute operation:', err);
+      res.status(500).json({ error: `Operation failed: ${err.message}` });
     }
   });
 

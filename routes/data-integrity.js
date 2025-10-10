@@ -1,10 +1,120 @@
 const express = require('express');
+const { ObjectId } = require('mongodb');
 const router = express.Router();
 
 // This function allows us to pass the database connection (db) from server.js
 module.exports = function(db) {
+    
+    // -----------------------------------------------------------
+    // FIX: Robust Gemini Helper Functions for Reconciliation
+    // -----------------------------------------------------------
+    
+    /**
+     * Retrieves the active Gemini API key from the settings collection.
+     * @returns {Promise<string>} The active API key.
+     */
+    async function getActiveApiKey() {
+        const apiKeysDoc = await db.collection('settings').findOne({ _id: 'api_keys' });
+        const activeKey = apiKeysDoc?.keys?.find(k => k.id === apiKeysDoc.active_key_id);
+        if (!activeKey?.key) {
+            throw new Error('Gemini API key not configured in settings collection.');
+        }
+        return activeKey.key;
+    }
 
-    // --- PARSER LOGIC (Helper functions) ---
+    /**
+     * Fetches a batch of full item objects for reconciliation from the Gemini API.
+     * This is a single, highly effective API call, replacing the old multi-step process.
+     */
+    async function fetchReconciliationBatch(apiKey, itemType, existingNames, batchSize) {
+        // FIX: Using the reliable Gemini 1.5 Flash model for production stability
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
+        
+        const prompt = `You are a Pathfinder 1st Edition rules expert. 
+Provide a list of up to ${batchSize} official ${itemType} objects (including ALL required keys like name, description, stats, etc., as appropriate for the type) that are NOT in the provided JSON array of names. 
+The response MUST be a single, clean JSON array of FULL objects. If no more items are found, return an empty JSON array: [].
+
+Existing item names:\n${JSON.stringify(existingNames)}`;
+
+        const payload = { contents: [{ parts: [{ text: prompt }] }] };
+
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.json();
+            throw new Error(`Gemini API Error (Status ${response.status}): ${errorBody.error?.message || 'Unknown Gemini API Error'}`);
+        }
+
+        const result = await response.json();
+        const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+        
+        // FIX: Robust JSON parsing (removing markdown fences and trimming)
+        try {
+            const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+            const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
+            return JSON.parse(jsonString);
+        } catch (e) {
+            console.error('Failed to parse JSON from Gemini response:', responseText);
+            throw new Error('Invalid JSON response from AI.');
+        }
+    }
+
+    /**
+     * Core logic for iterative AI reconciliation of a collection (Items, Spells, Deities, Hazards).
+     */
+    async function reconcileCollection(collectionName, itemType, idPrefix, maxIterations, batchSize) {
+        if (!db) { throw new Error('Database not ready for reconciliation.'); }
+        
+        const apiKey = await getActiveApiKey();
+        const existingDocs = await db.collection(collectionName).find({}).project({ name: 1 }).toArray();
+        let knownNames = existingDocs.map(d => d.name).filter(Boolean);
+        let totalAdded = 0;
+
+        for (let i = 0; i < maxIterations; i++) {
+            console.log(`[RECONCILE ${collectionName}] Iteration ${i + 1}/${maxIterations}. Fetching ${batchSize} new items...`);
+            
+            const newItemsBatch = await fetchReconciliationBatch(apiKey, itemType, knownNames, batchSize);
+
+            if (!newItemsBatch || newItemsBatch.length === 0) {
+                console.log(`[RECONCILE ${collectionName}] Fetch complete. No new items found.`);
+                break;
+            }
+
+            const bulkOps = [];
+            const newNames = [];
+
+            for (const item of newItemsBatch) {
+                if (item.name) {
+                    const itemId = `${idPrefix}${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+                    
+                    bulkOps.push({
+                        updateOne: {
+                            filter: { _id: itemId },
+                            update: { $set: { ...item, _id: itemId } },
+                            upsert: true
+                        }
+                    });
+                    
+                    newNames.push(item.name);
+                }
+            }
+            
+            if (bulkOps.length > 0) {
+                await db.collection(collectionName).bulkWrite(bulkOps, { ordered: false });
+                totalAdded += newNames.length;
+                knownNames.push(...newNames);
+                console.log(`[RECONCILE ${collectionName}] Stored ${newNames.length} new ${itemType}(s).`);
+            }
+        }
+        return totalAdded;
+    }
+    // -----------------------------------------------------------
+    
+    // --- PARSER LOGIC (Helper functions - original code starts here) ---
 
     // Helper function to escape special characters for use in a regular expression
     function escapeRegExp(string) {
@@ -148,15 +258,9 @@ module.exports = function(db) {
 
         try {
             // 1. Grab Gemini key
-            const apiKeysDoc = await db.collection('settings').findOne({ _id: 'api_keys' });
-            const activeKeyId = apiKeysDoc?.active_key_id;
-            const activeKey = apiKeysDoc?.keys?.find(k => k.id === activeKeyId);
-            const apiKey = activeKey?.key;
-            if (!apiKey) {
-                const message = 'Gemini API key not configured in settings collection.';
-                console.error(`[LINK EQUIPMENT] error: ${message}`);
-                return res.status(500).json({ error: message });
-            }
+            // FIX: Uses robust helper function
+            const apiKey = await getActiveApiKey();
+            
 
             // 2. Fetch entities and Codex data
             const entsToProcess = await db.collection('entities_pf1e')
@@ -176,9 +280,9 @@ module.exports = function(db) {
 You are an expert Pathfinder 1st Edition (PF1e) ruleset parser.
 Your task is to analyze a short English sentence describing a character's gear and extract only the official, core PF1e equipment names.
 Constraints:
-1.  **Ignore** descriptive adjectives like 'fine', 'masterwork', 'loaded', 'various', 'set of', 'hidden', etc., unless the adjective is part of an official magic item name (e.g., '+1 Longsword' is kept).
-2.  **Ignore** generic, non-game-rule items like 'keys', 'ledgers', 'pouch', 'spectacles', 'coins', 'trinkets', 'small constructs', 'fine clothes', 'uniform', 'robes', 'maps', or 'scrolls'.
-3.  **Return ONLY** a clean JSON array of extracted item names (no explanations, no markdown formatting).
+1.  **Ignore** descriptive adjectives like 'fine', 'masterwork', 'loaded', 'various', 'set of', 'hidden', etc., unless the adjective is part of an official magic item name (e.g., '+1 Longsword' is kept).
+2.  **Ignore** generic, non-game-rule items like 'keys', 'ledgers', 'pouch', 'spectacles', 'coins', 'trinkets', 'small constructs', 'fine clothes', 'uniform', 'robes', 'maps', or 'scrolls'.
+3.  **Return ONLY** a clean JSON array of extracted item names (no explanations, no markdown formatting).
 `;
                 const prompt = `${systemPrompt}\nInput: \"${text}\"`;
 
@@ -187,7 +291,8 @@ Constraints:
                 let attempt = 0;
                 while (attempt < maxRetries) {
                     try {
-                        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+                        // FIX: Use the reliable Gemini 1.5 Flash model for production stability
+                        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
                         const body = { contents: [{ parts: [{ text: prompt }] }] };
 
                         const r = await fetch(url, { 
@@ -207,7 +312,10 @@ Constraints:
                         const raw = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
                         
                         try {
-                            return JSON.parse(raw.replace(/```json|```/g, ''));
+                            // FIX: Robust JSON parsing (removing markdown fences and trimming)
+                            const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/);
+                            const jsonString = jsonMatch ? jsonMatch[1] : raw.trim();
+                            return JSON.parse(jsonString);
                         } catch (e) {
                             console.error(`[LINK EQUIPMENT] Failed to parse JSON from Gemini. Raw response: ${raw.substring(0, 100)}...`, e);
                             return []; 
@@ -662,21 +770,21 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         console.log(`[SMART SPELL LINK] Job started.`);
 
         try {
-            const apiKeysDoc = await db.collection('settings').findOne({ _id: 'api_keys' });
-            const activeKeyId = apiKeysDoc?.active_key_id;
-            const activeKey = apiKeysDoc?.keys?.find(k => k.id === activeKeyId);
-            const apiKey = activeKey?.key;
-            if (!apiKey) {
-                return res.status(500).json({ error: 'Gemini API key not configured.' });
-            }
+            const apiKey = await getActiveApiKey();
 
             async function fetchFromGemini(prompt) {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+                // FIX: Use the reliable Gemini 1.5 Flash model for reliability
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
                 const body = { contents: [{ parts: [{ text: prompt }] }] };
                 const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 if (!r.ok) throw new Error(`Gemini request failed with status: ${r.status} ${r.statusText}`);
                 const json = await r.json();
-                return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
+                const responseText = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
+                
+                // FIX: Robust JSON parsing
+                const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+                const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
+                return jsonString;
             }
 
             const allSpells = await db.collection('spells_pf1e').find({}).toArray();
@@ -694,7 +802,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 const prompt = `You are a Pathfinder 1st Edition Game Master. For a ${casterClass} of level ${casterLevel} with a casting score of ${castingScore}, select a thematic and effective list of prepared spells for one day.\n- You must select from the provided list of available spells only.\n- Return your selection as a single, valid JSON object where keys are the spell levels (e.g., "0", "1", "2") and values are arrays of the chosen spell names.\n\nAvailable spells: ${JSON.stringify(allSpells.map(s => s.name))}`;
 
                 const jsonString = await fetchFromGemini(prompt);
-                const selectedSpells = JSON.parse(jsonString.replace(/```json|```/g, ''));
+                const selectedSpells = JSON.parse(jsonString);
 
                 const spellLinks = {};
                 for (const level in selectedSpells) {
@@ -745,7 +853,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                     const correctId = `eq_${doc.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
                     finalEquipmentData.set(correctId, { ...doc, _id: correctId });
                     if (doc._id.toString() !== correctId) {
-                        idMigrationMap.set(_id.toString(), correctId);
+                        idMigrationMap.set(doc._id.toString(), correctId);
                     }
                 }
             });
@@ -901,136 +1009,97 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
     // ROUTE 11: RECONCILE ITEMS, SPELLS, DEITIES, HAZARDS (Generic)
     // ------------------------------------------------------------
 
-    async function reconcileCollection(collectionName, itemType, idPrefix, res) {
-        if (!db) return res.status(503).json({ error: 'Database not ready' });
-        console.log(`[RECONCILE ${collectionName}] Job started.`);
-
-        try {
-            const apiKeysDoc = await db.collection('settings').findOne({ _id: 'api_keys' });
-            const activeKeyId = apiKeysDoc?.active_key_id;
-            const activeKey = apiKeysDoc?.keys?.find(k => k.id === activeKeyId);
-            const apiKey = activeKey?.key;
-            if (!apiKey) {
-                return res.status(500).json({ error: 'Gemini API key not configured.' });
-            }
-
-            async function fetchFromGemini(prompt) {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
-                const body = { contents: [{ parts: [{ text: prompt }] }] };
-                const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                if (!r.ok) throw new Error(`Gemini request failed with status: ${r.status} ${r.statusText}`);
-                const json = await r.json();
-                return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
-            }
-
-            const existingDocs = await db.collection(collectionName).find({}).project({ name: 1 }).toArray();
-            let knownItems = existingDocs.map(d => d.name);
-            const MAX_ITERATIONS = 20; // To prevent infinite loops
-            let totalAdded = 0;
-
-            for (let i = 0; i < MAX_ITERATIONS; i++) {
-                const prompt = `You are a Pathfinder 1st Edition rules expert. Provide a list of up to 10 official ${itemType}s from the Pathfinder Core Rulebook that are NOT in the provided JSON array. The response must be a single, clean JSON array of FULL ${itemType} objects, not just names. If no more items are found, return an empty JSON array: [].\n\nExisting item names:\n${JSON.stringify(knownItems)}`;
-                
-                let batchString = await fetchFromGemini(prompt);
-                batchString = batchString.replace(/```json|```/g, '').trim();
-                const newItemsBatch = JSON.parse(batchString);
-
-                if (newItemsBatch.length === 0) {
-                    console.log(`[RECONCILE ${collectionName}] Fetch complete. No new items found.`);
-                    break;
-                }
-
-                console.log(`[RECONCILE ${collectionName}] Fetched batch of ${newItemsBatch.length} ${itemType}(s). Processing...`);
-                const itemsToInsert = [];
-                for (const item of newItemsBatch) {
-                    if (item.name) {
-                        item._id = `${idPrefix}${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
-                        itemsToInsert.push(item);
-                    }
-                }
-
-                if (itemsToInsert.length > 0) {
-                    await db.collection(collectionName).insertMany(itemsToInsert);
-                    totalAdded += itemsToInsert.length;
-                    console.log(`[RECONCILE ${collectionName}] Stored ${itemsToInsert.length} new ${itemType}(s).`);
-                    knownItems.push(...itemsToInsert.map(item => item.name));
-                }
-
-                if (i === MAX_ITERATIONS - 1) console.log(`[RECONCILE ${collectionName}] Hit max iterations.`);
-            }
-            
-            return totalAdded;
-
-        } catch (e) {
-            console.error(`[RECONCILE ${collectionName}] Fatal error:`, e);
-            res.status(500).json({ error: e.message || `An unknown error occurred during ${itemType} reconciliation.` });
-            return -1; // Indicate error
-        }
-    }
+    // The following routes now call the fixed reconcileCollection:
 
     router.post('/reconcile-items', async (req, res) => {
-        const equipmentAdded = await reconcileCollection('equipment_pf1e', 'equipment', 'eq_', res);
-        if (equipmentAdded === -1) return;
-        const magicItemsAdded = await reconcileCollection('magic_items_pf1e', 'magic item', 'mi_', res);
-        if (magicItemsAdded === -1) return;
-        res.status(200).json({ message: `Item reconciliation complete. Added ${equipmentAdded} equipment and ${magicItemsAdded} magic items.` });
+        // Use default batch parameters if not provided in the request body
+        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body; 
+
+        try {
+            const equipmentAdded = await reconcileCollection('equipment_pf1e', 'equipment', 'eq_', maxIterations, batchSize);
+            const magicItemsAdded = await reconcileCollection('magic_items_pf1e', 'magic item', 'mi_', maxIterations, batchSize);
+            
+            res.status(200).json({ message: `Item reconciliation complete. Added ${equipmentAdded} equipment and ${magicItemsAdded} magic items.` });
+        } catch (e) {
+            console.error('[RECONCILE ITEMS] Fatal error:', e);
+            res.status(500).json({ error: e.message || 'An unknown error occurred during item reconciliation.' });
+        }
     });
 
     router.post('/reconcile-spells', async (req, res) => {
-        const spellsAdded = await reconcileCollection('spells_pf1e', 'spell', 'sp_', res);
-        if (spellsAdded !== -1) {
+        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body; 
+        
+        try {
+            const spellsAdded = await reconcileCollection('spells_pf1e', 'spell', 'sp_', maxIterations, batchSize);
             res.status(200).json({ message: `Spell reconciliation complete. Added ${spellsAdded} spells.` });
+        } catch (e) {
+            console.error('[RECONCILE SPELLS] Fatal error:', e);
+            res.status(500).json({ error: e.message || 'An unknown error occurred during spell reconciliation.' });
         }
     });
 
     router.post('/reconcile-deities', async (req, res) => {
-        const deitiesAdded = await reconcileCollection('deities_pf1e', 'deity', 'de_', res);
-        if (deitiesAdded !== -1) {
+        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body; 
+        
+        try {
+            const deitiesAdded = await reconcileCollection('deities_pf1e', 'deity', 'de_', maxIterations, batchSize);
             res.status(200).json({ message: `Deity reconciliation complete. Added ${deitiesAdded} deities.` });
+        } catch (e) {
+            console.error('[RECONCILE DEITIES] Fatal error:', e);
+            res.status(500).json({ error: e.message || 'An unknown error occurred during deity reconciliation.' });
         }
     });
 
+    // FIX: This route was the original source of the error. It now uses the robust logic.
     router.post('/reconcile-hazards', async (req, res) => {
-        const hazardsAdded = await reconcileCollection('hazards_pf1e', 'hazard', 'hz_', res);
-        if (hazardsAdded !== -1) {
+        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body; 
+
+        try {
+            const hazardsAdded = await reconcileCollection('hazards_pf1e', 'hazard', 'hz_', maxIterations, batchSize);
             res.status(200).json({ message: `Hazard reconciliation complete. Added ${hazardsAdded} hazards.` });
+        } catch (e) {
+            console.error('[RECONCILE HAZARDS] Fatal error:', e);
+            res.status(500).json({ error: e.message || 'An unknown error occurred during hazard reconciliation.' });
         }
     });
 
     // ------------------------------------------------------------
     // ROUTE 12: RECONCILE RULES
     // ------------------------------------------------------------
+    // Note: The logic for reconciling rules is different as it explicitly fetches a list of names first. 
+    // We update the Gemini model and add robust parsing here too.
     router.post('/reconcile-rules', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         console.log(`[RECONCILE RULES] Job started.`);
 
         try {
-            const apiKeysDoc = await db.collection('settings').findOne({ _id: 'api_keys' });
-            const activeKeyId = apiKeysDoc?.active_key_id;
-            const activeKey = apiKeysDoc?.keys?.find(k => k.id === activeKeyId);
-            const apiKey = activeKey?.key;
-            if (!apiKey) {
-                return res.status(500).json({ error: 'Gemini API key not configured.' });
-            }
+            const apiKey = await getActiveApiKey();
 
             async function fetchFromGemini(prompt) {
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`;
+                // FIX: Use the reliable Gemini 1.5 Flash model
+                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
                 const body = { contents: [{ parts: [{ text: prompt }] }] };
                 const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
                 if (!r.ok) throw new Error(`Gemini request failed with status: ${r.status} ${r.statusText}`);
                 const json = await r.json();
-                return json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
+                const responseText = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
+                
+                // FIX: Robust JSON parsing
+                const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
+                const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
+                return jsonString;
             }
 
             async function reconcileRuleType(ruleType, idPrefix) {
                 console.log(`[RECONCILE RULES] Reconciling ${ruleType}s...`);
                 const existingDocs = await db.collection('rules_pf1e').find({ type: ruleType }).project({ name: 1 }).toArray();
-                const existingNames = existingDocs.map(d => d.name);
+                const existingNames = existingDocs.map(d => d.name).filter(Boolean);
 
+                // Step 1: Get list of names
                 const prompt = `You are a Pathfinder 1st Edition rules expert. Provide a comprehensive list of all official ${ruleType}s from the Pathfinder Core Rulebook that are NOT in the provided JSON array. The response must be a single, clean JSON array of strings. Example: ["Dodge", "Power Attack"].\n\nExisting ${ruleType} names:\n${JSON.stringify(existingNames)}`;
 
                 const jsonString = await fetchFromGemini(prompt);
-                const names = JSON.parse(jsonString.replace(/```json|```/g, ''));
+                const names = JSON.parse(jsonString);
 
                 if (names.length === 0) {
                     console.log(`[RECONCILE RULES] No new ${ruleType}s to add.`);
@@ -1041,9 +1110,10 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
 
                 const newRules = [];
                 for (const name of names) {
+                    // Step 2: Get details for each name
                     const detailPrompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object representing the mechanical effects of the ${ruleType}: "${name}". The response must be a single, valid JSON object with the following keys: "name", "type" (which should be "${ruleType}"), "description", and "effects". The "effects" key must be an array of objects, where each object has "target" (e.g., "attackRoll"), "value" (a number or string), "type" (e.g., "penalty"), and an optional "condition" string.`;
                     const detailJsonString = await fetchFromGemini(detailPrompt);
-                    const ruleData = JSON.parse(detailJsonString.replace(/```json|```/g, ''));
+                    const ruleData = JSON.parse(detailJsonString);
                     
                     if (ruleData.name) {
                         ruleData._id = `${idPrefix}${ruleData.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
@@ -1052,7 +1122,15 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 }
 
                 if (newRules.length > 0) {
-                    await db.collection('rules_pf1e').insertMany(newRules);
+                    // Use upsert to handle potential conflicts safely
+                    const bulkOps = newRules.map(r => ({
+                        updateOne: {
+                            filter: { _id: r._id },
+                            update: { $set: r },
+                            upsert: true
+                        }
+                    }));
+                    await db.collection('rules_pf1e').bulkWrite(bulkOps, { ordered: false });
                 }
                 return newRules.length;
             }
@@ -1134,4 +1212,3 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
 
     return router;
 };
-

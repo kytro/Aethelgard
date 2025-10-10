@@ -99,5 +99,45 @@ module.exports = function(db) {
     }
   });
 
+  // Endpoint to update the completion status of a codex item.
+  router.patch('/item', async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database not ready' });
+    try {
+      const { path, isCompleted } = req.body;
+      if (!Array.isArray(path) || path.length === 0) {
+        return res.status(400).json({ error: 'Path must be a non-empty array.' });
+      }
+
+      const updatePath = path.join('.') + '.isCompleted';
+      const update = { $set: { [updatePath]: isCompleted } };
+
+      await db.collection('codex').updateOne({ _id: 'world_data' }, update);
+      res.status(200).json({ message: 'Codex item updated successfully.' });
+    } catch (error) {
+      console.error('Failed to update codex item:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Endpoint to update the completion tracking setting for a category.
+  router.patch('/category', async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database not ready' });
+    try {
+      const { category, enableCompletionTracking } = req.body;
+      if (!category) {
+        return res.status(400).json({ error: 'Category is required.' });
+      }
+
+      const updatePath = category + '.enableCompletionTracking';
+      const update = { $set: { [updatePath]: enableCompletionTracking } };
+
+      await db.collection('codex').updateOne({ _id: 'world_data' }, update);
+      res.status(200).json({ message: 'Category setting updated successfully.' });
+    } catch (error) {
+      console.error('Failed to update category setting:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return router;
 };

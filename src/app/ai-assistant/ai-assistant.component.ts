@@ -25,7 +25,7 @@ export class AiAssistantComponent {
     this.updateResult.set(null);
     this.proposedUpdate.set(null);
     try {
-      const result = await lastValueFrom(this.http.post<any>('api/admin/ai/generate-update', { query: this.query() }));
+      const result = await lastValueFrom(this.http.post<any>('api/ai-assistant/generate-update', { query: this.query() }));
       this.proposedUpdate.set(result);
     } catch (err: any) {
       this.updateResult.set({ message: err.error?.error || 'Failed to generate update.', isError: true });
@@ -39,7 +39,7 @@ export class AiAssistantComponent {
     this.isLoading.set(true);
     this.updateResult.set(null);
     try {
-      const result = await lastValueFrom(this.http.post<any>('api/admin/ai/execute-update', this.proposedUpdate()));
+      const result = await lastValueFrom(this.http.post<any>('api/ai-assistant/execute-operation', this.proposedUpdate()));
       this.updateResult.set({ message: result.message, isError: false });
     } catch (err: any) {
       this.updateResult.set({ message: err.error?.error || 'Failed to execute update.', isError: true });
