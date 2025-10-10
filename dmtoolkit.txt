@@ -1,0 +1,1563 @@
+import { ChangeDetectionStrategy, Component, computed, effect, signal, WritableSignal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+
+// --- FIREBASE IMPORTS ---
+import { initializeApp } from 'firebase/app';
+import { getAuth, Auth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, Firestore, doc, getDoc, setDoc, collection, onSnapshot, addDoc, deleteDoc, updateDoc, query, serverTimestamp, getDocs, writeBatch, deleteField } from 'firebase/firestore';
+
+// --- TYPE INTERFACES ---
+interface Fight {
+  id: string;
+  name: string;
+  createdAt: any;
+  combatStartTime?: any;
+  roundCounter?: number;
+  currentTurnIndex?: number;
+  initialCombatants?: { name: string; type: string; hp: number; maxHp: number; }[];
+}
+interface Combatant { id: string; name: string; initiative: number | null; hp: number; maxHp: number; stats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; }
+interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
+interface ParsedAttack { name: string; bonus: string; damage: string; }
+interface CombatantWithModifiers extends Combatant { baseStats: any; modifiedStats: any; attacks: ParsedAttack[]; allFeats: any[]; equipment: any[]; magicItems: any[]; }
+interface Session { id: string; title: string; notes: string; createdAt: any; }
+interface CacheEntry { status: 'idle' | 'loading' | 'loaded' | 'error'; data: any; }
+type LookupType = 'effect'; // Simpler lookup for just conditions
+interface FoundCreature { id: string; name: string; cr: string; stats: string; hp: string; }
+interface GeneratedNpc { name: string; race: string; description: string; stats: { [key: string]: number }; }
+interface Pf1eEntity {
+  id: string;
+  name: string;
+  sourceCodexPath: string[];
+  baseStats: any;
+  rules: string[]; // feat/special ability IDs
+  equipment?: string[];
+  magicItems?: string[];
+  spells?: string[];
+  deity?: string;
+}
+
+// --- CONSTANTS: PF1e Rules ---
+const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17];
+const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
+
+// --- HELPER: Gemini API Call ---
+async function fetchFromGemini(apiKey: string, termName: string, type: LookupType | 'creature' | 'assistant' | 'npc-generation', options?: { pcCount?: number, pcLevel?: number, codex?: any, debug?: boolean }): Promise<string> {
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+    let prompt = '';
+    switch(type) {
+        case 'effect':
+            prompt = `Provide the official description and a JSON object of game rule modifiers for the Pathfinder 1st Edition condition or status effect: "${termName}". The modifiers object should use keys for stats (e.g., "AC", "Attack", "Str") and a value that is another object containing 'value' (a number, or string for special cases like speed) and 'type' (a string like 'penalty', 'circumstance', etc.). Return the entire response as a single, clean JSON object with keys "description" and "modifiers". For example: {"description": "The creature is blinded...", "modifiers": {"AC": {"value": -2, "type": "penalty"}, "Attack": {"value": -2, "type": "penalty"}, "Speed": {"value": "half", "type": "untyped"}}}`;
+            break;
+        case 'creature':
+            let creaturePrompt = `Find up to 5 Pathfinder 1st Edition creatures or small groups of creatures matching the search term "${termName}".`;
+            if (options?.pcCount && options?.pcLevel) {
+                creaturePrompt += ` These should be suitable for a party of ${options.pcCount} characters with an average level of ${options.pcLevel}. The total encounter CR should be approximately ${options.pcLevel}.`;
+            }
+            creaturePrompt += ` Assume they have average gear for their CR. Return the response as a single, clean JSON array of objects. Each object should have this structure: {"name": "...", "cr": "...", "stats": "...", "hp": "...", "Melee": "...", "Ranged": "...", "Feats": "...", "Gear": "..."}. Only return the JSON array.`;
+            prompt = creaturePrompt;
+            break;
+        case 'assistant':
+            if (!options?.codex) return "No codex data provided.";
+            const context = JSON.stringify(options.codex);
+            prompt = `You are a helpful assistant for a Game Master. Answer the following question based *only* on the provided JSON data context. Do not use any outside knowledge. Question: "${termName}"\n\nContext:\n${context}`;
+            break;
+        case 'npc-generation':
+            if (!options?.codex) return "No context provided.";
+            const npcContext = JSON.stringify(options.codex, null, 2);
+            prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Based on the following context about a location or situation, generate NPCs that fit the user's request. Return the response as a single, clean JSON array of objects. Do not include any other text or markdown formatting. Each object in the array must have the following keys: "name", "race", "description", and "stats". The "stats" key must be an object with basic Pathfinder 1e style ability scores (Str, Dex, Con, Int, Wis, Cha), with values between 3 and 18.\n\nUser Request: "${termName}"\n\nJSON Context:\n\`\`\`json\n${npcContext}\n\`\`\`\n\nGenerate the JSON array now.`;
+            break;
+    }
+
+    const maxRetries = 3;
+    let delay = 1000;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+            });
+
+            if (response.status === 503 || response.status === 429) {
+                if (i === maxRetries - 1) throw new Error(`API call failed after ${maxRetries} retries with status ${response.status}.`);
+                await new Promise(res => setTimeout(res, delay));
+                delay *= 2;
+                continue;
+            }
+
+            if (!response.ok) {
+               const errorBody = await response.text();
+               throw new Error(`API call failed with status ${response.status}: ${errorBody}`);
+            }
+            const result = await response.json();
+            const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) throw new Error(`API returned an empty response for ${type}.`);
+            return text;
+
+        } catch (error) {
+            if (i < maxRetries - 1) {
+                await new Promise(res => setTimeout(res, delay));
+                delay *= 2;
+            } else {
+                 console.error("Error fetching from Gemini API after all retries:", error);
+                 throw error; 
+            }
+        }
+    }
+    throw new Error("API call failed after all retries.");
+}
+
+// --- HELPER: Stat Calculation ---
+const getAbilityModifierAsNumber = (score: any): number => {
+    const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
+    if (isNaN(numScore)) return 0;
+    return Math.floor((numScore - 10) / 2);
+};
+
+const calculateAverageHp = (diceString: string): number => {
+    const match = diceString.match(/(\d+)d(\d+)\s*([+-]\s*\d+)?/);
+    if (!match) {
+        const singleNumber = parseInt(diceString, 10);
+        return isNaN(singleNumber) ? 10 : singleNumber;
+    }
+    const numDice = parseInt(match[1], 10);
+    const dieSize = parseInt(match[2], 10);
+    const modifier = parseInt((match[3] || '0').replace(/\s/g, ''), 10);
+
+    const averageRoll = (dieSize + 1) / 2;
+    return Math.floor(numDice * averageRoll) + modifier;
+};
+
+const calculateCompleteBaseStats = (stats: any): any => {
+    const newStats = { ...(stats || {}) };
+    const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+    abilities.forEach(ability => { if (typeof newStats[ability] === 'undefined') newStats[ability] = 10; });
+
+    const strMod = getAbilityModifierAsNumber(newStats.Str);
+    const dexMod = getAbilityModifierAsNumber(newStats.Dex);
+    const conMod = getAbilityModifierAsNumber(newStats.Con);
+    const wisMod = getAbilityModifierAsNumber(newStats.Wis);
+
+    if (typeof newStats.AC === 'string') {
+        const acMatch = newStats.AC.match(/^(\d+)/);
+        const touchMatch = newStats.AC.match(/touch\s*(\d+)/);
+        const ffMatch = newStats.AC.match(/flat-footed\s*(\d+)/);
+        if (acMatch) newStats.AC = parseInt(acMatch[1], 10);
+        if (touchMatch) newStats.Touch = parseInt(touchMatch[1], 10);
+        if (ffMatch) newStats['Flat-Footed'] = parseInt(ffMatch[1], 10);
+    }
+    if (typeof newStats.AC !== 'number') newStats.AC = 10 + dexMod;
+    if (typeof newStats.Touch !== 'number') newStats.Touch = 10 + dexMod;
+    if (typeof newStats['Flat-Footed'] !== 'number') newStats['Flat-Footed'] = newStats.AC - dexMod;
+
+    if (!newStats.Saves) {
+        const level = parseInt(String(newStats.Level || newStats.CR || 1), 10);
+        const con = parseInt(String(newStats.Con).match(/-?\d+/)?.[0] || '10', 10);
+        const dex = parseInt(String(newStats.Dex).match(/-?\d+/)?.[0] || '10', 10);
+        const wis = parseInt(String(newStats.Wis).match(/-?\d+/)?.[0] || '10', 10);
+        const isFortGood = con >= 14 || (con >= dex && con >= wis);
+        const isRefGood = dex >= 14 || (dex >= con && dex >= wis);
+        const isWillGood = wis >= 14 || (wis >= con && wis >= wis);
+        const safeLevelIndex = Math.max(0, Math.min(level - 1, GOOD_SAVES.length - 1));
+        const baseFort = isFortGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
+        const baseRef = isRefGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
+        const baseWill = isWillGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
+        const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
+        newStats.Saves = `Fort ${formatMod(baseFort + conMod)}, Ref ${formatMod(baseRef + dexMod)}, Will ${formatMod(baseWill + wisMod)}`;
+    }
+
+    if (!newStats.Speed) newStats.Speed = '30 ft.';
+    if (typeof newStats.BAB !== 'number') newStats.BAB = parseInt(String(newStats['Base Attack Bonus'] || newStats.BAB || 0).match(/-?\d+/)?.[0] || '0', 10);
+    if (typeof newStats.CMB !== 'number') newStats.CMB = newStats.BAB + strMod;
+    if (typeof newStats.CMD !== 'number') newStats.CMD = 10 + newStats.BAB + strMod + dexMod;
+    
+    const hpValue = newStats.hp || newStats.HP || '1d8';
+    const avgHpMatch = String(hpValue).match(/^(\d+)/);
+    const diceInParenMatch = String(hpValue).match(/\((\s*\d+d\d+[+-]?\s*\d*\s*)\)/);
+    if (avgHpMatch) newStats.maxHp = parseInt(avgHpMatch[1], 10);
+    else if (diceInParenMatch) newStats.maxHp = calculateAverageHp(diceInParenMatch[1]);
+    else newStats.maxHp = calculateAverageHp(String(hpValue));
+    if (isNaN(newStats.maxHp) || newStats.maxHp <= 0) newStats.maxHp = 10;
+
+    return newStats;
+};
+
+// --- HELPER FUNCTIONS ---
+const isLeafNode = (data: any): boolean => {
+  if (!data || typeof data !== 'object') return false;
+  const keys = Object.keys(data);
+  return keys.includes('content') && !keys.some(k => !['content', 'category', 'summary'].includes(k) && typeof data[k] === 'object' && !Array.isArray(data[k])); 
+};
+
+function normalizeStats(statsArray: { label: string, value: any }[] | undefined): any {
+  if (!Array.isArray(statsArray)) return statsArray || {};
+  return statsArray.reduce((obj, s) => {
+      if (s.label) obj[s.label.replace(/\s+/g, '')] = s.value;
+      return obj;
+  }, {} as any);
+}
+
+@Component({
+  selector: 'app-root',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <div class="bg-gray-900 text-gray-200 font-sans flex h-screen overflow-hidden">
+        <main class="flex-1 overflow-y-auto p-6">
+            @if(!isAuthReady()) {
+                <div class="flex items-center justify-center h-full text-white">Loading & Authenticating with your Firebase...</div>
+            } @else {
+                <div id="dm-toolkit">
+                  <div class="flex space-x-2 border-b border-gray-700 mb-6">
+                      <button (click)="setActiveTool('assistant')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeTool() === 'assistant', 'text-gray-400': activeTool() !== 'assistant'}">
+                        Codex Assistant
+                      </button>
+                      <button (click)="setActiveTool('npc-generator')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeTool() === 'npc-generator', 'text-gray-400': activeTool() !== 'npc-generator'}">
+                        NPC Generator
+                      </button>
+                      <button (click)="setActiveTool('combat')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeTool() === 'combat', 'text-gray-400': activeTool() !== 'combat'}">
+                        Combat Manager ({{fightCount()}})
+                      </button>
+                       <button (click)="setActiveTool('session')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeTool() === 'session', 'text-gray-400': activeTool() !== 'session'}">
+                        Session Logger ({{sessionCount()}})
+                      </button>
+                  </div>
+
+                  @if(activeTool() === 'assistant') {
+                    <div id="codex-assistant">
+                      <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">Codex Assistant</h2>
+                      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+                          <p class="text-gray-400 mb-4">Ask a question about your world data. The assistant will answer based on the loaded codex content.</p>
+                          
+                          <div class="space-y-4 mb-4">
+                              <div>
+                                  <label class="block text-sm font-medium text-gray-400 mb-1">API Key Source</label>
+                                  <select [ngModel]="apiKeySource()" (ngModelChange)="apiKeySource.set($event); isEditingStoredKey.set(false);" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                      <option value="native">Native (Use built-in key)</option>
+                                      <option value="stored">Stored (From Firestore)</option>
+                                      <option value="customer">Customer (Enter manually)</option>
+                                  </select>
+                              </div>
+                              @if(apiKeySource() === 'native') {
+                                  <div class="bg-gray-900/50 p-3 rounded-md border border-gray-700">
+                                      <p class="text-sm text-gray-400">Using the application's built-in native API key.</p>
+                                  </div>
+                              }
+                              @if(apiKeySource() === 'customer') {
+                                  <div>
+                                      <label class="block text-sm font-medium text-gray-400 mb-1">Enter Custom API Key</label>
+                                      <input type="password" [ngModel]="customerApiKey()" (ngModelChange)="customerApiKey.set($event)" placeholder="Enter your Gemini API Key" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500" />
+                                  </div>
+                              }
+                              @if(apiKeySource() === 'stored') {
+                                  <div>
+                                      <label class="block text-sm font-medium text-gray-400 mb-1">Stored API Key</label>
+                                      @if(isEditingStoredKey()) {
+                                          <div class="flex items-center space-x-2">
+                                              <input type="password" [ngModel]="storedApiKey()" (ngModelChange)="storedApiKey.set($event)" placeholder="Enter key to store in Firestore" class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                              <button type="button" (click)="handleSaveStoredApiKey()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md">Save</button>
+                                              <button type="button" (click)="isEditingStoredKey.set(false)" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md">Cancel</button>
+                                          </div>
+                                      } @else {
+                                          <div class="flex items-center space-x-2 bg-gray-900/50 p-3 rounded-md border border-gray-700">
+                                              <p class="flex-grow text-sm font-mono text-gray-400">
+                                                  {{ storedApiKey() ? '••••••••' + storedApiKey().slice(-4) : 'No key stored.' }}
+                                              </p>
+                                              <button type="button" (click)="isEditingStoredKey.set(true)" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-md text-sm">Edit</button>
+                                          </div>
+                                      }
+                                  </div>
+                              }
+                          </div>
+
+                          <textarea [(ngModel)]="assistantQuery" placeholder="e.g., Who is Captain Valerius and what are his motivations?" class="w-full h-24 bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4"></textarea>
+                          
+                          <button (click)="handleAskAssistant()" [disabled]="isAskingAssistant() || !assistantApiKey()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+                              {{ isAskingAssistant() ? 'Thinking...' : 'Ask Assistant' }}
+                          </button>
+                      </div>
+
+                       @if(assistantResponse() || isAskingAssistant()) {
+                          <div class="mt-6 bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+                              <h3 class="font-semibold text-xl mb-3 text-yellow-400">Response</h3>
+                               @if(isAskingAssistant()) {
+                                  <p class="text-gray-400">Loading response...</p>
+                               } @else {
+                                  <p class="text-gray-300 whitespace-pre-wrap leading-relaxed">{{assistantResponse()}}</p>
+                               }
+                          </div>
+                       }
+                    </div>
+                  } @else if(activeTool() === 'npc-generator') {
+                     <div id="npc-generator">
+                      <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">NPC Generator</h2>
+                      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+                          <p class="text-gray-400 mb-4">Describe the NPCs you want to generate. Provide a context (e.g., from a codex entry) and a group name for saving them.</p>
+                          
+                           <div class="space-y-4 mb-4">
+                              <div>
+                                  <label class="block text-sm font-medium text-gray-400 mb-1">API Key Source</label>
+                                  <select [ngModel]="apiKeySource()" (ngModelChange)="apiKeySource.set($event); isEditingStoredKey.set(false);" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                      <option value="native">Native (Use built-in key)</option>
+                                      <option value="stored">Stored (From Firestore)</option>
+                                      <option value="customer">Customer (Enter manually)</option>
+                                  </select>
+                              </div>
+                              @if(apiKeySource() === 'native') {
+                                  <div class="bg-gray-900/50 p-3 rounded-md border border-gray-700">
+                                      <p class="text-sm text-gray-400">Using the application's built-in native API key.</p>
+                                  </div>
+                              }
+                              @if(apiKeySource() === 'customer') {
+                                  <div>
+                                      <label class="block text-sm font-medium text-gray-400 mb-1">Enter Custom API Key</label>
+                                      <input type="password" [ngModel]="customerApiKey()" (ngModelChange)="customerApiKey.set($event)" placeholder="Enter your Gemini API Key" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500" />
+                                  </div>
+                              }
+                              @if(apiKeySource() === 'stored') {
+                                  <div>
+                                      <label class="block text-sm font-medium text-gray-400 mb-1">Stored API Key</label>
+                                      @if(isEditingStoredKey()) {
+                                          <div class="flex items-center space-x-2">
+                                              <input type="password" [ngModel]="storedApiKey()" (ngModelChange)="storedApiKey.set($event)" placeholder="Enter key to store in Firestore" class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                              <button type="button" (click)="handleSaveStoredApiKey()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md">Save</button>
+                                              <button type="button" (click)="isEditingStoredKey.set(false)" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md">Cancel</button>
+                                          </div>
+                                      } @else {
+                                          <div class="flex items-center space-x-2 bg-gray-900/50 p-3 rounded-md border border-gray-700">
+                                              <p class="flex-grow text-sm font-mono text-gray-400">
+                                                  {{ storedApiKey() ? '••••••••' + storedApiKey().slice(-4) : 'No key stored.' }}
+                                              </p>
+                                              <button type="button" (click)="isEditingStoredKey.set(true)" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-md text-sm">Edit</button>
+                                          </div>
+                                      }
+                                  </div>
+                              }
+                          </div>
+
+                          <label class="block text-sm font-medium text-gray-400 mb-1">Prompt</label>
+                          <textarea [(ngModel)]="npcGenQuery" placeholder="e.g., Give me 3 tough-looking guards for the gate." class="w-full h-24 bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4"></textarea>
+
+                          <label class="block text-sm font-medium text-gray-400 mb-1">Group Name</label>
+                          <input [(ngModel)]="npcGenGroupName" placeholder="e.g., Market Gate Guards" class="w-full bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4" />
+                          
+                          <label class="block text-sm font-medium text-gray-400 mb-1">Context</label>
+                          <textarea [(ngModel)]="npcGenContext" placeholder="Paste context here, e.g., the description of a city or tavern from the codex." class="w-full h-40 bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4"></textarea>
+                          
+                          <button (click)="handleGenerateNpcs()" [disabled]="isGeneratingNpcs() || !assistantApiKey()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+                              {{ isGeneratingNpcs() ? 'Generating...' : 'Generate NPCs' }}
+                          </button>
+                      </div>
+
+                      @if(lastGeneratedNpcs().length > 0) {
+                         <div class="mt-6">
+                            <h3 class="font-semibold text-xl mb-3 text-yellow-400">Last Generated Group: {{lastGeneratedGroupName()}}</h3>
+                             <div class="space-y-4">
+                                @for(npc of lastGeneratedNpcs(); track npc.name) {
+                                    <div class="bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                                        <h4 class="font-bold text-lg text-yellow-300">{{npc.name}} ({{npc.race}})</h4>
+                                        <p class="text-gray-300 italic my-2">{{npc.description}}</p>
+                                        <div class="grid grid-cols-3 md:grid-cols-6 gap-2 text-sm mt-2">
+                                            @for(stat of objectKeys(npc.stats || {}); track stat) {
+                                                <div class="text-center bg-gray-900/50 p-1 rounded">
+                                                    <span class="font-semibold">{{stat}}</span>
+                                                    <p>{{npc.stats[stat]}}</p>
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                             </div>
+                         </div>
+                      }
+                    </div>
+                  } @else if(activeTool() === 'combat') {
+                    <div id="combat-manager">
+                        <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">Combat Manager</h2>
+                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div class="lg-col-span-1 bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                                <h3 class="font-semibold text-xl mb-3">Encounters</h3>
+                                <div class="flex space-x-2 mb-4">
+                                    <input type="text" [(ngModel)]="newFightName" placeholder="New fight name..." class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500" />
+                                    <button (click)="handleAddFight()" [disabled]="isSavingFight()" class="bg-green-600 hover:bg-green-500 text-white font-bold p-2 rounded-md transition-colors disabled:bg-gray-500">
+                                        {{ isSavingFight() ? '...' : 'Add' }}
+                                    </button>
+                                </div>
+                                <div class="space-y-2">
+                                    @for(fight of fights(); track fight.id) {
+                                        <div
+                                         class="flex justify-between items-center p-2 rounded-md"
+                                         [ngClass]="{'bg-yellow-600 text-black': currentFight()?.id === fight.id, 'bg-gray-700/50': currentFight()?.id !== fight.id}">
+                                            <button (click)="setCurrentFight(fight)" class="flex-grow text-left">{{fight.name}}</button>
+                                            <button (click)="handleDeleteFight(fight.id)" class="text-red-400 hover:text-red-300 font-bold">X</button>
+                                        </div>
+                                    }
+                                </div>
+                            </div>
+                            <div class="lg:col-span-2">
+                                @if(currentFight(); as fight) {
+                                    <div>
+                                        <div class="flex justify-between items-center mb-4">
+                                            <h3 class="font-semibold text-2xl text-yellow-400">{{fight.name}}</h3>
+                                            @if(isCombatActive()) {
+                                              <button (click)="handleEndCombat()" [disabled]="isTogglingCombatState()" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-500 w-36">
+                                                 {{ isTogglingCombatState() ? '...' : 'End Combat' }}
+                                              </button>
+                                            } @else {
+                                              <button (click)="handleStartCombat()" [disabled]="isTogglingCombatState()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-500 w-36">
+                                                 {{ isTogglingCombatState() ? '...' : 'Start Combat' }}
+                                              </button>
+                                            }
+                                        </div>
+
+                                        @if(isCombatActive()){
+                                          <div class="flex justify-between items-center bg-gray-800/50 p-2 rounded-lg border border-gray-700 mb-4">
+                                            <div>
+                                              <span class="font-bold text-xl">Round: {{roundCounter()}}</span>
+                                              <span class="text-gray-400 text-sm ml-4">Started: {{formatTime(fight.combatStartTime)}}</span>
+                                            </div>
+                                            <button (click)="handleNextTurn()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md">Next Turn</button>
+                                          </div>
+                                        }
+
+                                        <form (submit)="handleAddCombatant($event)" class="bg-gray-800/50 p-4 rounded-lg border border-gray-700 mb-4 flex flex-wrap gap-4 items-end">
+                                            <div class="flex-auto min-w-[120px]">
+                                                <label class="block text-sm font-medium text-gray-400">Source</label>
+                                                <select [ngModel]="addFormSource()" (ngModelChange)="onSourceChange($event)" name="source" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                                    <option>Custom</option><option>PC</option><option>NPC</option><option>Bestiary</option><option>Find</option><option>Found</option>
+                                                </select>
+                                            </div>
+
+                                            @if(addFormSource() === 'Custom') {
+                                                <div class="flex-auto min-w-[150px]"><label class="block text-sm font-medium text-gray-400">Name</label><input type="text" [ngModel]="customCombatant().name" (ngModelChange)="updateCustomCombatant('name', $event)" name="customName" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                                <div class="flex-none"><label class="block text-sm font-medium text-gray-400">HP</label><input type="number" [ngModel]="customCombatant().hp" (ngModelChange)="updateCustomCombatant('hp', $event)" name="customHp" class="w-20 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                                <div class="flex-none"><label class="block text-sm font-medium text-gray-400">Init</label><input type="number" [ngModel]="customCombatant().initiative" (ngModelChange)="updateCustomCombatant('initiative', $event)" name="customInit" class="w-20 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                            } @else if (addFormSource() === 'Find') {
+                                                <div class="flex-auto min-w-[150px]"><label class="block text-sm font-medium text-gray-400">Find Creature</label><input type="text" [(ngModel)]="findCreatureTerm" name="findTerm" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                                <div class="flex-none"><label class="block text-sm font-medium text-gray-400"># PCs</label><input type="number" [(ngModel)]="pcCount" name="pcCount" class="w-16 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                                <div class="flex-none"><label class="block text-sm font-medium text-gray-400">Avg Lvl</label><input type="number" [(ngModel)]="pcLevel" name="pcLevel" class="w-16 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                                                <button type="button" (click)="handleFindCreature()" [disabled]="isFindingCreature()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md">
+                                                    {{ isFindingCreature() ? '...' : 'Find' }}
+                                                </button>
+                                            } @else if (addFormSource() === 'Found') {
+                                                <div class="flex-auto min-w-[200px] relative">
+                                                    <label class="block text-sm font-medium text-gray-400">Filter Found Creatures</label>
+                                                    <input type="text"
+                                                           [ngModel]="foundCreatureFilter()"
+                                                           (ngModelChange)="foundCreatureFilter.set($event)"
+                                                           (focus)="showFoundCreaturesList.set(true)"
+                                                           (blur)="hideFoundCreaturesListWithDelay()"
+                                                           placeholder="Type to filter..."
+                                                           name="foundFilter"
+                                                           class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                                  @if(showFoundCreaturesList() && filteredFoundCreatures().length > 0) {
+                                                      <div class="absolute top-full left-0 right-0 bg-gray-800 border border-gray-700 rounded-b-md max-h-48 overflow-y-auto z-10">
+                                                          @for(creature of filteredFoundCreatures(); track creature.id) {
+                                                              <button type="button"
+                                                                      (click)="selectFoundCreature(creature.name)"
+                                                                      class="w-full text-left px-3 py-2 hover:bg-yellow-600">
+                                                                {{ creature.name }}
+                                                              </button>
+                                                          }
+                                                      </div>
+                                                  }
+                                                </div>
+                                                <div class="flex-auto min-w-[200px]">
+                                                    <label class="block text-sm font-medium text-gray-400">Selected</label>
+                                                    <input type="text" [value]="selectedTemplate" name="selectedFound" disabled class="w-full mt-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-gray-400" />
+                                                </div>
+                                            } @else {
+                                                 <div class="flex-auto min-w-[200px]">
+                                                    <label class="block text-sm font-medium text-gray-400">Template</label>
+                                                    <select [(ngModel)]="selectedTemplate" name="template" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                                        <option value="">Select...</option>
+                                                        @for(name of templateOptions(); track name) {
+                                                          <option [value]="name">{{name}}</option>
+                                                        }
+                                                    </select>
+                                                </div>
+                                            }
+
+                                            <button type="submit" [disabled]="isSavingCombatant()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+                                                 {{ isSavingCombatant() ? '...' : 'Add to Fight' }}
+                                            </button>
+                                        </form>
+                                        <div class="space-y-2 relative z-10">
+                                            @for(c of modifiedCombatants(); track c.id; let i = $index) {
+                                                <div
+                                                  class="p-2 rounded-md border"
+                                                  [ngClass]="{'bg-yellow-800/50 border-yellow-600': isCombatActive() && currentTurnIndex() === i, 'bg-gray-800/50 border-gray-700': !isCombatActive() || currentTurnIndex() !== i }">
+                                                  <div class="grid grid-cols-12 gap-2 items-center">
+                                                      <div class="col-span-1 text-center font-bold text-xl"><input type="number" [ngModel]="c.initiative" (ngModelChange)="handleUpdateCombatant(c.id, 'initiative', $event)" class="w-12 bg-gray-900 border border-gray-600 rounded-md p-1 text-center"/></div>
+                                                      <div class="col-span-5 font-semibold flex items-center">
+                                                          <span class="truncate" title="{{c.name}}">{{c.name}}</span>
+                                                          <span class="text-xs text-gray-400 font-normal ml-2 whitespace-nowrap">({{ (c.type === 'PC' || c.type === 'NPC') ? 'Lvl' : 'CR' }} {{ c.baseStats.Level || c.baseStats.CR || '?' }})</span>
+                                                      </div>
+                                                      <div class="col-span-3 flex items-center">
+                                                          <input type="number" [ngModel]="c.hp" (ngModelChange)="handleUpdateCombatant(c.id, 'hp', $event)" class="w-16 bg-gray-900 border border-gray-600 rounded-md px-2 py-1 text-white" />
+                                                          <span class="ml-2 text-gray-400">/ {{c.modifiedStats.maxHp}}</span>
+                                                      </div>
+                                                      <div class="col-span-1 text-sm text-gray-300">
+                                                          <strong>Spd:</strong> {{ c.modifiedStats?.Speed || 'N/A' }}
+                                                      </div>
+                                                      <div class="col-span-1 text-center">
+                                                          <button (click)="toggleDetails(c.id)" class="text-gray-400 hover:text-white">Details</button>
+                                                      </div>
+                                                      <div class="col-span-1 text-right">
+                                                          <button type="button" (click)="handleRemoveCombatant(c.id)" class="text-red-500 hover:text-red-400 font-bold px-2 text-lg">X</button>
+                                                      </div>
+                                                  </div>
+
+                                                  <div class="mt-2 text-xs flex justify-between items-start">
+                                                      <div class="flex flex-wrap gap-2 items-center">
+                                                        @for(effect of c.effects; track $index; let effIndex = $index) {
+                                                          <span (mouseenter)="showTooltip($event, effect.name, 'effect')" (mouseleave)="hideTooltip()" class="relative group bg-red-900/50 text-red-300 border border-red-700 px-2 py-0.5 rounded-full flex items-center gap-2">
+                                                            {{effect.name}}
+                                                            @if(effect.unit !== 'permanent') {
+                                                                <span>({{effect.remainingRounds}} rounds left)</span>
+                                                            }
+                                                            <button (click)="$event.stopPropagation(); handleRemoveEffect(c.id, effIndex)" class="text-red-400 hover:text-red-200 -mr-1">x</button>
+                                                          </span>
+                                                        }
+                                                      </div>
+                                                  </div>
+
+                                                  @if(expandedCombatant() === c.id) {
+                                                    <div class="mt-2 p-3 bg-gray-900/50 rounded-lg">
+                                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                            <div>
+                                                                <h4 class="font-bold mb-2">Combat Stats</h4>
+                                                                <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                                                                    <p class="col-span-2">
+                                                                        <span class="font-semibold">AC:</span> {{ c.modifiedStats.AC }} @if(c.modifiedStats.AC !== c.baseStats.AC) { <span class="text-gray-400">({{c.baseStats.AC}})</span> }
+                                                                        (T: {{ c.modifiedStats.Touch }} @if(c.modifiedStats.Touch !== c.baseStats.Touch) { <span class="text-gray-400">({{c.baseStats.Touch}})</span> },
+                                                                        FF: {{ c.modifiedStats['Flat-Footed'] }} @if(c.modifiedStats['Flat-Footed'] !== c.baseStats['Flat-Footed']) { <span class="text-gray-400">({{c.baseStats['Flat-Footed']}})</span> })
+                                                                    </p>
+                                                                    <p><span class="font-semibold">Fort:</span> {{ c.modifiedStats.SavesObject.Fort >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Fort }} @if(c.modifiedStats.SavesObject.Fort !== c.baseStats.SavesObject.Fort) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Fort >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Fort }})</span> }</p>
+                                                                    <p><span class="font-semibold">Ref:</span> {{ c.modifiedStats.SavesObject.Ref >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Ref }} @if(c.modifiedStats.SavesObject.Ref !== c.baseStats.SavesObject.Ref) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Ref >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Ref }})</span> }</p>
+                                                                    <p><span class="font-semibold">Will:</span> {{ c.modifiedStats.SavesObject.Will >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Will }} @if(c.modifiedStats.SavesObject.Will !== c.baseStats.SavesObject.Will) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Will >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Will }})</span> }</p>
+                                                                    <p><span class="font-semibold">BAB:</span> {{ c.modifiedStats.BAB }} @if(c.modifiedStats.BAB !== c.baseStats.BAB) { <span class="text-gray-400">({{c.baseStats.BAB}})</span> }</p>
+                                                                    <p><span class="font-semibold">CMB:</span> {{ c.modifiedStats.CMB }} @if(c.modifiedStats.CMB !== c.baseStats.CMB) { <span class="text-gray-400">({{c.baseStats.CMB}})</span> }</p>
+                                                                    <p><span class="font-semibold">CMD:</span> {{ c.modifiedStats.CMD }} @if(c.modifiedStats.CMD !== c.baseStats.CMD) { <span class="text-gray-400">({{c.baseStats.CMD}})</span> }</p>
+                                                                </div>
+
+                                                                <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Ability Scores</h4>
+                                                                <div class="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                                                                    @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
+                                                                        <div class="flex items-center justify-between bg-gray-900/50 p-1 rounded cursor-pointer" (click)="openTempModModal(c.id, ability)">
+                                                                            <span class="font-bold">{{ ability }}</span>
+                                                                            <div>
+                                                                                <span>{{ c.modifiedStats[ability] }}</span>
+                                                                                <span class="text-gray-400 text-xs ml-1">({{ getAbilityModifier(c.modifiedStats[ability]) }})</span>
+                                                                                @if(c.modifiedStats[ability] !== c.baseStats[ability]) {
+                                                                                    <span class="text-gray-500 text-xs ml-1">({{ c.baseStats[ability] }})</span>
+                                                                                }
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                </div>
+                                                            </div>
+                                                             <div>
+                                                                <h4 class="font-semibold text-yellow-400 mb-2">Actions & Gear</h4>
+                                                                <div class="space-y-2">
+                                                                    @if(c.attacks.length > 0) {
+                                                                        <div>
+                                                                            <h5 class="text-sm font-bold text-gray-300">Attacks</h5>
+                                                                            <div class="p-2 bg-gray-900/50 rounded-md space-y-1 mt-1 text-sm font-mono">
+                                                                                @for(attack of c.attacks; track $index) {
+                                                                                    <div>
+                                                                                        <span class="text-white">{{ attack.name }}</span> <span class="text-green-400">{{ attack.bonus }}</span> <span class="text-gray-400">({{ attack.damage }})</span>
+                                                                                    </div>
+                                                                                }
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                    @if(c.allFeats.length > 0) {
+                                                                        <div class="mt-2">
+                                                                            <h5 class="text-sm font-bold text-gray-300">Feats</h5>
+                                                                            <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2">
+                                                                                @for(feat of c.allFeats; track feat.id) {
+                                                                                    <button
+                                                                                        (click)="toggleActiveFeat(c.id, feat.id)"
+                                                                                        [ngClass]="{
+                                                                                            'bg-blue-600 text-white border-blue-400 hover:bg-blue-500': (c.activeFeats || []).includes(feat.id),
+                                                                                            'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600': !(c.activeFeats || []).includes(feat.id)
+                                                                                        }"
+                                                                                        (mouseenter)="showTooltip($event, feat.id, 'rule')" (mouseleave)="hideTooltip()"
+                                                                                        class="px-2 py-0.5 rounded border text-xs transition-colors">
+                                                                                        {{ feat.name }}
+                                                                                    </button>
+                                                                                }
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                    @if(c.equipment.length > 0 || c.magicItems.length > 0) {
+                                                                        <div class="mt-2">
+                                                                            <h5 class="text-sm font-bold text-gray-300">Equipment</h5>
+                                                                            <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2 text-xs">
+                                                                                @for(item of c.equipment; track item.id) {
+                                                                                    <span (mouseenter)="showTooltip($event, item.id, 'equipment')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 cursor-pointer">{{item.name}}</span>
+                                                                                }
+                                                                                 @for(item of c.magicItems; track item.id) {
+                                                                                    <span (mouseenter)="showTooltip($event, item.id, 'magic-item')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-purple-900/50 text-purple-300 border border-purple-700 cursor-pointer">{{item.name}}</span>
+                                                                                }
+                                                                            </div>
+                                                                        </div>
+                                                                    }
+                                                                </div>
+                                                                
+                                                                <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Add Effects</h4>
+                                                                <div class="flex items-center gap-2">
+                                                                    <div class="relative flex-auto">
+                                                                        <input type="text"
+                                                                            [ngModel]="newEffectForCombatant(c.id)?.name"
+                                                                            (ngModelChange)="updateNewEffect(c.id, 'name', $event)"
+                                                                            (focus)="showEffectList(c.id)"
+                                                                            (blur)="hideEffectListWithDelay(c.id)"
+                                                                            placeholder="e.g., Bleed"
+                                                                            class="w-full bg-gray-800 border-gray-600 rounded p-1 text-sm" />
+                                                                        @if(activeEffectDropdown() === c.id && filteredEffects(c.id).length > 0) {
+                                                                            <div class="absolute top-full left-0 min-w-max bg-gray-800 border border-gray-700 rounded-b-md max-h-48 overflow-y-auto z-20">
+                                                                                @for(effect of filteredEffects(c.id); track effect) {
+                                                                                    <button type="button"
+                                                                                            (click)="selectEffect(c.id, effect)"
+                                                                                            (mouseenter)="showTooltip($event, effect, 'effect')"
+                                                                                            (mouseleave)="hideTooltip()"
+                                                                                            class="w-full text-left px-3 py-2 hover:bg-yellow-600 relative group whitespace-nowrap">
+                                                                                        {{effect}}
+                                                                                    </button>
+                                                                                }
+                                                                            </div>
+                                                                        }
+                                                                    </div>
+                                                                    <input type="number"
+                                                                        [ngModel]="newEffectForCombatant(c.id)?.duration"
+                                                                        (ngModelChange)="updateNewEffect(c.id, 'duration', $event)"
+                                                                        [disabled]="newEffectForCombatant(c.id)?.unit === 'permanent'"
+                                                                        placeholder="3"
+                                                                        class="w-16 bg-gray-800 border-gray-600 rounded p-1 text-sm disabled:bg-gray-700" />
+                                                                    <select [ngModel]="newEffectForCombatant(c.id)?.unit"
+                                                                        (ngModelChange)="updateNewEffect(c.id, 'unit', $event)"
+                                                                        class="bg-gray-800 border-gray-600 rounded p-1 text-sm">
+                                                                        <option value="rounds">Rounds</option>
+                                                                        <option value="minutes">Minutes</option>
+                                                                        <option value="hours">Hours</option>
+                                                                        <option value="days">Days</option>
+                                                                        <option value="permanent">Permanent</option>
+                                                                    </select>
+                                                                    <button (click)="handleAddEffect(c.id)" class="bg-green-600 hover:bg-green-500 text-white font-bold py-1 px-3 rounded text-sm">+</button>
+                                                                </div>
+                                                             </div>
+                                                        </div>
+                                                    </div>
+                                                  }
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                } @else {
+                                  <div class="flex items-center justify-center h-64 text-gray-500">Select or create a fight.</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                  } @else if(activeTool() === 'session') {
+                     <div id="session-logger">
+                         <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">Session Logger</h2>
+                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            <div class="lg-col-span-1 bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+                                <h3 class="font-semibold text-xl mb-3">Sessions</h3>
+                                <button (click)="handleAddSession()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold p-2 rounded-md transition-colors mb-4">New Session</button>
+                                <div class="space-y-2">
+                                    @for(s of sessions(); track s.id) {
+                                      <div
+                                        class="flex justify-between items-center p-2 rounded-md"
+                                        [ngClass]="{
+                                          'bg-yellow-600 text-black': currentSession()?.id === s.id,
+                                          'bg-gray-700/50': currentSession()?.id !== s.id
+                                        }">
+                                        <button (click)="setCurrentSession(s)" class="flex-grow text-left text-sm">
+                                          {{ s.title || formatTime(s.createdAt) }}
+                                        </button>
+                                        <button (click)="handleDeleteSession(s.id)" class="text-red-400 hover:text-red-300 font-bold">
+                                          X
+                                        </button>
+                                      </div>
+                                    }
+                                </div>
+                            </div>
+                             <div class="lg:col-span-2">
+                                @if(currentSession(); as session) {
+                                    <div>
+                                         <h3 class="font-semibold text-2xl mb-4 text-yellow-400">
+                                            Session Notes for {{ session.title || formatTime(session.createdAt) }}
+                                         </h3>
+                                         <textarea
+                                           [ngModel]="sessionNotes()"
+                                           (ngModelChange)="onNotesChange($event)"
+                                           placeholder="Start typing your session notes here..."
+                                           class="w-full h-96 bg-gray-900 border border-gray-600 rounded-md p-4 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                                         ></textarea>
+                                    </div>
+                                } @else {
+                                  <div class="flex items-center justify-center h-64 text-gray-500">Select or create a session.</div>
+                                }
+                             </div>
+                         </div>
+                     </div>
+                  }
+              </div>
+            }
+        </main>
+    </div>
+
+    <!-- Global Tooltip -->
+    @if(tooltipContent(); as content) {
+      <div 
+        class="fixed bg-gray-900 border border-indigo-700 text-white text-sm rounded-lg px-3 py-2 min-w-[300px] w-max max-w-md z-50 shadow-lg pointer-events-none"
+        [style.top]="tooltipPosition().top"
+        [style.left]="tooltipPosition().left">
+          <span class="font-bold block mb-1">{{ content.title }}</span>
+          @if(content.status === 'loading') {
+              <span>Loading...</span>
+          } @else if (content.status === 'error') {
+              <span class="text-red-400">{{ content.data?.description || 'Error fetching details.' }}</span>
+          } @else {
+              <span class="whitespace-pre-wrap">{{ content.data?.description || 'No description found.' }}</span>
+          }
+      </div>
+    }
+
+    <!-- Temporary Modifier Modal -->
+    @if(editingTempMod(); as modInfo) {
+      <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeTempModModal()">
+        <div class="bg-gray-800 rounded-lg p-6 w-full max-w-sm border border-gray-700" (click)="$event.stopPropagation()">
+          <h3 class="text-xl font-bold mb-4 text-yellow-400">Set Temp Mod for {{modInfo.stat}}</h3>
+          <p class="text-gray-400 mb-4">Enter a temporary bonus or penalty. This will stack with other effects.</p>
+          <input
+            type="number"
+            [ngModel]="tempModValue()"
+            (ngModelChange)="setTempModValue($event)"
+            class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white text-center text-lg"
+            (keydown.enter)="handleSetTempMod()"
+          />
+          <div class="flex justify-end space-x-2 mt-6">
+            <button (click)="closeTempModModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+            <button (click)="handleSetTempMod()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded">Save</button>
+          </div>
+        </div>
+      </div>
+    }
+  `,
+  styles: [`
+    :host {
+      display: block;
+      height: 100vh;
+      width: 100vw;
+    }
+    .group:hover .group-hover\\:block {
+      display: block;
+    }
+  `]
+})
+export class App {
+
+  // --- STATE SIGNALS ---
+  db: Firestore | null = null;
+  auth: Auth | null = null;
+  isAuthReady = signal(false);
+  codex = signal<any | null>(null);
+  error = signal<string | null>(null);
+  
+  // DM Toolkit State
+  activeTool = signal<'assistant' | 'npc-generator' | 'combat' | 'session'>('assistant');
+  fightCount = signal(0);
+  sessionCount = signal(0);
+  
+  // Codex Assistant State
+  assistantQuery = '';
+  assistantResponse = signal('');
+  isAskingAssistant = signal(false);
+  
+  // NPC Generator State
+  npcGenQuery = '';
+  npcGenContext = '';
+  npcGenGroupName = '';
+  isGeneratingNpcs = signal(false);
+  lastGeneratedNpcs = signal<GeneratedNpc[]>([]);
+  lastGeneratedGroupName = signal('');
+
+  // Combat Manager State
+  fights = signal<Fight[]>([]);
+  currentFight: WritableSignal<Fight | null> = signal(null);
+  newFightName = '';
+  combatants = signal<Combatant[]>([]);
+  addFormSource: WritableSignal<'Custom' | 'PC' | 'NPC' | 'Bestiary' | 'Find' | 'Found'> = signal('Custom');
+  selectedTemplate = '';
+  customCombatant = signal({ name: '', initiative: 10, hp: 10 });
+  isSavingFight = signal(false);
+  isSavingCombatant = signal(false);
+  isTogglingCombatState = signal(false);
+  isCombatActive = signal(false);
+  roundCounter = signal(1);
+  currentTurnIndex = signal(0);
+  findCreatureTerm = '';
+  isFindingCreature = signal(false);
+  foundCreatures = signal<FoundCreature[]>([]);
+  foundCreatureFilter = signal('');
+  showFoundCreaturesList = signal(false);
+  expandedCombatant = signal<string | null>(null);
+  newEffects = signal<Map<string, Partial<CombatantEffect>>>(new Map());
+  activeEffectDropdown = signal<string | null>(null);
+  editingTempMod = signal<{ combatantId: string, stat: string } | null>(null);
+  tempModValue = signal(0);
+  isEditingStoredKey = signal(false);
+  pcCount = signal(4);
+  pcLevel = signal(1);
+
+  // Session Logger State
+  sessions = signal<Session[]>([]);
+  currentSession: WritableSignal<Session | null> = signal(null);
+  sessionNotes = signal('');
+
+  // UI State for Tooltip
+  tooltipContent = signal<{ title: string, data: any, status: 'loading' | 'loaded' | 'error' } | null>(null);
+  tooltipPosition = signal({ top: '0px', left: '0px' });
+  
+  // Dynamic Lookup State
+  rulesCache = signal(new Map<string, any>());
+  equipmentCache = signal(new Map<string, any>());
+  magicItemsCache = signal(new Map<string, any>());
+  effectsCache = signal(new Map<string, any>());
+  entitiesCache = signal<Pf1eEntity[]>([]);
+
+  // --- API KEYS & CONFIG ---
+  environmentApiKey = "AIzaSyBitG2HnjkYFMdofM2pRMGcF4p0meveu1M"; // For 'Native' option
+  apiKeySource = signal<'customer' | 'stored' | 'native'>('native');
+  customerApiKey = signal('');
+  storedApiKey = signal('');
+  
+  assistantApiKey = computed(() => {
+    const source = this.apiKeySource();
+    if (source === 'customer') return this.customerApiKey();
+    if (source === 'stored') return this.storedApiKey();
+    if (source === 'native') return this.environmentApiKey;
+    return '';
+  });
+
+  firebaseConfig = {
+      apiKey: "AIzaSyDfRfUEpL7lQFhCtwGSjbJTIKEiGc3067Y",
+      authDomain: "aethelgard-d34cc.firebaseapp.com",
+      projectId: "aethelgard-d34cc",
+      storageBucket: "aethelgard-d34cc.firebasestorage.app",
+      messagingSenderId: "283129050747",
+      appId: "1:283129050747:web:3e88abd1f65d61fa6814de",
+      measurementId: "G-BQ4R0FN9Z4"
+  };
+  codexAppId = "aethelgard-codex-data";
+
+  commonEffects = [
+    'Blinded', 'Bleed', 'Confused', 'Cowering', 'Dazed', 'Dazzled', 'Deafened',
+    'Entangled', 'Exhausted', 'Fascinated', 'Fatigued', 'Flat-Footed', 'Frightened',
+    'Grappled', 'Helpless', 'Invisible', 'Nauseated', 'Panicked', 'Paralyzed',
+    'Petrified', 'Pinned', 'Prone', 'Shaken', 'Sickened', 'Staggered', 'Stunned',
+    'Unconscious', 'Haste', 'Slow', 'Bless', 'Bane', 'Enlarged', 'Reduced'
+  ].sort();
+
+  // --- COMPUTED SIGNALS (DERIVED STATE) ---
+  templateOptions = computed(() => {
+    const source = this.addFormSource();
+    if (source === 'Custom' || source === 'Find' || source === 'Found') return [];
+    
+    return this.entitiesCache()
+      .filter(e => {
+          const cat = e.sourceCodexPath[0] || '';
+          if (source === 'PC') return ['Player Characters', 'Player_Characters', 'PCs'].includes(cat);
+          if (source === 'NPC') return ['People', 'NPCs', 'Persons'].includes(cat);
+          if (source === 'Bestiary') return ['Bestiary', 'Monsters'].includes(cat);
+          return false;
+      })
+      .map(e => e.name)
+      .sort();
+  });
+
+  filteredFoundCreatures = computed(() => this.foundCreatures().filter(c => c.name.toLowerCase().includes(this.foundCreatureFilter().toLowerCase())));
+
+  modifiedCombatants = computed<CombatantWithModifiers[]>(() => {
+    return this.combatants().map(c => {
+        const entity = c.entityId ? this.entitiesCache().find(e => e.id === c.entityId) : null;
+        const baseStats = calculateCompleteBaseStats(c.stats);
+        baseStats.SavesObject = this.parseSaves(baseStats.Saves, baseStats);
+        
+        const allFeats = entity ? (entity.rules || []).map(id => ({ id, ...this.rulesCache().get(id) })).filter(f => f.name) : [];
+        const equipment = entity ? (entity.equipment || []).map(id => ({ id, ...this.equipmentCache().get(id) })).filter(e => e.name) : [];
+        const magicItems = entity ? (entity.magicItems || []).map(id => ({ id, ...this.magicItemsCache().get(id) })).filter(mi => mi.name) : [];
+
+        const allMods: { [stat: string]: { [type: string]: (number | string)[] } } = {};
+        const addMod = (stat: string, type: string, value: number | string) => {
+            if (!allMods[stat]) allMods[stat] = {};
+            if (!allMods[stat][type]) allMods[stat][type] = [];
+            allMods[stat][type].push(value);
+        };
+
+        (c.effects || []).forEach(effect => {
+            const cached = this.effectsCache().get(effect.name);
+            if (cached?.data?.modifiers) Object.entries(cached.data.modifiers).forEach(([s, m]: [string, any]) => addMod(s, m.type, m.value));
+        });
+        Object.entries(c.tempMods || {}).forEach(([s, v]) => addMod(s, 'untyped', v));
+        (c.activeFeats || []).forEach(featId => {
+            const featData = this.rulesCache().get(featId);
+            if (featData?.effects) featData.effects.forEach((eff: any) => addMod(eff.target, eff.type, eff.value));
+        });
+
+        const finalBonuses: { [key: string]: number } = {};
+        const stringyMods: { [key: string]: string[] } = {};
+
+        for (const stat in allMods) {
+            finalBonuses[stat] = 0;
+            stringyMods[stat] = [];
+            for (const type in allMods[stat]) {
+                const numVals = allMods[stat][type].filter((v): v is number => typeof v === 'number');
+                stringyMods[stat].push(...allMods[stat][type].filter((v): v is string => typeof v === 'string'));
+                if (numVals.length > 0) {
+                    if (type === 'dodge' || type === 'untyped' || type === 'penalty' || type === 'circumstance' || type === 'morale' || type === 'competence') finalBonuses[stat] += numVals.reduce((s, v) => s + v, 0);
+                    else { // Stacking rules for other types
+                        const pos = numVals.filter(v => v > 0);
+                        const neg = numVals.filter(v => v < 0);
+                        if (pos.length > 0) finalBonuses[stat] += Math.max(...pos);
+                        if (neg.length > 0) finalBonuses[stat] += Math.min(...neg);
+                    }
+                }
+            }
+        }
+        
+        const modifiedStats = { ...baseStats };
+        const modifiedSaves = { ...baseStats.SavesObject };
+
+        for(const stat in finalBonuses) {
+            const bonus = finalBonuses[stat];
+            if (stat === 'Saves') { modifiedSaves.Fort += bonus; modifiedSaves.Ref += bonus; modifiedSaves.Will += bonus; }
+            else if (['Reflex', 'Ref'].includes(stat)) modifiedSaves.Ref += bonus;
+            else if (['Fortitude', 'Fort'].includes(stat)) modifiedSaves.Fort += bonus;
+            else if (stat === 'Will') modifiedSaves.Will += bonus;
+            else if (typeof modifiedStats[stat] !== 'undefined') {
+                const baseVal = parseInt(String(modifiedStats[stat]).match(/-?\d+/)?.[0] || '0', 10);
+                if (!isNaN(baseVal)) modifiedStats[stat] = baseVal + bonus;
+            }
+        }
+        (stringyMods['Speed'] || []).forEach(v => { if (v === 'half') modifiedStats.Speed = `${Math.floor(parseInt(String(modifiedStats.Speed).match(/\d+/)?.[0] || '30', 10) / 2)} ft.`; });
+
+        const dexModDiff = getAbilityModifierAsNumber(modifiedStats.Dex) - getAbilityModifierAsNumber(baseStats.Dex);
+        const conModDiff = getAbilityModifierAsNumber(modifiedStats.Con) - getAbilityModifierAsNumber(baseStats.Con);
+        const wisModDiff = getAbilityModifierAsNumber(modifiedStats.Wis) - getAbilityModifierAsNumber(baseStats.Wis);
+        modifiedSaves.Ref += dexModDiff; modifiedSaves.Fort += conModDiff; modifiedSaves.Will += wisModDiff;
+        modifiedStats.AC += dexModDiff; modifiedStats.Touch += dexModDiff;
+        if (conModDiff !== 0) {
+            const lvl = baseStats.Level || parseInt(String(baseStats.HP || baseStats.hp || '1d8').match(/\((\d+)d\d+/)?.[1] || '1', 10);
+            modifiedStats.maxHp = (c.maxHp || 10) + (conModDiff * lvl);
+            if (modifiedStats.maxHp < 1) modifiedStats.maxHp = 1;
+        } else modifiedStats.maxHp = c.maxHp || baseStats.maxHp;
+        modifiedStats.Saves = this.formatSaves(modifiedSaves);
+        modifiedStats.SavesObject = modifiedSaves;
+        
+        const naturalAttacks = this.parseAttacks(baseStats);
+        const weaponAttacks = this.generateAttacksFromWeapons(c, baseStats, modifiedStats, allFeats, equipment, magicItems);
+        
+        return { ...c, baseStats, modifiedStats, attacks: [...naturalAttacks, ...weaponAttacks], allFeats, equipment, magicItems };
+    }).sort((a, b) => (b.initiative || 0) - (a.initiative || 0) || a.name.localeCompare(b.name));
+  });
+
+  constructor() {
+    try {
+      const app = initializeApp(this.firebaseConfig);
+      this.db = getFirestore(app);
+      this.auth = getAuth(app);
+      this.setupAuthListener();
+    } catch (e: any) {
+      this.error.set(`Firebase init failed: ${e.message}`);
+    }
+
+    effect(() => {
+      if(this.isAuthReady() && this.db) {
+        this.fetchCodexData(); // Needed for assistant and NPC gen context
+        this.listenToDMToolkitCounts();
+        this.listenToFights();
+        this.listenToSessions();
+        this.listenToFoundCreatures();
+        this.listenToEffectsCache();
+        this.listenToRulesCache(); // replaces feats
+        this.listenToEquipmentCache();
+        this.listenToMagicItemsCache();
+        this.listenToStoredApiKey();
+        this.listenToEntitiesCache();
+      }
+    });
+
+    effect(() => this.currentFight() ? this.listenToCombatants(this.currentFight()!.id) : this.combatants.set([]));
+
+    effect(() => {
+      const current = this.currentFight();
+      if (current && !this.fights().some(f => f.id === current.id)) {
+        this.currentFight.set(null);
+      }
+    });
+
+    effect(() => {
+      const current = this.currentSession();
+      if (current && !this.sessions().some(s => s.id === current.id)) {
+        this.currentSession.set(null);
+      }
+    });
+    
+    effect(() => {
+        const session = this.currentSession();
+        const notes = this.sessionNotes();
+        if(!session || !this.db) return;
+        const handler = setTimeout(async () => {
+            if (notes !== (session.notes || "")) await updateDoc(doc(this.db!, `dm_toolkit_sessions`, session.id), { notes });
+        }, 500);
+        return () => clearTimeout(handler);
+    });
+
+    effect(() => {
+        const fight = this.currentFight();
+        this.isCombatActive.set(!!fight?.combatStartTime);
+        this.roundCounter.set(fight?.roundCounter || 1);
+        this.currentTurnIndex.set(fight?.currentTurnIndex || 0);
+    });
+  }
+
+  // --- DATA FETCHING & LISTENING ---
+  private fetchCodexData() {
+    if (!this.db) return;
+    const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+    onSnapshot(docRef, (docSnap) => this.codex.set(docSnap.exists() ? docSnap.data() : null), 
+      (error) => this.error.set("Could not load codex data.")
+    );
+  }
+
+  private listenToEntitiesCache() {
+    if (!this.db) return;
+    const entitiesRef = collection(this.db, 'entities_pf1e');
+    onSnapshot(query(entitiesRef), s => {
+      this.entitiesCache.set(s.docs.map(d => ({ id: d.id, ...d.data() } as Pf1eEntity)));
+    });
+  }
+  
+  private listenToRulesCache() {
+    if (!this.db) return;
+    onSnapshot(query(collection(this.db, 'rules_pf1e')), s => {
+        const newCache = new Map<string, any>();
+        s.docs.forEach(d => newCache.set(d.id, d.data()));
+        this.rulesCache.set(newCache);
+    });
+  }
+  private listenToEquipmentCache() {
+    if (!this.db) return;
+    onSnapshot(query(collection(this.db, 'equipment_pf1e')), s => {
+        const newCache = new Map<string, any>();
+        s.docs.forEach(d => newCache.set(d.id, d.data()));
+        this.equipmentCache.set(newCache);
+    });
+  }
+  private listenToMagicItemsCache() {
+    if (!this.db) return;
+    onSnapshot(query(collection(this.db, 'magic_items_pf1e')), s => {
+        const newCache = new Map<string, any>();
+        s.docs.forEach(d => newCache.set(d.id, d.data()));
+        this.magicItemsCache.set(newCache);
+    });
+  }
+
+
+  private listenToStoredApiKey() {
+    if (!this.db) return;
+    const keyDocRef = doc(this.db, 'admin_settings/api_keys');
+    onSnapshot(keyDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+            this.storedApiKey.set(docSnap.data()?.gemini || '');
+        } else {
+            this.storedApiKey.set('');
+        }
+    }, (error) => {
+        console.error(`Error fetching stored API key: ${error.message}`);
+    });
+  }
+
+  private listenToDMToolkitCounts() {
+      onSnapshot(collection(this.db!, `dm_toolkit_fights`), s => this.fightCount.set(s.size));
+      onSnapshot(collection(this.db!, `dm_toolkit_sessions`), s => this.sessionCount.set(s.size));
+  }
+
+  private listenToFights() {
+    if (!this.db) return;
+    onSnapshot(query(collection(this.db, 'dm_toolkit_fights')), s => {
+      const newFights = s.docs.map(d => ({ id: d.id, ...d.data() } as Fight)).sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
+      this.fights.set(newFights);
+      const currentId = this.currentFight()?.id;
+      if (currentId) {
+        const updatedCurrent = newFights.find(f => f.id === currentId);
+        if (updatedCurrent) {
+          this.currentFight.set(updatedCurrent);
+        }
+      }
+    });
+  }
+
+  private listenToSessions() {
+    if (!this.db) return;
+    onSnapshot(query(collection(this.db, 'dm_toolkit_sessions')), s => {
+      this.sessions.set(s.docs.map(d => ({ id: d.id, ...d.data() } as Session)).sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0)));
+    });
+  }
+
+   private listenToFoundCreatures() {
+      if (!this.db) return;
+      onSnapshot(query(collection(this.db, 'dm_toolkit_found_creatures')), s => {
+          this.foundCreatures.set(s.docs.map(d => ({ id: d.id, ...d.data() } as FoundCreature)).sort((a,b) => a.name.localeCompare(b.name)));
+      });
+  }
+  
+  private listenToEffectsCache() {
+    if (!this.db) return;
+    onSnapshot(query(collection(this.db, 'dm_toolkit_effects')), s => {
+        const newCache = new Map<string, CacheEntry>();
+        s.docs.forEach(d => newCache.set(d.id, { data: d.data(), status: 'loaded' }));
+        this.effectsCache.set(newCache);
+        this.commonEffects.forEach(e => { if (!newCache.has(e)) this.lookupTerm(e, 'effect'); });
+    });
+  }
+
+  private listenToCombatants(fightId: string) {
+    if (!this.db) return;
+    onSnapshot(query(collection(this.db, 'dm_toolkit_fights', fightId, 'combatants')), s => {
+      this.combatants.set(s.docs.map(d => ({ id: d.id, ...d.data() } as Combatant)).sort((a,b) => (b.initiative||0) - (a.initiative||0) || a.name.localeCompare(b.name)));
+    });
+  }
+
+  private setupAuthListener() {
+    if (!this.auth) {
+      this.error.set("Auth service not available.");
+      this.isAuthReady.set(true);
+      return;
+    }
+    onAuthStateChanged(this.auth, (user) => {
+      if (!user) signInAnonymously(this.auth).catch(e => this.error.set("Authentication failed."));
+      this.isAuthReady.set(true);
+    });
+  }
+
+  // --- UI EVENT HANDLERS ---
+  setActiveTool(tool: 'assistant' | 'npc-generator' | 'combat' | 'session') { this.activeTool.set(tool); }
+
+  async handleAskAssistant() {
+    if (!this.assistantQuery.trim() || !this.codex()) return;
+    this.isAskingAssistant.set(true);
+    this.assistantResponse.set('');
+    try {
+        const response = await fetchFromGemini(this.assistantApiKey(), this.assistantQuery, 'assistant', { codex: this.codex() });
+        this.assistantResponse.set(response);
+    } catch (e: any) { this.assistantResponse.set(`Error: ${e.message}`); } 
+    finally { this.isAskingAssistant.set(false); }
+  }
+  
+  async handleGenerateNpcs() {
+    if (!this.npcGenQuery.trim() || !this.npcGenContext.trim() || !this.npcGenGroupName.trim() || !this.db) return;
+    if (this.codex()?.['Generated Characters']?.[this.npcGenGroupName]) {
+        console.error("Group name already exists"); return;
+    }
+    this.isGeneratingNpcs.set(true);
+    this.lastGeneratedNpcs.set([]);
+    try {
+        let json = await fetchFromGemini(this.assistantApiKey(), this.npcGenQuery, 'npc-generation', { codex: { context: this.npcGenContext } });
+        json = json.replace(/```json|```/g, '').trim();
+        const npcs = JSON.parse(json);
+        this.lastGeneratedNpcs.set(npcs);
+        this.lastGeneratedGroupName.set(this.npcGenGroupName);
+        const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+        await updateDoc(docRef, { [`Generated Characters.${this.npcGenGroupName}`]: npcs });
+    } catch (e: any) { console.error("Error generating NPCs:", e); } 
+    finally { this.isGeneratingNpcs.set(false); }
+  }
+
+  // --- COMBAT MANAGER ---
+  async handleAddFight() {
+    if (!this.newFightName.trim() || !this.db) return;
+    this.isSavingFight.set(true);
+    try {
+      await addDoc(collection(this.db, 'dm_toolkit_fights'), { name: this.newFightName, createdAt: serverTimestamp(), roundCounter: 1, currentTurnIndex: 0 });
+      this.newFightName = '';
+    } catch(e) { console.error(e); } 
+    finally { this.isSavingFight.set(false); }
+  }
+
+  async handleDeleteFight(id: string) {
+    if (!this.db) return;
+    try {
+      const combatantsSnap = await getDocs(collection(this.db, 'dm_toolkit_fights', id, 'combatants'));
+      const batch = writeBatch(this.db);
+      combatantsSnap.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      await deleteDoc(doc(this.db, 'dm_toolkit_fights', id));
+      if (this.currentFight()?.id === id) this.currentFight.set(null);
+    } catch(e) { console.error(e); }
+  }
+
+  setCurrentFight(fight: Fight) { this.currentFight.set(fight); }
+  onSourceChange(source: any) { this.addFormSource.set(source); this.selectedTemplate = ''; }
+  updateCustomCombatant(field: 'name'|'hp'|'initiative', val: any) { this.customCombatant.update(c => ({...c, [field]: val})); }
+
+  async handleAddCombatant(event: Event) {
+    event.preventDefault();
+    if (!this.currentFight() || !this.db) return;
+    this.isSavingCombatant.set(true);
+    let combatant: Partial<Combatant> = {};
+    try {
+        const source = this.addFormSource();
+
+        if (source === 'Custom') {
+            const custom = this.customCombatant();
+            const stats = calculateCompleteBaseStats({ BAB: 0, Level: 1, name: custom.name });
+            combatant = { name: custom.name, initiative: +custom.initiative, hp: +custom.hp, maxHp: +custom.hp, type: 'Custom', stats, activeFeats: [], effects: [] };
+        } else if (source === 'Found') {
+            const creature = this.foundCreatures().find(c => c.name === this.selectedTemplate);
+            if (!creature) throw new Error("Found creature template not found.");
+            const baseStats: any = { CR: creature.cr, HP: creature.hp, name: creature.name };
+            creature.stats.split(',').forEach(p => {
+                const [s, v] = p.trim().split(' ');
+                if (s && v) baseStats[s] = v;
+            });
+            const stats = calculateCompleteBaseStats(baseStats);
+            combatant = { name: creature.name, initiative: 10 + getAbilityModifierAsNumber(stats.Dex), hp: stats.maxHp, maxHp: stats.maxHp, type: 'Found', stats, activeFeats: [], effects: [] };
+
+        } else { // PC, NPC, Bestiary
+            const entity = this.entitiesCache().find(e => e.name === this.selectedTemplate);
+            if (!entity) throw new Error("Entity template not found.");
+
+            const stats = calculateCompleteBaseStats({ ...entity.baseStats });
+            combatant = { 
+                name: entity.name, 
+                initiative: 10 + getAbilityModifierAsNumber(stats.Dex), 
+                hp: stats.maxHp, 
+                maxHp: stats.maxHp, 
+                type: source, 
+                stats: stats, // Store the COMPLETED baseStats
+                entityId: entity.id, // Link to the source entity
+                activeFeats: [],
+                effects: []
+            };
+        }
+
+        await addDoc(collection(this.db, 'dm_toolkit_fights', this.currentFight()!.id, 'combatants'), combatant);
+        this.customCombatant.set({ name: '', initiative: 10, hp: 10 });
+        this.selectedTemplate = '';
+    } catch (e) { console.error("Error adding combatant:", e); } 
+    finally { this.isSavingCombatant.set(false); }
+  }
+
+  async handleRemoveCombatant(id: string) {
+    if (!this.currentFight() || !this.db) return;
+    await deleteDoc(doc(this.db, 'dm_toolkit_fights', this.currentFight()!.id, 'combatants', id));
+  }
+
+  async handleUpdateCombatant(id: string, field: keyof Combatant, val: any) {
+     if (!this.currentFight() || !this.db) return;
+     if (isNaN(+val) && (field==='hp'||field==='initiative'||field==='maxHp')) return;
+     await updateDoc(doc(this.db, 'dm_toolkit_fights', this.currentFight()!.id, 'combatants', id), { [field]: +val });
+  }
+
+  async handleStartCombat() {
+    if (!this.currentFight() || !this.db) return;
+    this.isTogglingCombatState.set(true);
+    await updateDoc(doc(this.db, 'dm_toolkit_fights', this.currentFight()!.id), { combatStartTime: serverTimestamp(), roundCounter: 1, currentTurnIndex: 0 });
+    this.isTogglingCombatState.set(false);
+  }
+
+  async handleEndCombat() {
+    if (!this.currentFight() || !this.db) return;
+    this.isTogglingCombatState.set(true);
+    try {
+        const combatantsSnap = await getDocs(collection(this.db, 'dm_toolkit_fights', this.currentFight()!.id, 'combatants'));
+        const batch = writeBatch(this.db);
+        combatantsSnap.docs.forEach(d => {
+            const permanentEffects = (d.data().effects || []).filter((e: CombatantEffect) => e.unit === 'permanent');
+            batch.update(d.ref, { effects: permanentEffects, activeFeats: [] });
+        });
+        await batch.commit();
+        await updateDoc(doc(this.db, 'dm_toolkit_fights', this.currentFight()!.id), { combatStartTime: deleteField(), roundCounter: 1, currentTurnIndex: 0 });
+    } catch(e) { console.error("Error ending combat:", e); }
+    finally { this.isTogglingCombatState.set(false); }
+  }
+
+  async handleNextTurn() {
+    if (!this.currentFight() || !this.db || !this.isCombatActive()) return;
+    let newIndex = (this.currentTurnIndex() || 0) + 1;
+    let newRound = this.roundCounter();
+    if (newIndex >= this.combatants().length) {
+        newIndex = 0; newRound++;
+        this.updateEffectDurations();
+    }
+    await updateDoc(doc(this.db, 'dm_toolkit_fights', this.currentFight()!.id), { currentTurnIndex: newIndex, roundCounter: newRound });
+  }
+
+  async updateEffectDurations() {
+      if (!this.currentFight() || !this.db) return;
+      const batch = writeBatch(this.db!);
+      this.combatants().forEach(c => {
+          const updatedEffects = (c.effects||[]).map(e => (e.unit==='rounds'&&e.startRound<this.roundCounter()) ? {...e, remainingRounds:e.remainingRounds-1} : e).filter(e => e.unit!=='rounds'||e.remainingRounds>0);
+          if (JSON.stringify(updatedEffects) !== JSON.stringify(c.effects)) batch.update(doc(this.db!, 'dm_toolkit_fights', this.currentFight()!.id, 'combatants', c.id), { effects: updatedEffects });
+      });
+      await batch.commit();
+  }
+
+  async handleFindCreature() {
+    if (!this.findCreatureTerm || !this.db) return;
+    this.isFindingCreature.set(true);
+    try {
+        const json = await fetchFromGemini(this.assistantApiKey(), this.findCreatureTerm, 'creature', { pcCount: this.pcCount(), pcLevel: this.pcLevel() });
+        const creatures = JSON.parse(json);
+        const batch = writeBatch(this.db!);
+        creatures.forEach((c: any) => {
+            const stats = `Str ${c.stats?.Str||10}, Dex ${c.stats?.Dex||10}, Con ${c.stats?.Con||10}, Int ${c.stats?.Int||10}, Wis ${c.stats?.Wis||10}, Cha ${c.stats?.Cha||10}`;
+            batch.set(doc(collection(this.db!, 'dm_toolkit_found_creatures')), { name: c.name, cr: c.cr, hp: c.hp, stats });
+        });
+        await batch.commit();
+        this.findCreatureTerm = '';
+    } catch(e) { console.error("Error finding creatures:", e); } 
+    finally { this.isFindingCreature.set(false); }
+  }
+  
+  hideFoundCreaturesListWithDelay() { setTimeout(() => this.showFoundCreaturesList.set(false), 200); }
+  selectFoundCreature(name: string) { this.selectedTemplate = name; this.foundCreatureFilter.set(name); this.showFoundCreaturesList.set(false); }
+  toggleDetails(id: string) { this.expandedCombatant.update(c => c === id ? null : id); }
+  
+  // --- SESSION LOGGER ---
+  async handleAddSession() {
+      if (!this.db) return;
+      const newSession = await addDoc(collection(this.db, 'dm_toolkit_sessions'), { title: '', notes: '', createdAt: serverTimestamp() });
+      this.setCurrentSession({id: newSession.id, title: '', notes: '', createdAt: new Date()});
+  }
+
+  async handleDeleteSession(id: string) {
+      if (!this.db) return;
+      await deleteDoc(doc(this.db, 'dm_toolkit_sessions', id));
+      if (this.currentSession()?.id === id) this.currentSession.set(null);
+  }
+
+  setCurrentSession(session: Session) { this.currentSession.set(session); this.sessionNotes.set(session.notes || ''); }
+  onNotesChange(notes: string) { this.sessionNotes.set(notes); }
+  
+  // --- DYNAMIC LOOKUP ---
+  lookupTerm(term: string, type: LookupType) {
+    if (!term) return;
+    const cache = this.effectsCache;
+    if (cache().has(term) && cache().get(term)?.status !== 'error') return;
+
+    cache.update(c => c.set(term, { status: 'loading', data: { description: 'Loading...' } }));
+
+    fetchFromGemini(this.assistantApiKey(), term, type).then(async (res) => {
+        let entry: CacheEntry = { status: 'loaded', data: { description: 'Error parsing.' } };
+        try {
+            const parsed = JSON.parse(res.replace(/```json|```/g, '').trim());
+            entry = { status: 'loaded', data: parsed };
+        } catch (e) { entry.data.description = res; }
+        cache.update(c => c.set(term, entry));
+        await setDoc(doc(this.db!, `dm_toolkit_effects`, term), entry.data);
+    }).catch(e => cache.update(c => c.set(term, { status: 'error', data: { description: `Error fetching.` } })));
+  }
+
+  // --- COMBATANT EFFECTS & MODS ---
+  async toggleActiveFeat(id: string, featId: string) {
+    if (!this.currentFight() || !this.db) return;
+    const c = this.combatants().find(c => c.id === id); if (!c) return;
+    const active = c.activeFeats || [];
+    const newActive = active.includes(featId) ? active.filter(f => f !== featId) : [...active, featId];
+    await updateDoc(doc(this.db!, `dm_toolkit_fights/${this.currentFight()!.id}/combatants/${id}`), { activeFeats: newActive });
+  }
+
+  newEffectForCombatant = (id: string) => this.newEffects().get(id) || { name: '', duration: 3, unit: 'rounds' };
+  updateNewEffect(id: string, field: keyof CombatantEffect, val: any) {
+    this.newEffects.update(m => {
+      const current = m.get(id) || { name: '', duration: 3, unit: 'rounds' };
+      const updated = { ...current, [field]: val };
+      if (field === 'unit' && val === 'permanent') updated.duration = 0;
+      return m.set(id, updated);
+    });
+  }
+  showEffectList = (id: string) => this.activeEffectDropdown.set(id);
+  hideEffectListWithDelay = (id: string) => setTimeout(() => { if (this.activeEffectDropdown() === id) this.activeEffectDropdown.set(null); }, 200);
+  filteredEffects = (id: string) => {
+    const term = (this.newEffects().get(id)?.name || '').toLowerCase();
+    return this.commonEffects.filter(e => e.toLowerCase().includes(term));
+  };
+  selectEffect(id: string, name: string) { this.updateNewEffect(id, 'name', name); this.activeEffectDropdown.set(null); }
+
+  async handleAddEffect(id: string) {
+    const effect = this.newEffects().get(id);
+    const combatant = this.combatants().find(c => c.id === id);
+    if (!effect?.name || !combatant || !this.db) return;
+    const toAdd: CombatantEffect = { name: effect.name, duration: effect.duration || 0, unit: effect.unit || 'rounds', startRound: this.roundCounter(), remainingRounds: effect.unit === 'permanent' ? 999 : (effect.duration || 0) };
+    const updated = [...(combatant.effects || []), toAdd];
+    await updateDoc(doc(this.db!, `dm_toolkit_fights/${this.currentFight()!.id}/combatants/${id}`), { effects: updated });
+    this.newEffects.update(m => { m.delete(id); return m; });
+  }
+
+  async handleRemoveEffect(id: string, index: number) {
+    this.hideTooltip();
+    const c = this.combatants().find(c => c.id === id);
+    if (!c?.effects || !this.db) return;
+    const updated = c.effects.filter((_, i) => i !== index);
+    await updateDoc(doc(this.db!, `dm_toolkit_fights/${this.currentFight()!.id}/combatants/${id}`), { effects: updated });
+  }
+  
+  async handleSaveStoredApiKey() {
+    if (!this.db) return;
+    try {
+        const keyDocRef = doc(this.db, 'admin_settings/api_keys');
+        await setDoc(keyDocRef, { gemini: this.storedApiKey() });
+        this.isEditingStoredKey.set(false);
+    } catch (e: any) {
+        console.error(`Error saving API key: ${e.message}`);
+    }
+  }
+
+  openTempModModal(id: string, stat: string) {
+    const c = this.combatants().find(c => c.id === id);
+    this.tempModValue.set(c?.tempMods?.[stat] || 0);
+    this.editingTempMod.set({ combatantId: id, stat });
+  }
+  closeTempModModal = () => this.editingTempMod.set(null);
+  setTempModValue = (val: any) => this.tempModValue.set(Number(val));
+  async handleSetTempMod() {
+    const modInfo = this.editingTempMod(); if (!modInfo) return;
+    const val = this.tempModValue();
+    await updateDoc(doc(this.db!, `dm_toolkit_fights/${this.currentFight()!.id}/combatants/${modInfo.combatantId}`), {
+      [`tempMods.${modInfo.stat}`]: val === 0 ? deleteField() : val
+    });
+    this.closeTempModModal();
+  }
+  
+  // --- HELPERS ---
+  getAbilityModifier(score: any): string {
+    const mod = Math.floor((Number(score) - 10) / 2);
+    return isNaN(mod) ? '' : (mod >= 0 ? `+${mod}` : `${mod}`);
+  }
+
+  parseSaves = (s: any, stats: any) => {
+    const res = { Fort: 0, Ref: 0, Will: 0 };
+    if (typeof s === 'string') {
+        res.Fort = parseInt(s.match(/Fort\s*([+-]?\d+)/i)?.[1]||'0',10);
+        res.Ref = parseInt(s.match(/Ref\s*([+-]?\d+)/i)?.[1]||'0',10);
+        res.Will = parseInt(s.match(/Will\s*([+-]?\d+)/i)?.[1]||'0',10);
+    } else {
+        res.Fort=getAbilityModifierAsNumber(stats?.Con); res.Ref=getAbilityModifierAsNumber(stats?.Dex); res.Will=getAbilityModifierAsNumber(stats?.Wis);
+    }
+    return res;
+  }
+  formatSaves = (s: {Fort:number;Ref:number;Will:number}) => `Fort ${s.Fort>=0?'+':''}${s.Fort}, Ref ${s.Ref>=0?'+':''}${s.Ref}, Will ${s.Will>=0?'+':''}${s.Will}`;
+  parseAttacks = (s: any) => {
+    const attacks: ParsedAttack[] = [];
+    const parse = (str: string) => {
+      const regex = /(.+?)\s*([+-]\d+(?:\/[+-]\d+)*)\s*\((.+?)\)/g;
+      let m; while ((m = regex.exec(str)) !== null) attacks.push({ name: m[1].trim(), bonus: m[2].trim(), damage: m[3].trim() });
+    };
+    parse(s.Melee||''); parse(s.Ranged||'');
+    return attacks;
+  }
+  
+  private generateAttacksFromWeapons(
+    c: Combatant, 
+    baseStats: any, 
+    modifiedStats: any, 
+    allFeats: any[],
+    equipment: any[],
+    magicItems: any[]
+): ParsedAttack[] {
+    const weaponAttacks: ParsedAttack[] = [];
+    const allItems = [...equipment, ...magicItems];
+    const weapons = allItems.filter(item => item.type === 'weapon' && item.properties);
+
+    const hasWeaponFinesse = allFeats.some(f => f.name === 'Weapon Finesse');
+    const powerAttackFeat = allFeats.find(f => f.name === 'Power Attack');
+    const hasPowerAttack = powerAttackFeat && (c.activeFeats || []).includes(powerAttackFeat.id);
+
+    for (const weapon of weapons) {
+        const props = weapon.properties || {};
+        const weaponName = weapon.name || 'Unknown Weapon';
+        const lowerWeaponName = weaponName.toLowerCase();
+        
+        const isRanged = props.range || lowerWeaponName.includes('bow') || lowerWeaponName.includes('crossbow') || lowerWeaponName.includes('sling');
+        const isThrown = props.range && parseInt(props.range) > 0 && !lowerWeaponName.includes('bow') && !lowerWeaponName.includes('crossbow');
+        const isLight = props.light || lowerWeaponName.includes('dagger') || lowerWeaponName.includes('shortsword') || lowerWeaponName.includes('handaxe');
+
+        let attackAbilityMod = getAbilityModifierAsNumber(modifiedStats.Str);
+        let damageAbilityMod = getAbilityModifierAsNumber(modifiedStats.Str);
+        
+        if (isRanged && !isThrown) {
+            attackAbilityMod = getAbilityModifierAsNumber(modifiedStats.Dex);
+            const isComposite = lowerWeaponName.includes('composite');
+            damageAbilityMod = isComposite ? getAbilityModifierAsNumber(modifiedStats.Str) : 0; 
+        } else if (hasWeaponFinesse && isLight) {
+            attackAbilityMod = getAbilityModifierAsNumber(modifiedStats.Dex);
+        }
+
+        const enhancementBonusMatch = weaponName.match(/^\+(\d+)/);
+        const enhancementBonus = enhancementBonusMatch ? parseInt(enhancementBonusMatch[1], 10) : 0;
+        
+        let powerAttackPenalty = 0;
+        let powerAttackDamage = 0;
+        if(hasPowerAttack && !isRanged) {
+            const bab = modifiedStats.BAB || 0;
+            powerAttackPenalty = bab >= 12 ? -4 : bab >= 8 ? -3 : bab >= 4 ? -2 : -1;
+            powerAttackDamage = Math.abs(powerAttackPenalty) * 2;
+        }
+
+        const totalAttackBonus = modifiedStats.BAB + attackAbilityMod + enhancementBonus + powerAttackPenalty;
+        const formattedAttackBonus = totalAttackBonus >= 0 ? `+${totalAttackBonus}` : `${totalAttackBonus}`;
+
+        let totalDamageBonus = damageAbilityMod + enhancementBonus + powerAttackDamage;
+        let damageString = props.damage_m || '1d6';
+        if (totalDamageBonus !== 0) {
+            damageString += totalDamageBonus > 0 ? `+${totalDamageBonus}` : ` ${totalDamageBonus}`;
+        }
+        
+        const critString = props.critical ? ` (${props.critical})` : '';
+        
+        weaponAttacks.push({
+            name: weaponName,
+            bonus: formattedAttackBonus,
+            damage: `${damageString}${critString}`.trim()
+        });
+    }
+
+    return weaponAttacks;
+  }
+
+  getCacheForType = (t: 'rule' | 'equipment' | 'magic-item' | 'effect') => {
+    if (t === 'rule') return this.rulesCache;
+    if (t === 'equipment') return this.equipmentCache;
+    if (t === 'magic-item') return this.magicItemsCache;
+    return this.effectsCache;
+  }
+
+  showTooltip(e:MouseEvent, id: string, type: 'rule' | 'equipment' | 'magic-item' | 'effect') {
+    const cache = this.getCacheForType(type)();
+    const item = cache.get(id);
+
+    this.tooltipContent.set({ 
+      title: item?.name || 'Unknown', 
+      data: item, 
+      status: item ? 'loaded' : 'error' 
+    });
+    this.tooltipPosition.set({ top: `${e.clientY + 15}px`, left: `${e.clientX + 15}px` });
+  }
+
+  hideTooltip = () => this.tooltipContent.set(null);
+
+  objectKeys = Object.keys;
+  formatTime = (t: any) => t?.toDate ? t.toDate().toLocaleString() : new Date(t?.seconds * 1000).toLocaleString();
+}

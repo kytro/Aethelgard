@@ -1,0 +1,998 @@
+import { ChangeDetectionStrategy, Component, computed, effect, signal, Input, Output, EventEmitter } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
+
+// --- FIREBASE IMPORTS ---
+import { initializeApp } from 'firebase/app';
+import { getAuth, Auth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, Firestore, doc, onSnapshot, setDoc, collection, query } from 'firebase/firestore';
+
+// --- TYPE INTERFACES ---
+interface Pf1eRule {
+  name: string;
+  type: string;
+  description: string;
+  effects: any[];
+}
+interface Pf1eEquipment {
+  name: string;
+  type: string;
+  description: string;
+  cost: string;
+  weight: string;
+  properties?: any;
+}
+interface Pf1eEntity {
+  id: string;
+  name: string;
+  sourceCodexPath: string[];
+  baseStats: any;
+  rules: string[];
+  equipment?: string[];
+}
+interface TooltipContent {
+  title: string;
+  description: string;
+  status: 'loaded' | 'error';
+}
+
+// --- TABLE VIEWER COMPONENT ---
+@Component({
+  selector: 'app-table-viewer',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  template: `
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-left text-gray-400">
+        <thead class="text-xs text-gray-300 uppercase bg-gray-700/50">
+          <tr>
+            @for(header of block.headers; track header; let i = $index) {
+              <th scope="col" class="px-6 py-3">
+                @if(isEditMode) {
+                  <div class="flex items-center gap-2">
+                    <input type="text" [(ngModel)]="block.headers[i]" (ngModelChange)="onHeaderChange()" class="bg-gray-800 p-1 rounded w-full">
+                    <button (click)="removeColumn(i)" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
+                  </div>
+                } @else {
+                  {{ header }}
+                }
+              </th>
+            }
+            @if(isEditMode) {
+              <th scope="col" class="px-6 py-3">
+                <button (click)="addColumn()" class="text-green-500 hover:text-green-500 font-bold text-lg">+</button>
+              </th>
+            }
+          </tr>
+        </thead>
+        <tbody>
+          @for(row of block.rows; track row; let i = $index) {
+            <tr class="border-b bg-gray-800/50 border-gray-700 hover:bg-gray-700/50">
+              @for(header of block.headers; track header) {
+                <td class="px-6 py-4">
+                  @if(isEditMode) {
+                    <input type="text" [(ngModel)]="row[getSafeKey(header)]" (ngModelChange)="emitBlockChange()" class="bg-gray-900 p-1 rounded w-full">
+                  } @else {
+                    {{ row[getSafeKey(header)] }}
+                  }
+                </td>
+              }
+              @if(isEditMode) {
+                <td class="px-6 py-4">
+                  <button (click)="removeRow(i)" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
+      </table>
+      @if(isEditMode) {
+        <div class="mt-2">
+          <button (click)="addRow()" class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md">Add Row</button>
+        </div>
+      }
+    </div>
+  `,
+})
+class TableViewerComponent {
+  @Input() block: any;
+  @Input() isEditMode: boolean = false;
+  @Output() blockChange = new EventEmitter<any>();
+
+  getSafeKey(header: string): string {
+    return header.replace(/\s+/g, '');
+  }
+
+  emitBlockChange() {
+    this.blockChange.emit(this.block);
+  }
+
+  onHeaderChange() {
+    this.emitBlockChange();
+  }
+
+  addColumn() {
+    const newHeaderName = prompt('Enter new column header:');
+    if (newHeaderName && !this.block.headers.includes(newHeaderName)) {
+      this.block.headers.push(newHeaderName);
+      const newKey = this.getSafeKey(newHeaderName);
+      this.block.rows.forEach((row: any) => (row[newKey] = ''));
+      this.emitBlockChange();
+    }
+  }
+
+  removeColumn(index: number) {
+    if (confirm('Are you sure you want to delete this column and all its data?')) {
+      const headerToRemove = this.block.headers[index];
+      const keyToRemove = this.getSafeKey(headerToRemove);
+      this.block.headers.splice(index, 1);
+      this.block.rows.forEach((row: any) => delete row[keyToRemove]);
+      this.emitBlockChange();
+    }
+  }
+
+  addRow() {
+    const newRow: any = {};
+    this.block.headers.forEach((h: string) => (newRow[this.getSafeKey(h)] = ''));
+    this.block.rows.push(newRow);
+    this.emitBlockChange();
+  }
+
+  removeRow(index: number) {
+    this.block.rows.splice(index, 1);
+    this.emitBlockChange();
+  }
+}
+
+@Component({
+  selector: 'app-root',
+  standalone: true,
+  imports: [CommonModule, FormsModule, TableViewerComponent, NgClass],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+template: `
+<div class="bg-gray-900 text-gray-200 font-sans flex h-screen overflow-hidden">
+  <!-- Sidebar -->
+  <aside class="w-64 bg-gray-800/80 backdrop-blur-sm border-r border-gray-700 flex-shrink-0 p-4 flex flex-col">
+    <h1 class="text-2xl font-bold text-white mb-4 text-yellow-500">Aethelgard Codex</h1>
+    <nav class="flex flex-col space-y-2 overflow-y-auto">
+      @for(key of categories(); track key) {
+        <div class="flex items-center group">
+          <button (click)="handleSidebarSelect(key)"
+            [ngClass]="{
+              'bg-yellow-600 text-black': selectedCategory() === key,
+              'text-gray-300 hover:bg-gray-700 hover:text-white': selectedCategory() !== key
+            }"
+            class="px-4 py-2 rounded-md text-left transition-colors font-medium flex-grow">
+            {{ formatKey(key) }}
+          </button>
+          @if(isEditMode() && !isGeneratedSelected()) {
+            <button (click)="deleteCategory(key)" class="p-2 text-gray-500 hover:text-red-500 transition-opacity">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+            </button>
+          }
+        </div>
+      }
+    </nav>
+  </aside>
+
+  <!-- Main Content -->
+  <div class="flex-1 flex flex-col">
+    <main class="flex-1 overflow-y-auto p-6 relative">
+      @if(!isAuthReady() || isLoading()) {
+        <div class="flex items-center justify-center h-full text-white">Loading Codex Data...</div>
+      } @else {
+        @if(error()) {
+          <div class="flex items-center justify-center h-full text-red-400 p-8 text-center">{{ error() }}</div>
+        } @else {
+          @if(!selectedCategory()) {
+            <div class="flex items-center justify-center h-full text-gray-500">Select a category to begin.</div>
+          } @else {
+            <!-- Codex View -->
+            <nav class="mb-4 text-gray-400 text-sm flex items-center flex-wrap">
+              @for(item of selectedPath(); track item; let i = $index) {
+                <button (click)="handleBreadcrumbSelect(i)" 
+                  [ngClass]="{
+                    'text-yellow-400 font-semibold underline': i === selectedPath().length - 1,
+                    'hover:text-white hover:underline': i < selectedPath().length - 1
+                  }"
+                  class="transition-colors"
+                  [disabled]="isEditMode()">
+                  {{ formatKey(item) }}
+                </button>
+                @if(i < selectedPath().length - 1) {<span class="mx-2">/</span>}
+              }
+            </nav>
+
+            <div class="flex justify-between items-start mb-4">
+              <div class="flex items-center gap-4">
+                <h2 class="text-4xl font-bold text-yellow-400 border-b-2 border-yellow-500/30 pb-2">{{ formatKey(selectedPath()[selectedPath().length - 1]) }}</h2>
+                @if(isEditMode() && selectedPath().length > 0 && !isCategoryNode() && !isGeneratedSelected()) {
+                  <button (click)="deleteCurrentEntry()" class="p-2 bg-gray-700 hover:bg-red-600 rounded-full text-white self-end mb-2" title="Delete this entire entry">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                  </button>
+                }
+              </div>
+              @if(hasContent(currentData()) || isCategoryNode() || isSingleGeneratedCharacterView()) {
+                <button (click)="toggleEditMode()"
+                  class="px-4 py-2 rounded-md font-semibold transition-colors flex-shrink-0 self-end mb-2"
+                  [ngClass]="isEditMode() ? 'bg-red-600 hover:bg-red-500' : 'bg-blue-600 hover:bg-blue-500'">
+                  {{ isEditMode() ? 'Cancel Edit' : 'Enter Edit Mode' }}
+                </button>
+              }
+            </div>
+
+            @if(currentData()) {
+              @if(linkedEntityData(); as data) {
+                @let entity = data.entity;
+                <div class="mb-6 bg-gray-900/50 p-4 rounded-xl border-2 border-yellow-500/50 shadow-2xl shadow-yellow-500/10">
+                  <h3 class="text-xl font-bold text-yellow-400 mb-3 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" /></svg>
+                    Linked Rules Engine Data
+                  </h3>
+                  <div class="bg-black/20 p-4 rounded-lg">
+                    <h4 class="font-bold text-lg mb-3 text-white">{{ entity.name }}</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                        <p><span class="font-semibold">AC:</span> {{entity.baseStats?.armorClass?.total ?? 10}} (touch {{entity.baseStats?.armorClass?.touch ?? 10}}, flat-footed {{entity.baseStats?.armorClass?.flatFooted ?? 10}})</p>
+                        <p><span class="font-semibold">HP:</span> {{entity.baseStats?.hp ?? '1d8'}}</p>
+                        <p><span class="font-semibold">Saves:</span> Fort {{ formatModifier(entity.baseStats?.saves?.fortitude) }}, Ref {{ formatModifier(entity.baseStats?.saves?.reflex) }}, Will {{ formatModifier(entity.baseStats?.saves?.will) }}</p>
+                        <p><span class="font-semibold">BAB/CMB/CMD:</span> {{ formatModifier(entity.baseStats?.combat?.bab) }} / {{entity.baseStats?.combat?.cmb ?? '-'}} / {{entity.baseStats?.combat?.cmd ?? '-'}}</p>
+                        <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                        <div class="grid grid-cols-3 gap-2 col-span-1 md:col-span-2">
+                            @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
+                              <div class="text-center bg-gray-900/50 p-1 rounded">
+                                  <span class="font-semibold">{{ability}}</span>
+                                  <p>{{ getCaseInsensitiveProp(entity.baseStats, ability) ?? 10 }} ({{getAbilityModifier(getCaseInsensitiveProp(entity.baseStats, ability))}})</p>
+                              </div>
+                            }
+                        </div>
+                        
+                        @if(entity.baseStats?.skills && objectKeys(entity.baseStats.skills).length > 0) {
+                          <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                          <div class="col-span-1 md:col-span-2">
+                            <p class="font-semibold text-white">Skills:</p>
+                            <div class="flex flex-wrap gap-x-4 gap-y-1 text-gray-300 text-sm">
+                                @for(skill of objectKeys(entity.baseStats.skills); track skill) {
+                                    <span>{{ skill }} {{ formatModifier(entity.baseStats.skills[skill]) }}</span>
+                                }
+                            </div>
+                          </div>
+                        }
+
+                        @if(entity.equipment && entity.equipment.length > 0) {
+                          <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                          <div class="col-span-1 md:col-span-2">
+                            <p class="font-semibold text-white">Equipment:</p>
+                            <div class="flex flex-wrap gap-x-3 gap-y-1 text-green-400">
+                                @for(equipId of entity.equipment; track equipId) {
+                                    <span class="relative group cursor-pointer hover:text-green-300" (mouseenter)="showTooltip($event, equipId)" (mouseleave)="hideTooltip()">
+                                        {{ equipmentCache().get(equipId)?.name || formatItemId(equipId) }}
+                                    </span>
+                                }
+                            </div>
+                          </div>
+                        }
+
+                          <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                          <div class="col-span-1 md:col-span-2">
+                            <p class="font-semibold text-white">Rules:</p>
+                            <div class="flex flex-wrap gap-x-3 gap-y-1 text-indigo-400">
+                                @for(ruleId of entity.rules; track ruleId) {
+                                    <span class="relative group cursor-pointer hover:text-indigo-300" (mouseenter)="showTooltip($event, ruleId)" (mouseleave)="hideTooltip()">
+                                        {{ rulesCache().get(ruleId)?.name || formatItemId(ruleId) }}
+                                    </span>
+                                }
+                            </div>
+                          </div>
+                    </div>
+                  </div>
+                </div>
+              }
+
+              @if(subCategories().length > 0) {
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                  @for(key of subCategories(); track key) {
+                    <button (click)="handleContentSelect(key)" class="bg-gray-800 hover:bg-yellow-900/50 border border-gray-700 hover:border-yellow-600 rounded-lg p-4 text-left" [disabled]="isEditMode()">
+                      <h3 class="font-semibold text-white text-lg">{{ formatKey(key) }}</h3>
+                    </button>
+                  }
+                </div>
+              }
+
+              @if(hasContent(currentData())) {
+                <div class="space-y-6">
+                  @for(block of currentData().content; track $index) {
+                    <div class="relative">
+                      <div [class.border-2]="isEditMode()" [class.border-dashed]="isEditMode()" [class.border-gray-700]="isEditMode()" [class.p-4]="isEditMode()" [class.rounded-lg]="isEditMode()">
+                         @if(isEditMode()) {
+                           <div class="absolute top-1 right-1 z-10">
+                                <div class="flex flex-row space-x-1 bg-gray-800 p-1 rounded-md">
+                                    <button (click)="moveBlock($index, 'up')" [disabled]="$index === 0" class="p-1.5 hover:bg-gray-700 rounded-full text-white disabled:opacity-50"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7" /></svg></button>
+                                    <button (click)="moveBlock($index, 'down')" [disabled]="$index === currentData().content.length - 1" class="p-1.5 hover:bg-gray-700 rounded-full text-white disabled:opacity-50"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg></button>
+                                    <button (click)="openEditModal(block, $index)" class="p-1.5 hover:bg-blue-600 rounded-full text-white"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z" /></svg></button>
+                                    <button (click)="deleteBlock($index)" class="p-1.5 hover:bg-red-600 rounded-full text-white"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg></button>
+                                </div>
+                            </div>
+                         }
+                        @switch(block.type) {
+                          @case('heading') {
+                            <h2 class="text-2xl font-bold text-yellow-400 border-b border-gray-700 pb-2">{{ block.text }}</h2>
+                          }
+                          @case('subheading') {
+                            <h3 class="text-xl font-semibold text-yellow-300 mt-2">{{ block.text }}</h3>
+                          }
+                          @case('paragraph') {
+                            <p class="text-gray-300 whitespace-pre-wrap leading-relaxed">{{ block.text }}</p>
+                          }
+                          @case('table') {
+                            <app-table-viewer [block]="block" [isEditMode]="isEditMode()" (blockChange)="updateBlock($index, $event)"></app-table-viewer>
+                          }
+                          @case('statblock') {
+                            @if(linkedEntityData()?.sourceBlockIndex !== $index) {
+                                @if (block.entityId) {
+                                  @let entity = findEntityCaseInsensitive(block.entityId);
+                                    @if (entity) {
+                                        <div class="bg-gray-800/50 p-4 rounded-lg border border-yellow-500 shadow-lg shadow-yellow-500/10">
+                                            <h4 class="font-bold text-lg mb-3">{{ block.title || entity.name }}</h4>
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                                                <p><span class="font-semibold">AC:</span> {{entity.baseStats?.armorClass?.total ?? 10}} (touch {{entity.baseStats?.armorClass?.touch ?? 10}}, flat-footed {{entity.baseStats?.armorClass?.flatFooted ?? 10}})</p>
+                                                <p><span class="font-semibold">HP:</span> {{entity.baseStats?.hp ?? '1d8'}}</p>
+                                                <p><span class="font-semibold">Saves:</span> Fort {{ formatModifier(entity.baseStats?.saves?.fortitude) }}, Ref {{ formatModifier(entity.baseStats?.saves?.reflex) }}, Will {{ formatModifier(entity.baseStats?.saves?.will) }}</p>
+                                                <p><span class="font-semibold">BAB/CMB/CMD:</span> {{ formatModifier(entity.baseStats?.combat?.bab) }} / {{entity.baseStats?.combat?.cmb ?? '-'}} / {{entity.baseStats?.combat?.cmd ?? '-'}}</p>
+                                                <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                                                <div class="grid grid-cols-3 gap-2 col-span-1 md:col-span-2">
+                                                    @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
+                                                      <div class="text-center bg-gray-900/50 p-1 rounded">
+                                                          <span class="font-semibold">{{ability}}</span>
+                                                          <p>{{ getCaseInsensitiveProp(entity.baseStats, ability) ?? 10 }} ({{getAbilityModifier(getCaseInsensitiveProp(entity.baseStats, ability))}})</p>
+                                                      </div>
+                                                    }
+                                                </div>
+                                                 <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                                                  <div class="col-span-1 md:col-span-2">
+                                                    <p class="font-semibold text-white">Rules:</p>
+                                                    <div class="flex flex-wrap gap-x-3 gap-y-1 text-indigo-400">
+                                                        @for(ruleId of entity.rules; track ruleId) {
+                                                            <span class="relative group cursor-pointer hover:text-indigo-300" (mouseenter)="showTooltip($event, ruleId)" (mouseleave)="hideTooltip()">
+                                                                {{ rulesCache().get(ruleId)?.name || formatItemId(ruleId) }}
+                                                            </span>
+                                                        }
+                                                    </div>
+                                                  </div>
+                                                  @if(entity.equipment && entity.equipment.length > 0) {
+                                                    <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                                                    <div class="col-span-1 md:col-span-2">
+                                                      <p class="font-semibold text-white">Equipment:</p>
+                                                      <div class="flex flex-wrap gap-x-3 gap-y-1 text-green-400">
+                                                          @for(equipId of entity.equipment; track equipId) {
+                                                              <span class="relative group cursor-pointer hover:text-green-300" (mouseenter)="showTooltip($event, equipId)" (mouseleave)="hideTooltip()">
+                                                                  {{ equipmentCache().get(equipId)?.name || formatItemId(equipId) }}
+                                                              </span>
+                                                          }
+                                                      </div>
+                                                    </div>
+                                                  }
+                                            </div>
+                                        </div>
+                                    } @else {
+                                        <div class="bg-red-900/50 p-4 rounded-lg border border-dashed border-red-500 relative">
+                                            <div class="absolute top-2 right-2 text-xs text-red-300 italic flex items-center gap-1" title="This statblock has an entity ID, but that entity was not found in the cache.">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                                Broken Entity Link
+                                            </div>
+                                            <h4 class="font-bold text-lg mb-3 text-red-200">{{ block.title }}</h4>
+                                            <p class="text-red-300">Could not find entity with ID: <code class="bg-black/50 p-1 rounded-sm">{{ block.entityId }}</code>. Please re-run the 'Process Codex into Rules Engine' action in the Admin Panel.</p>
+                                        </div>
+                                    }
+                                } @else {
+                                  <div class="bg-gray-800/50 p-4 rounded-lg border border-dashed border-gray-600 relative">
+                                      <div class="absolute top-2 right-2 text-xs text-gray-500 italic flex items-center gap-1" title="This is a manually entered statblock. Run the 'Process Codex into Rules Engine' action in the Admin Panel to link it.">
+                                          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                                          Manual Statblock (Not Linked)
+                                      </div>
+                                      <h4 class="font-bold text-lg mb-3">{{ block.title }}</h4>
+                                      <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+                                          @for(stat of block.stats; track stat.label) {
+                                              <div><p><span class="font-semibold text-white">{{ stat.label }}:</span> <span class="font-normal text-gray-300">{{ stat.value }}</span></p></div>
+                                          }
+                                      </div>
+                                  </div>
+                                }
+                            }
+                          }
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
+
+              <!-- Display for single, non-content generated characters -->
+              @if(isSingleGeneratedCharacterView()) {
+                @let character = currentData();
+                <div class="bg-gray-800/50 p-4 rounded-lg border border-yellow-500 shadow-lg shadow-yellow-500/10">
+                  @if(isEditMode()) {
+                    <div class="space-y-4">
+                      <div>
+                        <label class="block text-sm font-medium text-gray-400">Name</label>
+                        <input type="text" [(ngModel)]="character.name" class="w-full bg-gray-700 border border-gray-600 rounded-md p-2 text-white" />
+                      </div>
+                      <div>
+                        <label class="block text-sm font-medium text-gray-400">Description</label>
+                        <textarea [(ngModel)]="character.description" class="w-full h-24 bg-gray-700 border border-gray-600 rounded-md p-2 text-white"></textarea>
+                      </div>
+                      <div>
+                        <label class="block text-sm font-medium text-gray-400">Race</label>
+                        <input type="text" [(ngModel)]="character.race" class="w-full bg-gray-700 border border-gray-600 rounded-md p-2 text-white" />
+                      </div>
+                      <div class="pt-2">
+                        <label class="block text-sm font-medium text-gray-400 mb-1">Stats</label>
+                        @for(statKey of objectKeys(character.stats); track statKey) {
+                          <div class="flex items-center gap-2 mb-2">
+                            <span class="w-1/3 bg-gray-800 p-2 rounded-md text-center font-semibold">{{ statKey }}</span>
+                            <input type="number" [(ngModel)]="character.stats[statKey]" placeholder="Value" class="flex-grow bg-gray-700 border border-gray-600 p-2 rounded-md">
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  } @else {
+                    <h4 class="font-bold text-lg mb-3">{{ character.name }}</h4>
+                    <p class="text-gray-400 italic mb-4">{{ character.description }}</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                        @for(statKey of objectKeys(character.stats); track statKey) {
+                          <p><span class="font-semibold text-white">{{ statKey }}:</span> {{ character.stats[statKey] }}</p>
+                        }
+                    </div>
+                  }
+                </div>
+              }
+
+              @if(isEditMode() && !isGeneratedSelected()) {
+                <div class="mt-8 border-t border-gray-700 pt-4 flex items-center justify-center gap-2">
+                  @if(isCategoryNode()){
+                    <input #newEntryInput type="text" placeholder="New Entry Name..." class="bg-gray-800 border border-gray-600 rounded-md px-3 py-2 text-white">
+                    <button (click)="addSubEntry(newEntryInput.value); newEntryInput.value=''" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md">Add Entry</button>
+                  }
+                  @if(hasContent(currentData())){
+                    <select #newBlockTypeSelect class="bg-gray-800 border border-gray-600 rounded-md px-3 py-2 text-white">
+                      <option value="paragraph">Paragraph</option>
+                      <option value="heading">Heading</option>
+                      <option value="subheading">Subheading</option>
+                      <option value="statblock">Statblock</option>
+                      <option value="table">Table</option>
+                    </select>
+                    <button (click)="addBlock(newBlockTypeSelect.value)" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md">Add Content</button>
+                  }
+                </div>
+              }
+
+              @if(isEditMode()) {
+                <div class="sticky bottom-0 left-0 right-0 p-4 bg-gray-900/80 border-t border-gray-700 flex justify-end">
+                  <button (click)="saveChanges()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-6 rounded-md text-lg">Save All Changes</button>
+                </div>
+              }
+            } @else {
+                <p class="text-gray-500">Select an entry to view its contents.</p>
+            }
+          }
+        }
+      }
+    </main>
+  </div>
+</div>
+
+<!-- Edit Modal -->
+@if(editingBlock()) {
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeModal()">
+    <div class="bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-2xl" (click)="$event.stopPropagation()">
+      <h3 class="text-xl font-bold mb-4">Editing {{ editingBlock()?.block.type }}</h3>
+        @switch (editingBlock()?.block.type) {
+          @case ('paragraph') {
+            <textarea [(ngModel)]="editableContent.text" class="w-full h-48 bg-gray-900 border border-gray-600 rounded-md p-2 text-white"></textarea>
+          }
+          @case ('heading') {
+            <input type="text" [(ngModel)]="editableContent.text" class="w-full bg-gray-900 border border-gray-600 rounded-md p-2 text-white" />
+          }
+          @case ('subheading') {
+            <input type="text" [(ngModel)]="editableContent.text" class="w-full bg-gray-900 border border-gray-600 rounded-md p-2 text-white" />
+          }
+          @case ('statblock') {
+            <div class="space-y-2">
+              <div>
+                <label class="block text-sm font-medium text-gray-400">Title</label>
+                <input type="text" [(ngModel)]="editableContent.title" class="w-full bg-gray-900 border border-gray-600 rounded-md p-2 text-white" />
+              </div>
+              <div class="max-h-64 overflow-y-auto space-y-2 p-2 border border-gray-700 rounded-md">
+                 @for(stat of editableContent.stats; track $index) {
+                    <div class="flex items-center gap-2">
+                       <input type="text" [(ngModel)]="stat.label" placeholder="Label (e.g., HP)" class="w-1/3 bg-gray-700 p-2 rounded-md">
+                       <input type="text" [(ngModel)]="stat.value" placeholder="Value (e.g., 1d8+2)" class="flex-grow bg-gray-700 p-2 rounded-md">
+                       <button (click)="removeStat(editableContent.stats, $index)" class="p-2 bg-red-800 hover:bg-red-700 rounded-md text-white">&times;</button>
+                    </div>
+                 }
+              </div>
+              <button (click)="addStat(editableContent.stats)" class="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md">Add Stat</button>
+            </div>
+          }
+        }
+      <div class="mt-6 flex justify-end space-x-2">
+        <button (click)="closeModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded-md">Cancel</button>
+        <button (click)="confirmEdit()" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-md text-white">Save</button>
+      </div>
+    </div>
+  </div>
+}
+ <!-- Global Tooltip -->
+@if(tooltipContent(); as content) {
+  <div 
+    class="fixed bg-gray-900 border border-indigo-700 text-white text-sm rounded-lg px-3 py-2 min-w-[300px] w-max max-w-md z-50 shadow-lg pointer-events-none"
+    [style.top]="tooltipPosition().top"
+    [style.left]="tooltipPosition().left">
+      <span class="font-bold block mb-1">{{ content.title }}</span>
+      @if(content.status === 'error') {
+        <span class="text-red-400">{{ content.description }}</span>
+      } @else {
+        <span class="whitespace-pre-wrap">{{ content.description || 'No description found.' }}</span>
+      }
+  </div>
+}
+  `,
+  styles: [':host { display: block; }']
+})
+export class App {
+  db: Firestore | null = null;
+  auth: Auth | null = null;
+  isAuthReady = signal(false);
+  isLoading = signal(true);
+  error = signal<string | null>(null);
+
+  codex = signal<any | null>(null);
+  selectedPath = signal<string[]>([]);
+
+  rulesCache = signal<Map<string, Pf1eRule>>(new Map());
+  entitiesCache = signal<Map<string, Pf1eEntity>>(new Map());
+  equipmentCache = signal<Map<string, Pf1eEquipment>>(new Map());
+  tooltipContent = signal<TooltipContent | null>(null);
+  tooltipPosition = signal({ top: '0px', left: '0px' });
+
+  // -- Editing State --
+  isEditMode = signal(false);
+  editingBlock = signal<{ block: any; index: number } | null>(null);
+  editableContent: any = {};
+  private originalContent: any | null = null;
+
+  firebaseConfig = {
+    apiKey: "AIzaSyDfRfUEpL7lQFhCtwGSjbJTIKEiGc3067Y",
+    authDomain: "aethelgard-d34cc.firebaseapp.com",
+    projectId: "aethelgard-d34cc",
+    storageBucket: "aethelgard-d34cc.firebasestorage.app",
+    messagingSenderId: "283129050747",
+    appId: "1:283129050747:web:3e88abd1f65d61fa6814de",
+    measurementId: "G-BQ4R0FN9Z4"
+  };
+  codexAppId = "aethelgard-codex-data";
+
+  constructor() {
+    try {
+      const app = initializeApp(this.firebaseConfig);
+      this.db = getFirestore(app);
+      this.auth = getAuth(app);
+      this.setupAuthListener();
+    } catch (e: any) {
+      this.error.set(`Firebase init failed: ${e.message}`);
+      this.isAuthReady.set(true); 
+      this.isLoading.set(false);
+    }
+
+    effect(() => {
+      if (this.isAuthReady() && this.db) {
+        this.fetchCodexData();
+        this.listenToRulesCache();
+        this.listenToEntitiesCache();
+        this.listenToEquipmentCache();
+      }
+    });
+  }
+
+  // --- COMPUTED SIGNALS ---
+  categories = computed(() => {
+    return this.codex() ? Object.keys(this.codex()!).sort() : [];
+  });
+  selectedCategory = computed(() => this.selectedPath()[0] || null);
+  
+  currentData = computed(() => {
+    const path = this.selectedPath();
+    if (!path.length || !this.codex()) return null;
+    
+    return path.reduce((acc: any, key: string) => {
+      if (!acc) return null;
+      if (Array.isArray(acc)) {
+        // Find in array by name property
+        return acc.find(item => this.formatKey(item.name) === this.formatKey(key)) || null;
+      }
+      // Standard object property access
+      return acc[key] !== undefined ? acc[key] : null;
+    }, this.codex());
+  });
+
+  subCategories = computed(() => {
+    const data = this.currentData();
+    if (!data) return [];
+
+    // Case 1: The data is an array of generated characters (e.g., Tavern Patrons)
+    if (Array.isArray(data)) {
+        return data.map(character => character.name).filter(Boolean);
+    }
+    
+    // Case 2: The data is an object (standard category or generated group)
+    if (typeof data === 'object' && !Array.isArray(data) && data !== null) {
+        const reservedKeys = ['content', 'category', 'summary', 'entityId', 'name', 'description', 'stats', 'race'];
+        return Object.keys(data).filter((key) => 
+            !reservedKeys.includes(key) &&
+            typeof data[key] === 'object' && 
+            data[key] !== null
+        );
+    }
+    
+    return [];
+  });
+
+  isCategoryNode = computed(() => {
+    const data = this.currentData();
+    return data && !data.content && !Array.isArray(data);
+  });
+  isGeneratedSelected = computed(() => {
+      const cat = this.selectedCategory();
+      return cat === 'Generated_Characters' || cat === 'Generated Characters';
+  });
+  
+  isSingleGeneratedCharacterView = computed(() => {
+    if (!this.isGeneratedSelected()) return false;
+    const data = this.currentData();
+    return data && typeof data === 'object' && !Array.isArray(data) && data.name && data.description;
+  });
+
+  linkedEntityData = computed(() => {
+    const data = this.currentData();
+    if (!data) return null;
+
+    let entityId: string | null = null;
+    let sourceBlockIndex = -1;
+
+    // Check for entityId on the root of the current entry first.
+    if (data.entityId) {
+        entityId = data.entityId;
+        // If we find it on the root, we still want to hide the first statblock in the content to avoid duplication.
+        if (data.content && Array.isArray(data.content)) {
+            sourceBlockIndex = data.content.findIndex((b: any) => b.type === 'statblock');
+        }
+    } 
+    // If not on the root, check inside the content blocks.
+    else if (data.content && Array.isArray(data.content)) {
+        const blockIndex = data.content.findIndex((b: any) => b.type === 'statblock' && b.entityId);
+        if (blockIndex !== -1) {
+            sourceBlockIndex = blockIndex;
+            entityId = data.content[blockIndex].entityId;
+        }
+    }
+
+    if (entityId) {
+      const entity = this.findEntityCaseInsensitive(entityId);
+      if (entity) {
+          return {
+              entity: entity,
+              sourceBlockIndex: sourceBlockIndex
+          };
+      }
+    }
+
+    return null;
+  });
+
+  linkedEntity = computed(() => this.linkedEntityData()?.entity ?? null);
+
+  // --- DATA FETCHING ---
+  private setupAuthListener() {
+    if (!this.auth) {
+      this.error.set('Auth service not available.');
+      this.isAuthReady.set(true);
+      return;
+    }
+    onAuthStateChanged(this.auth, (user) => {
+      if (!user) signInAnonymously(this.auth).catch((e) => this.error.set(`Auth failed: ${e.message}`));
+      this.isAuthReady.set(true);
+    });
+  }
+
+  private fetchCodexData() {
+    if (!this.db) return;
+    this.isLoading.set(true);
+    const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, 'world_data');
+    onSnapshot(
+      docRef,
+      (docSnap) => {
+        this.codex.set(docSnap.exists() ? docSnap.data() : {});
+        this.isLoading.set(false);
+      },
+      (e) => {
+        this.error.set(`Could not load codex: ${e.message}`);
+        this.isLoading.set(false);
+      }
+    );
+  }
+  
+  private listenToRulesCache() {
+    if (!this.db) return;
+    const rulesCol = collection(this.db, `rules_pf1e`);
+    onSnapshot(query(rulesCol), (snapshot) => {
+      const newCache = new Map<string, Pf1eRule>();
+      snapshot.docs.forEach((d) => newCache.set(d.id, d.data() as Pf1eRule));
+      this.rulesCache.set(newCache);
+    });
+  }
+
+  private listenToEquipmentCache() {
+    if (!this.db) return;
+    const equipCol = collection(this.db, `equipment_pf1e`);
+    onSnapshot(query(equipCol), (snapshot) => {
+      const newCache = new Map<string, Pf1eEquipment>();
+      snapshot.docs.forEach((d) => newCache.set(d.id, d.data() as Pf1eEquipment));
+      this.equipmentCache.set(newCache);
+    });
+  }
+
+  private listenToEntitiesCache() {
+    if (!this.db) return;
+    const entitiesCol = collection(this.db, `entities_pf1e`);
+    onSnapshot(query(entitiesCol), (snapshot) => {
+      const newCache = new Map<string, Pf1eEntity>();
+      snapshot.docs.forEach((d) => newCache.set(d.id, { id: d.id, ...(d.data() as object) } as Pf1eEntity));
+      this.entitiesCache.set(newCache);
+    });
+  }
+
+  // --- UI HANDLERS ---
+  handleSidebarSelect(category: string) {
+    if (!this.isEditMode()) this.selectedPath.set([category]);
+  }
+  
+  handleContentSelect(key: string) {
+    if (!this.isEditMode()) this.selectedPath.update((path) => [...path, key]);
+  }
+  
+  handleBreadcrumbSelect(index: number) {
+    if (!this.isEditMode()) this.selectedPath.update((path) => path.slice(0, index + 1));
+  }
+
+  // --- EDITING LOGIC ---
+  toggleEditMode() {
+    if (this.isEditMode()) {
+      if (this.originalContent) {
+          const freshData = JSON.parse(JSON.stringify(this.originalContent));
+          this.codex.set(freshData);
+      }
+      this.originalContent = null;
+    } else {
+      this.originalContent = JSON.parse(JSON.stringify(this.codex()));
+    }
+    this.isEditMode.set(!this.isEditMode());
+  }
+
+  openEditModal(block: any, index: number) {
+    this.editingBlock.set({ block: { ...block }, index });
+    this.editableContent = JSON.parse(JSON.stringify(block));
+  }
+
+  closeModal() {
+    this.editingBlock.set(null);
+    this.editableContent = {};
+  }
+
+  confirmEdit() {
+    const editInfo = this.editingBlock();
+    if (!editInfo) return;
+    this.updateBlock(editInfo.index, this.editableContent);
+    this.closeModal();
+  }
+
+  updateBlock(index: number, newBlockData: any) {
+    const currentEntry = this.currentData();
+    if (!currentEntry || !currentEntry.content) return;
+    
+    const newContent = [...currentEntry.content];
+    newContent[index] = newBlockData;
+    this.updateCurrentEntryContent(newContent);
+  }
+
+  deleteBlock(index: number) {
+    if (!confirm('Are you sure you want to delete this block?')) return;
+    const currentEntry = this.currentData();
+    if (!currentEntry || !currentEntry.content) return;
+    
+    const newContent = [...currentEntry.content];
+    newContent.splice(index, 1);
+    this.updateCurrentEntryContent(newContent);
+  }
+
+  moveBlock(index: number, direction: 'up' | 'down') {
+    const currentEntry = this.currentData();
+    if (!currentEntry || !currentEntry.content) return;
+    
+    const newContent = [...currentEntry.content];
+    const item = newContent[index];
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= newContent.length) return;
+    newContent[index] = newContent[swapIndex];
+    newContent[swapIndex] = item;
+    this.updateCurrentEntryContent(newContent);
+  }
+
+  addBlock(type: string) {
+    let newBlock: any;
+    switch (type) {
+      case 'paragraph': newBlock = { type: 'paragraph', text: 'New paragraph.' }; break;
+      case 'heading': newBlock = { type: 'heading', text: 'New Heading' }; break;
+      case 'subheading': newBlock = { type: 'subheading', text: 'New Subheading' }; break;
+      case 'statblock': newBlock = { type: 'statblock', title: 'New Statblock', stats: [{ label: 'HP', value: '10' }] }; break;
+      case 'table': newBlock = { type: 'table', headers: ['Header 1', 'Header 2'], rows: [{ Header1: 'Data 1', Header2: 'Data 2' }] }; break;
+      default: return;
+    }
+    
+    const currentEntry = this.currentData();
+    if (!currentEntry) return;
+    
+    const newContent = currentEntry.content ? [...currentEntry.content, newBlock] : [newBlock];
+    this.updateCurrentEntryContent(newContent);
+  }
+
+  addSubEntry(name: string) {
+    if (!name) { alert('Please enter a name for the new entry.'); return; }
+    const formattedName = name.replace(/\s+/g, '_');
+    const newCodexState = JSON.parse(JSON.stringify(this.codex()));
+    let target = this.getNestedObject(newCodexState, this.selectedPath());
+    
+    if (target[formattedName]) { 
+      alert('An entry with this name already exists here.'); 
+      return; 
+    }
+    
+    target[formattedName] = { content: [] };
+    this.codex.set(newCodexState);
+  }
+
+  deleteCurrentEntry() {
+    const path = this.selectedPath();
+    if (path.length === 0) return;
+    
+    if (!confirm(`Are you sure you want to permanently delete '${this.formatKey(path[path.length - 1])}' and all its contents?`)) return;
+    
+    const newCodexState = JSON.parse(JSON.stringify(this.codex()));
+    const parentPath = path.slice(0, -1);
+    const keyToDelete = path[path.length - 1];
+    
+    if (parentPath.length === 0) {
+      // Deleting a top-level category
+      delete newCodexState[keyToDelete];
+    } else {
+      let parent = this.getNestedObject(newCodexState, parentPath);
+      delete parent[keyToDelete];
+    }
+    
+    this.codex.set(newCodexState);
+    this.selectedPath.set(parentPath);
+  }
+
+  deleteCategory(keyToDelete: string) {
+    if (this.isGeneratedSelected()) return; // Safety check
+    if (!confirm(`Are you sure you want to permanently delete the entire '${this.formatKey(keyToDelete)}' category and all of its contents? This action cannot be undone.`)) return;
+    const newCodexState = JSON.parse(JSON.stringify(this.codex()));
+    delete newCodexState[keyToDelete];
+    this.codex.set(newCodexState);
+    if (this.selectedPath()[0] === keyToDelete) {
+      this.selectedPath.set([]);
+    }
+  }
+
+  addStat(stats: any[]) { stats.push({ label: '', value: '' }); }
+  removeStat(stats: any[], index: number) { stats.splice(index, 1); }
+
+  async saveChanges() {
+    if (!this.db) { alert('Database connection lost.'); return; }
+    this.isLoading.set(true);
+    try {
+      const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, 'world_data');
+      await setDoc(docRef, this.codex());
+      this.isEditMode.set(false);
+      this.originalContent = null;
+    } catch (e: any) {
+      alert(`Error saving changes: ${e.message}`);
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
+  private updateCurrentEntryContent(newContent: any[]) {
+    const path = this.selectedPath();
+    const newCodexState = JSON.parse(JSON.stringify(this.codex()));
+    let target = this.getNestedObject(newCodexState, path);
+    target.content = newContent;
+    this.codex.set(newCodexState);
+  }
+
+  private getNestedObject(obj: any, path: string[]): any {
+    return path.reduce((acc: any, key: string) => {
+       if (!acc) return null;
+      if (Array.isArray(acc)) {
+        return acc.find(item => this.formatKey(item.name) === this.formatKey(key)) || null;
+      }
+      return acc[key] !== undefined ? acc[key] : null;
+    }, obj);
+  }
+
+  // --- HELPERS ---
+  getCaseInsensitiveProp(obj: any, key: string): any {
+    if (!obj || typeof obj !== 'object' || !key) return undefined;
+    const objKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+    return objKey ? obj[objKey] : undefined;
+  }
+  findEntityCaseInsensitive(entityId: string): Pf1eEntity | undefined {
+    if (!entityId) return undefined;
+    const cache = this.entitiesCache();
+    const cacheKey = Array.from(cache.keys()).find(k => k.toLowerCase() === entityId.toLowerCase());
+    return cacheKey ? cache.get(cacheKey) : undefined;
+  }
+  getAbilityModifier(score: any): string {
+    const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
+    if (isNaN(numScore)) return '+0';
+    const mod = Math.floor((numScore - 10) / 2);
+    return mod >= 0 ? `+${mod}` : `${mod}`;
+  }
+  hasContent = (data: any) => data?.content && Array.isArray(data.content);
+  formatKey = (key: string) => (key ? key.replace(/_/g, ' ') : '');
+  formatModifier(val: number | string | null | undefined): string {
+    if (val == null) return '-';
+    const num = Number(val);
+    if (isNaN(num)) return String(val);
+    if (num >= 0) return `+${num}`;
+    return String(num);
+  }
+  formatItemId = (id: string) => this.formatKey(id.replace(/^(feat_|sa_|cond_|equip_)/, ''));
+  objectKeys = (obj: any) => obj ? Object.keys(obj) : [];
+  
+  showTooltip(event: MouseEvent, itemId: string) {
+    let item: Pf1eRule | Pf1eEquipment | undefined;
+    let title = '';
+    let description = 'Item not found in cache.';
+    let status: 'loaded' | 'error' = 'error';
+    let fullDescription = '';
+
+    if (itemId.startsWith('equip_')) {
+        item = this.equipmentCache().get(itemId);
+        title = item?.name || this.formatItemId(itemId);
+        if (item) {
+          const equip = item as Pf1eEquipment;
+          fullDescription = `${equip.description}\nCost: ${equip.cost} | Weight: ${equip.weight}`;
+        }
+    } else {
+        item = this.rulesCache().get(itemId);
+        title = item?.name || this.formatItemId(itemId);
+        if (item) {
+            fullDescription = item.description;
+        }
+    }
+
+    if (item) {
+        description = fullDescription || 'No description found.';
+        status = 'loaded';
+    }
+
+    this.tooltipContent.set({ title, description, status });
+    this.tooltipPosition.set({ top: `${event.clientY + 15}px`, left: `${event.clientX + 15}px` });
+  }
+
+
+  hideTooltip() {
+    this.tooltipContent.set(null);
+  }
+}
+

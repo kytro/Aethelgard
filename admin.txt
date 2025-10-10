@@ -1,0 +1,2586 @@
+import { ChangeDetectionStrategy, Component, computed, effect, signal } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { FormsModule } from '@angular/forms';
+
+// --- FIREBASE IMPORTS ---
+import { initializeApp } from 'firebase/app';
+import { getAuth, Auth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, Firestore, doc, setDoc, onSnapshot, updateDoc, deleteField, writeBatch, getDocs, collection, addDoc, getDoc, where, query, arrayUnion, arrayRemove } from 'firebase/firestore';
+
+declare var JSZip: any;
+
+// --- TYPE INTERFACES ---
+interface LogEntry { message: string; isError: boolean; time: string; }
+interface Pf1eRule {
+  name: string;
+  type: 'feat' | 'condition' | 'spell_effect' | 'trait' | 'special_ability';
+  description: string;
+  effects: {
+    target: string;
+    value: number | string;
+    type: string;
+    condition?: string;
+    notes?: string;
+  }[];
+}
+interface Pf1eEntity {
+  name: string;
+  sourceCodexPath: string[];
+  baseStats: any;
+  rules: string[]; // Array of rule IDs from rules_pf1e
+  equipment?: string[];
+  magicItems?: string[];
+  spells?: { [key: string]: string[] }; // e.g., { "0": ["detect magic"], "1": ["magic missile"] }
+  deity?: string;
+}
+interface Pf1eSpell {
+  name: string;
+  school: string;
+  level: string;
+  castingTime: string;
+  components: string;
+  range: string;
+  target: string;
+  duration: string;
+  savingThrow: string;
+  spellResistance: string;
+  description: string;
+}
+interface Pf1eMagicItem {
+    name: string;
+    aura: string;
+    cl: number;
+    slot: string;
+    price: string;
+    weight: string;
+    description: string;
+    construction: { requirements: string; cost: string; };
+}
+interface Pf1eHazard {
+    name: string;
+    cr: number;
+    type: string;
+    trigger: string;
+    reset: string;
+    effect: string;
+    perception_dc: number;
+    disable_device_dc: number;
+}
+interface Pf1eDeity {
+    name: string;
+    alignment: string;
+    domains: string[];
+    favoredWeapon: string;
+    description: string;
+    rank?: 'major' | 'minor';
+}
+
+interface DuplicateContentSet {
+  id: string;
+  contentPreview: string;
+  paths: string[][];
+}
+interface DuplicateByNameSet {
+  id: string;
+  name: string;
+  docIds: string[];
+  collection: 'entities_pf1e' | 'rules_pf1e' | 'equipment_pf1e' | 'magic_items_pf1e' | 'spells_pf1e' | 'deities_pf1e' | 'hazards_pf1e';
+}
+
+
+// --- HELPER: Gemini API Call ---
+async function fetchFromGemini(apiKey: string, termName: string, type: 'codex-update' | 'codex-locate' | 'codex-create' | 'feat-rule' | 'pf1e-all-feats' | 'special-ability-rule' | 'condition-rule' | 'pf1e-all-conditions' | 'equipment-rule' | 'pf1e-all-equipment' | 'pf1e-extract-equipment' | 'spell-rule' | 'pf1e-all-spells' | 'magic-item-rule' | 'pf1e-all-magic-items' | 'hazard-rule' | 'pf1e-all-hazards' | 'deity-rule' | 'pf1e-all-deities' | 'pf1e-select-spells', options?: { codex?: any, debug?: boolean, batchSize?: number }): Promise<string> {
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+    let prompt = '';
+    const batchSize = options?.batchSize || 10;
+    switch(type) {
+        case 'codex-locate':
+            if (!options?.codex) return "No codex data provided for locating.";
+            prompt = `You are a data navigation assistant. Find the path to the most specific object that matches the user's request within the provided JSON codex. Return ONLY a JSON array of strings representing the path. Example: if user says 'update Captain Valerius', and he is at codex['People']['Solarran_Freehold']['Riftwatch']['Captain_Valerius'], return: ["People", "Solarran_Freehold", "Riftwatch", "Captain_Valerius"].\n\nUser Request: "${termName}"\n\nJSON Context:\n${JSON.stringify(options.codex)}`;
+            break;
+        case 'codex-create':
+            if (!options?.codex || !Array.isArray(options.codex)) return "No path provided for creation.";
+            const newEntryName = options.codex[options.codex.length - 1];
+            prompt = `You are a data creation assistant. Generate JSON content for a NEW codex entry named "${newEntryName}". If the request is just to create a container (like a 'folder' or 'category'), return an empty JSON object: \`{}\`. Otherwise, generate content following these structures: Heading: \`{"type": "heading", "text": "..."}\`, Paragraph: \`{"type": "paragraph", "text": "..."}\`, etc. Generate *only the JSON object for the new entry*. Do NOT wrap it in a key. User Request: "${termName}"`;
+            break;
+        case 'codex-update':
+            if (!options?.codex) return "No codex data provided for update.";
+            prompt = `You are a data management assistant. Apply the user's request to the given JSON object and return the *entire, complete, modified JSON object*. Do NOT return snippets or commentary. Adhere to content structures like Heading: \`{"type": "heading", "text": "..."}\`, Table rows need keys matching cleaned headers (e.g., header "Primary Deity" becomes key "PrimaryDeity").\n\nUser Request: "${termName}"\n\nCurrent JSON data:\n\`\`\`json\n${JSON.stringify(options.codex, null, 2)}\n\`\`\`\n\nReturn the complete, updated JSON object now.`;
+            break;
+        case 'feat-rule':
+            prompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object representing the mechanical effects of the feat: "${termName}". The response must be a single, valid JSON object with the following keys: "name", "type" (which should be "feat"), "description", and "effects". The "effects" key must be an array of objects, where each object has "target" (e.g., "attackRoll"), "value" (a number or string), "type" (e.g., "penalty"), and an optional "condition" string. IMPORTANT: Numeric values must be standard JSON numbers (e.g., 4, -2) and must not be prefixed with a '+' sign. Example for "Dodge": {"name": "Dodge", "type": "feat", "description": "You are adept at dodging blows.", "effects": [{"target": "AC", "value": 1, "type": "dodge"}]}`;
+            break;
+        case 'special-ability-rule':
+            prompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object representing the mechanical effects of the special ability: "${termName}". This could be a supernatural (Su), spell-like (Sp), or extraordinary (Ex) ability. The response must be a single, valid JSON object with "name", "type" (use "special_ability"), "description", and an "effects" array. The "effects" array should detail any numerical modifiers to rolls or stats. If there are no direct numerical effects (e.g., Darkvision), return an empty "effects" array. IMPORTANT: Numeric values must be standard JSON numbers (e.g., 4, -2) and must not be prefixed with a '+' sign. Example for Rend: {"name": "Rend", "type": "special_ability", "description": "If a creature with rend hits with two or more natural attacks in 1 round, it can rend its opponent.", "effects": [{"target": "damageRoll", "value": "1d6+1.5*Str", "type": "untyped", "notes": "This damage is in addition to the normal damage from the natural attacks."}]}`;
+            break;
+        case 'condition-rule':
+            prompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object representing the mechanical effects of the condition: "${termName}". The response must be a single, valid JSON object with "name", "type" (use "condition"), "description", and an "effects" array. The "effects" array should detail any numerical modifiers to rolls or stats. IMPORTANT: Numeric values must be standard JSON numbers (e.g., 4, -2) and must not be prefixed with a '+' sign. Example for Shaken: {"name": "Shaken", "type": "condition", "description": "A shaken character takes a –2 penalty on attack rolls, saving throws, skill checks, and ability checks.", "effects": [{"target": "attackRoll", "value": -2, "type": "penalty"}, {"target": "savingThrow", "value": -2, "type": "penalty"}, {"target": "skillCheck", "value": -2, "type": "penalty"}, {"target": "abilityCheck", "value": -2, "type": "penalty"}]}`;
+            break;
+        case 'equipment-rule':
+            prompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object for the equipment item: "${termName}". The response must be a single, valid JSON object with "name", "type" (e.g., "weapon", "armor", "adventuring_gear"), "description", "cost", "weight", and an optional "properties" object for mechanical data (like damage, critical, armor bonus, etc.). Example for Longsword: {"name": "Longsword", "type": "weapon", "description": "...", "cost": "15 gp", "weight": "4 lbs.", "properties": {"damage_s": "1d6", "damage_m": "1d8", "critical": "19-20/x2", "type": "slashing"}}`;
+            break;
+        case 'pf1e-extract-equipment':
+            prompt = `You are a Pathfinder 1st Edition rules expert. Analyze the following text and extract a list of equipment items. Return the data as a single, valid JSON array of strings. Only include the names of the items. If no equipment is found, return an empty JSON array: []. Example Input: "He carries masterwork artisan's tools, a dagger, and various intricate trinkets and puzzles." Example Output: ["masterwork artisan's tools", "dagger", "intricate trinkets", "puzzles"]. Text to analyze: "${termName}"`;
+            break;
+        case 'pf1e-all-equipment':
+            const existingEquipment = (options?.codex as string[] || []);
+            prompt = `You are a Pathfinder 1st Edition rules expert. Provide a list of up to ${batchSize} official equipment items from the Pathfinder Core Rulebook that are NOT in the provided JSON array. The response must be a single, clean JSON array of FULL equipment objects, not just names. Each object must follow the structure: {"name": string, "type": string, "description": string, "cost": string, "weight": string, "properties": object}. If no more items are found, return an empty JSON array: [].\n\nExisting item names:\n${JSON.stringify(existingEquipment)}`;
+            break;
+        case 'spell-rule':
+            prompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object for the spell: "${termName}". The response must be a single, valid JSON object with the keys: "name", "school", "level", "castingTime", "components", "range", "target", "duration", "savingThrow", "spellResistance", "description".`;
+            break;
+        case 'pf1e-all-spells':
+            const existingSpells = (options?.codex as string[] || []);
+            prompt = `You are a Pathfinder 1st Edition rules expert. Provide a list of up to ${batchSize} official spells from the Pathfinder Core Rulebook (0-9 level) that are NOT in the provided JSON array. The response must be a single, clean JSON array of FULL spell objects, not just names. Each object must follow the structure: {"name": string, "school": string, "level": string, ...}. If no more spells are found, return an empty JSON array: [].\n\nExisting spell names:\n${JSON.stringify(existingSpells)}`;
+            break;
+        case 'magic-item-rule':
+             prompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object for the magic item: "${termName}". The response must be a single, valid JSON object with the keys: "name", "aura", "cl", "slot", "price", "weight", "description", and "construction" (which is an object with "requirements" and "cost").`;
+            break;
+        case 'pf1e-all-magic-items':
+            const existingMagicItems = (options?.codex as string[] || []);
+            prompt = `You are a Pathfinder 1st Edition rules expert. Provide a list of up to ${batchSize} official magic items from the Pathfinder Core Rulebook that are NOT in the provided JSON array. The response must be a single, clean JSON array of FULL magic item objects, not just names. Each object must follow the structure: {"name": string, "aura": string, "cl": number, ...}. If no more items are found, return an empty JSON array: [].\n\nExisting item names:\n${JSON.stringify(existingMagicItems)}`;
+            break;
+        case 'hazard-rule':
+             prompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object for the trap or hazard: "${termName}". The response must be a single, valid JSON object with the keys: "name", "cr", "type", "trigger", "reset", "effect", "perception_dc", and "disable_device_dc".`;
+            break;
+        case 'pf1e-all-hazards':
+            const existingHazards = (options?.codex as string[] || []);
+            prompt = `You are a Pathfinder 1st Edition rules expert. Provide a list of up to ${batchSize} common traps or hazards from the Pathfinder Core Rulebook that are NOT in the provided JSON array. The response must be a single, clean JSON array of FULL hazard objects, not just names. Each object must follow the structure: {"name": string, "cr": number, "type": string, ...}. If no more hazards are found, return an empty JSON array: [].\n\nExisting hazard names:\n${JSON.stringify(existingHazards)}`;
+            break;
+        case 'deity-rule':
+             prompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object for the deity: "${termName}". The response must be a single, valid JSON object with the keys: "name", "alignment", "domains" (an array of strings), "favoredWeapon", "description", and "rank" (either "major" or "minor").`;
+            break;
+        case 'pf1e-all-deities':
+            const existingDeities = (options?.codex as string[] || []);
+            prompt = `You are a Pathfinder 1st Edition rules expert. Provide a list of up to ${batchSize} core and minor deities from the Pathfinder setting that are NOT in the provided JSON array. The response must be a single, clean JSON array of FULL deity objects, not just names. Each object must follow the structure: {"name": string, "alignment": string, "domains": string[], ...}. If no more deities are found, return an empty JSON array: [].\n\nExisting deity names:\n${JSON.stringify(existingDeities)}`;
+            break;
+        case 'pf1e-select-spells':
+            const spellSelectionContext = options?.codex as any;
+            prompt = `You are a Pathfinder 1st Edition Game Master. For a ${spellSelectionContext.casterClass} of level ${spellSelectionContext.casterLevel} with a casting score of ${spellSelectionContext.castingScore}, select a thematic and effective list of prepared spells for one day.
+            - You must select from the provided list of available spells only.
+            - You must select exactly the number of spells specified for each spell level.
+            - Return your selection as a single, valid JSON object where keys are the spell levels (e.g., "0", "1", "2") and values are arrays of the chosen spell names.
+            
+            Spells to select per level: ${JSON.stringify(spellSelectionContext.slotsToFill)}
+            Available spells: ${JSON.stringify(spellSelectionContext.availableSpells)}
+            `;
+            break;
+        case 'pf1e-all-feats':
+            const existingFeats = (options?.codex as string[] || []);
+            prompt = `You are a Pathfinder 1st Edition rules expert. Your task is to provide a list of up to ${batchSize} official feats from the Pathfinder Core Rulebook that are NOT included in the provided JSON array. The response must be a single, clean JSON array of FULL feat objects, not just names. Each object must follow the structure: {"name": string, "type": "feat", "description": string, "effects": [...]}. If no more feats are found, return an empty JSON array: [].\n\nExisting feat names:\n${JSON.stringify(existingFeats)}`;
+            break;
+        case 'pf1e-all-conditions':
+             prompt = `You are a Pathfinder 1st Edition rules expert. Provide a comprehensive list of all official conditions from the Pathfinder Core Rulebook (e.g., Blinded, Grappled, Prone). The response must be a single, clean JSON array of strings. Example: ["Blinded", "Confused", "Cowering", ...]`;
+            break;
+    }
+    const maxRetries = 3; let delay = 1000;
+    for (let i = 0; i < maxRetries; i++) {
+        try {
+            const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }) });
+            if (response.status === 503 || response.status === 429) {
+                if (i === maxRetries - 1) throw new Error(`API failed after retries with status ${response.status}.`);
+                await new Promise(res => setTimeout(res, delay)); delay *= 2; continue;
+            }
+            if (!response.ok) { const err = await response.text(); throw new Error(`API failed with status ${response.status}: ${err}`); }
+            const result = await response.json(); const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) throw new Error(`API returned an empty response.`);
+            return text;
+        } catch (error) {
+            if (i < maxRetries - 1) { await new Promise(res => setTimeout(res, delay)); delay *= 2; } 
+            else { console.error("Error fetching from Gemini API:", error); throw error; }
+        }
+    }
+    throw new Error("API call failed after all retries.");
+}
+
+// --- HELPER FUNCTIONS ---
+function processFirestoreData(data: any): any {
+    if (Array.isArray(data)) return data.map(item => processFirestoreData(item));
+    if (data !== null && typeof data === 'object') {
+        const newData: { [key: string]: any } = {};
+        for (const key in data) {
+            if (key === 'content' && Array.isArray(data[key])) {
+                newData[key] = data[key].map((block: any) => {
+                    if (block.type === 'table' && Array.isArray(block.rows)) {
+                        const newRows = block.rows.map((row: any) => {
+                            if (Array.isArray(row)) {
+                                const rowObj: { [key: string]: any } = {};
+                                (block.headers || []).forEach((h: string, i: number) => { rowObj[h.replace(/\s+/g, '')] = row[i] ?? null; });
+                                return rowObj;
+                            }
+                            return row;
+                        });
+                        return { ...block, rows: newRows };
+                    }
+                    return block;
+                });
+            } else newData[key] = processFirestoreData(data[key]);
+        }
+        return newData;
+    }
+    return data;
+}
+
+/** Merge freshly-parsed stats into an existing baseStats object. */
+function mergeBaseStats(
+  fresh: Record<string, any>,   // what the parser just found
+  old:   Record<string, any>    // what is already in Firestore
+): Record<string, any> {
+  // Start with the old stats as a base, then overwrite with all fresh data.
+  // This ensures all newly parsed or calculated fields (saves, combat, ac, hp, abilities) are updated.
+  const out = { ...old, ...fresh };
+
+  // As a final safety net, ensure the six core abilities always exist, defaulting to 10 if missing.
+  for (const a of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']) {
+    if (out[a] === undefined) {
+      out[a] = 10;
+    }
+  }
+  return out;
+}
+
+// --- CONSTANTS: PF1e Rules ---
+const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17];
+const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
+
+const CASTER_CLASSES: { [key: string]: { type: 'prepared' | 'spontaneous', stat: 'Int' | 'Wis' | 'Cha', progression: number[][] } } = {
+    'wizard': { type: 'prepared', stat: 'Int', progression: [ [4, 2, 0, 0, 0, 0, 0, 0, 0, 0], [4, 3, 0, 0, 0, 0, 0, 0, 0, 0], [4, 3, 2, 0, 0, 0, 0, 0, 0, 0], [4, 4, 3, 0, 0, 0, 0, 0, 0, 0], [4, 4, 3, 2, 0, 0, 0, 0, 0, 0], [4, 4, 4, 3, 0, 0, 0, 0, 0, 0], [4, 4, 4, 3, 2, 0, 0, 0, 0, 0], [4, 4, 4, 4, 3, 0, 0, 0, 0, 0], [4, 4, 4, 4, 3, 2, 0, 0, 0, 0], [4, 4, 4, 4, 4, 3, 0, 0, 0, 0], [4, 4, 4, 4, 4, 3, 2, 0, 0, 0], [4, 4, 4, 4, 4, 4, 3, 0, 0, 0], [4, 4, 4, 4, 4, 4, 3, 2, 0, 0], [4, 4, 4, 4, 4, 4, 4, 3, 0, 0], [4, 4, 4, 4, 4, 4, 4, 3, 2, 0], [4, 4, 4, 4, 4, 4, 4, 4, 3, 0], [4, 4, 4, 4, 4, 4, 4, 4, 3, 2], [4, 4, 4, 4, 4, 4, 4, 4, 4, 3], [4, 4, 4, 4, 4, 4, 4, 4, 4, 4], [4, 4, 4, 4, 4, 4, 4, 4, 4, 4] ] },
+    'cleric': { type: 'prepared', stat: 'Wis', progression: [ [3, 2, 0, 0, 0, 0, 0, 0, 0, 0], [4, 3, 0, 0, 0, 0, 0, 0, 0, 0], [4, 3, 2, 0, 0, 0, 0, 0, 0, 0], [5, 4, 3, 0, 0, 0, 0, 0, 0, 0], [5, 4, 3, 2, 0, 0, 0, 0, 0, 0], [6, 4, 4, 3, 0, 0, 0, 0, 0, 0], [6, 5, 4, 3, 2, 0, 0, 0, 0, 0], [6, 5, 4, 4, 3, 0, 0, 0, 0, 0], [6, 5, 5, 4, 3, 2, 0, 0, 0, 0], [6, 5, 5, 4, 4, 3, 0, 0, 0, 0], [6, 6, 5, 5, 4, 3, 2, 0, 0, 0], [6, 6, 5, 5, 4, 4, 3, 0, 0, 0], [6, 6, 6, 5, 5, 4, 3, 2, 0, 0], [6, 6, 6, 5, 5, 4, 4, 3, 0, 0], [6, 6, 6, 6, 5, 5, 4, 3, 2, 0], [6, 6, 6, 6, 5, 5, 4, 4, 3, 0], [6, 6, 6, 6, 6, 5, 5, 4, 3, 2], [6, 6, 6, 6, 6, 5, 5, 4, 4, 3], [6, 6, 6, 6, 6, 6, 5, 5, 5, 4], [6, 6, 6, 6, 6, 6, 6, 6, 6, 6] ] },
+};
+
+// --- HELPER: Stat Calculation ---
+const getAbilityModifierAsNumber = (score: any): number => {
+    const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
+    if (isNaN(numScore)) return 0;
+    return Math.floor((numScore - 10) / 2);
+};
+
+const isLeafNode = (data: any): boolean => {
+  if (!data || typeof data !== 'object') return false;
+  const keys = Object.keys(data);
+  const hasContent = keys.includes('content') && Array.isArray(data.content);
+  const hasSubCategories = keys.some(
+    k => !['content', 'category', 'summary'].includes(k) &&
+         typeof data[k] === 'object' &&
+         !Array.isArray(data[k])
+  );
+  return hasContent && !hasSubCategories; 
+};
+
+const parseStatBlockToEntity = (statBlock: any, name: string, path: string[], content: any[] = []): { baseStats: any, featNames: string[], specialAbilityNames: string[], equipmentNames: string[], spellNames: string[], deityName: string | null } => {
+    const statsArray = statBlock.stats || [];
+    const statsMap = new Map<string, string>();
+    statsArray.forEach((stat: { label: string, value: string }) => {
+        if (stat.label) {
+            statsMap.set(stat.label.trim().toLowerCase(), String(stat.value));
+        }
+    });
+    const getStat = (key: string): string | undefined => statsMap.get(key.trim().toLowerCase());
+    const cleanHeader = (h: string) => typeof h !== 'string' ? '' : h.replace(/[^a-zA-Z0-9]/g, '');
+
+    let baseStats: any = {};
+    const featNames: string[] = [];
+    const specialAbilityNames: string[] = [];
+    const equipmentNames: string[] = [];
+    const spellNames: string[] = [];
+    let deityName: string | null = null;
+
+    // --- Ability Scores (REVISED PARSING LOGIC) ---
+    const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+    const abilityVariations: { [key: string]: string[] } = {
+      'Str': ['str', 'strength'],
+      'Dex': ['dex', 'dexterity'],
+      'Con': ['con', 'constitution'],
+      'Int': ['int', 'intelligence'],
+      'Wis': ['wis', 'wisdom'],
+      'Cha': ['cha', 'charisma']
+    };
+
+    // Attempt 1: Parse from a single "Ability Scores" string, which is common.
+    const abilityString = getStat('ability scores');
+    if (abilityString) {
+      abilities.forEach(ab => {
+        const variationsRegex = `(?:${abilityVariations[ab].join('|')})`;
+        const match = abilityString.match(
+          new RegExp(`${variationsRegex}\\s*[:—-]?\\s*(-?\\d+)`, 'i')
+        );
+        if (match) {
+          baseStats[ab] = parseInt(match[1], 10);
+        }
+      });
+    }
+
+    // Attempt 2: Check for individual stats by full name ("Strength", etc.)
+    abilities.forEach(ab => {
+      if (baseStats[ab] === undefined) {
+        for (const variation of abilityVariations[ab]) {
+          const individualStat = getStat(variation);
+          if (individualStat) {
+            const statValueMatch = String(individualStat).match(/-?\d+/);
+            if (statValueMatch) {
+              baseStats[ab] = parseInt(statValueMatch[0], 10);
+              break;
+            }
+          }
+        }
+      }
+    });
+
+    // Attempt 3: Handle Firestore-style rows with "STR", "DEX", etc.
+    abilities.forEach(ab => {
+      if (baseStats[ab] === undefined) {
+        const statValue = getStat(ab); // directly look up "str", "dex" row labels
+        if (statValue) {
+          const statValueMatch = String(statValue).match(/-?\d+/);
+          if (statValueMatch) {
+            baseStats[ab] = parseInt(statValueMatch[0], 10);
+          }
+        }
+      }
+    });
+
+    // Attempt 4: Parse ability scores from a table in the main content. This handles "Manual Statblocks".
+    const abilityScoreTables = (content || []).filter((b: any) => {
+        if (b.type !== 'table') return false;
+        
+        // Check 1: Title contains "ability score" or "statistics"
+        if (b.title && (b.title.toLowerCase().includes('ability score') || b.title.toLowerCase().includes('statistic'))) {
+            return true;
+        }
+
+        // Check 2: Headers suggest an ability score table
+        if (Array.isArray(b.headers)) {
+            const lowerHeaders = b.headers.map((h: string) => (h || '').toLowerCase());
+            
+            // Format: ['Ability', 'Score']
+            const hasAbilityAndScore = lowerHeaders.includes('ability') && lowerHeaders.includes('score');
+            if (hasAbilityAndScore) return true;
+
+            // Format: ['STR', 'DEX', 'CON', ...]
+            const coreAbilitiesInHeaders = lowerHeaders.filter(h => ['str', 'dex', 'con', 'int', 'wis', 'cha'].includes(h));
+            if (coreAbilitiesInHeaders.length >= 2) { // Heuristic: if at least 2 core abilities are headers, it's likely an ability table.
+                 return true;
+            }
+        }
+        
+        return false;
+    });
+
+
+    abilityScoreTables.forEach(table => {
+        (table.rows || []).forEach((row: any) => {
+            if (typeof row !== 'object' || row === null) return;
+            
+            // Find the keys for ability and score, case-insensitive.
+            const abilityKey = Object.keys(row).find(k => k.toLowerCase() === 'ability');
+            const scoreKey = Object.keys(row).find(k => k.toLowerCase() === 'score');
+            
+            // Format 1: { "Ability": "STR", "Score": "12" }
+            if (abilityKey && scoreKey) {
+                const abilityName = String(row[abilityKey]).toLowerCase();
+                const scoreValue = row[scoreKey];
+                abilities.forEach(ab => {
+                    if (baseStats[ab] === undefined && abilityVariations[ab].includes(abilityName)) {
+                        const scoreMatch = String(scoreValue).match(/-?\d+/);
+                        if (scoreMatch) {
+                            baseStats[ab] = parseInt(scoreMatch[0], 10);
+                        }
+                    }
+                });
+            } 
+            // Format 2: Keys are the ability names themselves, e.g., { "STR": "12" }
+            else {
+                for (const key in row) {
+                    const lowerKey = key.toLowerCase();
+                    abilities.forEach(ab => {
+                        if (baseStats[ab] === undefined && abilityVariations[ab].includes(lowerKey)) {
+                            const scoreMatch = String(row[key]).match(/-?\d+/);
+                            if (scoreMatch) {
+                                baseStats[ab] = parseInt(scoreMatch[0], 10);
+                            }
+                        }
+                    });
+                }
+            }
+        });
+    });
+
+    // Attempt 5: Scan all text-based content blocks for ability scores as a last resort.
+    if (Object.keys(baseStats).length < 6) {
+        // Broaden search beyond just paragraphs to any block with a text property.
+        const textBlocks = (content || []).filter((b: any) => b.text && typeof b.text === 'string');
+        if (textBlocks.length > 0) {
+            const allText = textBlocks.map((b: any) => b.text).join('\n');
+            abilities.forEach(ab => {
+                if (baseStats[ab] === undefined) {
+                    const variationsRegex = `(?:${abilityVariations[ab].join('|')})`;
+                    // This regex looks for things like "STR:12", "Strength 14", "DEX - 10"
+                    const match = allText.match(
+                      new RegExp(`(?:^|\\s)${variationsRegex}\\s*[:—-]?\\s*(-?\\d+)`, 'im')
+                    );
+                    if (match) {
+                      baseStats[ab] = parseInt(match[1], 10);
+                    }
+                }
+            });
+        }
+    }
+
+    // --- AC ---
+    const ac: any = {};
+    const acString = getStat('AC') || getStat('Armor Class') || '';
+    const totalACMatch = acString.match(/^(\d+)/);
+    ac.total = totalACMatch ? parseInt(totalACMatch[1], 10) : 10;
+    const touchACMatch = acString.match(/touch\s*(\d+)/);
+    ac.touch = touchACMatch ? parseInt(touchACMatch[1], 10) : ac.total;
+    const ffACMatch = acString.match(/flat-footed\s*(\d+)/);
+    ac.flatFooted = ffACMatch ? parseInt(ffACMatch[1], 10) : ac.total;
+    baseStats.armorClass = ac;
+
+    // HP
+    baseStats.hp = getStat('hp') || 0;
+
+    // --- Saves & Combat Stats (with calculation fallbacks) ---
+    const saves: any = {};
+    const combat: any = { bab: null, cmb: null, cmd: null };
+
+    // Check for explicit overrides in the statblock first
+    const saveString = getStat('Saves');
+    const babString = getStat('Base Atk');
+    const cmbString = getStat('CMB');
+    const cmdString = getStat('CMD');
+
+    if (saveString) {
+        saves.fortitude = parseInt(saveString.match(/Fort\s*([+-]?\d+)/)?.[1] || '0', 10);
+        saves.reflex = parseInt(saveString.match(/Ref\s*([+-]?\d+)/)?.[1] || '0', 10);
+        saves.will = parseInt(saveString.match(/Will\s*([+-]?\d+)/)?.[1] || '0', 10);
+    }
+    if (babString) {
+        combat.bab = parseInt(babString.match(/[+-]?\d+/)?.[0] || '0', 10);
+    }
+    if (cmbString) {
+        combat.cmb = cmbString;
+    }
+    if (cmdString) {
+        combat.cmd = cmdString;
+    }
+    
+    // If overrides are missing, calculate the values
+    const strMod = getAbilityModifierAsNumber(baseStats.Str);
+    const dexMod = getAbilityModifierAsNumber(baseStats.Dex);
+    const conMod = getAbilityModifierAsNumber(baseStats.Con);
+    const wisMod = getAbilityModifierAsNumber(baseStats.Wis);
+
+    const crString = getStat('cr') || '1';
+    let level = 1;
+    if (crString.includes('/')) {
+        const parts = crString.split('/');
+        level = parseInt(parts[0], 10) / parseInt(parts[1], 10);
+    } else {
+        level = parseInt(crString, 10);
+    }
+    if (isNaN(level) || level < 1) level = 1;
+    const levelInt = Math.floor(level);
+
+    // Calculate Saves if not found
+    if (!saveString) {
+        const isFortGood = baseStats.Con >= 14 || (baseStats.Con >= baseStats.Dex && baseStats.Con >= baseStats.Wis);
+        const isRefGood = baseStats.Dex >= 14 || (baseStats.Dex >= baseStats.Con && baseStats.Dex >= baseStats.Wis);
+        const isWillGood = baseStats.Wis >= 14 || (baseStats.Wis >= baseStats.Con && baseStats.Wis >= baseStats.Dex);
+        
+        const safeLevelIndex = Math.max(0, Math.min(levelInt - 1, GOOD_SAVES.length - 1));
+        
+        saves.fortitude = (isFortGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + conMod;
+        saves.reflex = (isRefGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + dexMod;
+        saves.will = (isWillGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + wisMod;
+    }
+    
+    // Calculate Combat stats if not found
+    if (combat.bab === null) {
+        combat.bab = levelInt;
+    }
+    if (combat.cmb === null && combat.bab !== null) {
+        combat.cmb = combat.bab + strMod;
+    }
+    if (combat.cmd === null && combat.bab !== null) {
+        combat.cmd = 10 + combat.bab + strMod + dexMod;
+    }
+
+    baseStats.saves = saves;
+    baseStats.combat = combat;
+    
+    // --- Skills ---
+    const skills: { [key: string]: number } = {};
+    let skillsString = getStat('Skills');
+
+    // Check if skills are appended to the feats line
+    const featsValueForSkills = getStat('Feats');
+    if (featsValueForSkills) {
+        const parts = featsValueForSkills.split(/\s*;\s*Skills|\s*Skills:/i);
+        if (parts.length > 1) {
+            const skillsPart = parts[1];
+            skillsString = skillsString ? `${skillsString}, ${skillsPart}` : skillsPart;
+        }
+    }
+
+    if (skillsString) {
+        const skillEntries = skillsString.split(',');
+        skillEntries.forEach(entry => {
+            const match = entry.trim().match(/^(.*?)\s*([+-]\d+)/);
+            if (match) {
+                const skillName = match[1].trim();
+                const skillValue = parseInt(match[2], 10);
+                if (skillName && !isNaN(skillValue)) {
+                    skills[skillName] = skillValue;
+                }
+            }
+        });
+    }
+    
+    // --- Skills from Tables ---
+    const skillTables = (content || []).filter((b: any) => {
+        if (b.type !== 'table' || !Array.isArray(b.headers)) return false;
+        const lowerCaseHeaders = b.headers.map((h: string) => (h || '').toLowerCase());
+        const hasSkillHeader = lowerCaseHeaders.includes('skill');
+        const hasBonusHeader = lowerCaseHeaders.includes('bonus') || lowerCaseHeaders.includes('total');
+        return hasSkillHeader && hasBonusHeader;
+    });
+
+    skillTables.forEach((table: any) => {
+        const skillHeader = table.headers.find((h: string) => (h || '').toLowerCase() === 'skill');
+        const bonusHeader = table.headers.find((h: string) => (h || '').toLowerCase() === 'bonus' || (h || '').toLowerCase() === 'total');
+        
+        if (skillHeader && bonusHeader) {
+            const skillKey = cleanHeader(skillHeader);
+            const bonusKey = cleanHeader(bonusHeader);
+
+            (table.rows || []).forEach((row: any) => {
+                const skillName = row[skillKey];
+                const skillValueText = String(row[bonusKey] || '');
+                const skillValueMatch = skillValueText.match(/[+-]?\d+/);
+                if (skillName && skillValueMatch) {
+                    const skillValue = parseInt(skillValueMatch[0], 10);
+                    if (!isNaN(skillValue)) {
+                       skills[skillName.trim()] = skillValue;
+                    }
+                }
+            });
+        }
+    });
+
+    baseStats.skills = skills;
+    
+    // Feats
+    const allFeatStrings: string[] = [];
+    statsMap.forEach((value, key) => {
+        if (key.toLowerCase().includes('feat')) {
+            allFeatStrings.push(value);
+        }
+    });
+    const featsValue = allFeatStrings.join(', ');
+    
+    if (featsValue) {
+        let featsOnlyString = featsValue.split(/\s*;\s*Skills|\s*Skills:/i)[0];
+        featsOnlyString = featsOnlyString.replace(/^Feats\s+/i, '').trim();
+        const potentialFeats = featsOnlyString.split(/[;,]/);
+        const actualFeats = potentialFeats
+            .map(f => f.replace(/\s*\([^)]+\)\s*$/, '').trim().replace(/[.,;]$/, '').trim())
+            .filter(f => f && !/\s+[+-]?\d+$/.test(f));
+        featNames.push(...actualFeats);
+    }
+
+    // Equipment
+    const equipmentString = getStat('Equipment') || getStat('Gear');
+    if (equipmentString) {
+        equipmentNames.push(...equipmentString.split(',').map(e => e.trim()));
+    }
+
+    // Equipment from tables
+    const equipmentTables = (content || []).filter((b: any) => {
+        if (b.type !== 'table' || !Array.isArray(b.headers)) return false;
+        const lowerCaseHeaders = b.headers.map((h: string) => (h || '').toLowerCase());
+        return lowerCaseHeaders.includes('item') || lowerCaseHeaders.includes('equipment') || lowerCaseHeaders.includes('gear');
+    });
+
+    equipmentTables.forEach((table: any) => {
+        const itemHeader = table.headers.find((h: string) => {
+            const lowerH = (h || '').toLowerCase();
+            return lowerH === 'item' || lowerH === 'equipment' || lowerH === 'gear' || lowerH === 'name';
+        });
+        if (itemHeader) {
+            const itemKey = cleanHeader(itemHeader);
+            const itemsFromTable = (table.rows || []).map((r: any) => r[itemKey]).filter(Boolean);
+            equipmentNames.push(...itemsFromTable);
+        }
+    });
+    
+    // Feats from tables
+    const featTables = (content || []).filter((b: any) => {
+        if (b.type !== 'table' || !Array.isArray(b.headers)) return false;
+        const lowerCaseTitle = (b.title || '').toLowerCase();
+        const lowerCaseHeaders = b.headers.map((h: string) => (h || '').toLowerCase());
+        if (lowerCaseTitle.includes('feat')) return true;
+        const hasNameHeader = lowerCaseHeaders.includes('name');
+        const hasFeatLikeHeader = lowerCaseHeaders.includes('prerequisite') || lowerCaseHeaders.includes('prerequisites') || lowerCaseHeaders.includes('benefit');
+        return hasNameHeader && hasFeatLikeHeader;
+    });
+    
+    const stripFeatModifiers = (f: string) => typeof f !== 'string' ? '' : f.replace(/\s*\([^)]+\)\s*$/, '').trim();
+
+    featTables.forEach((table: any) => {
+        const nameHeader = (table.headers || []).find((h: string) => {
+            const lowerH = (h || '').toLowerCase();
+            return lowerH === 'name' || lowerH === 'feat';
+        });
+        if (nameHeader) {
+            const nameKey = cleanHeader(nameHeader);
+            const featsFromTable = (table.rows || [])
+                .map((r: any) => stripFeatModifiers(r[nameKey]))
+                .filter(Boolean)
+                .filter(f => !/\s+[+-]?\d+$/.test(f.trim()));
+            featNames.push(...featsFromTable);
+        }
+    });
+    
+    // Special Abilities
+    const specialAbilityFields = ['Special Attacks', 'Special Qualities', 'Spell-Like Abilities'];
+    specialAbilityFields.forEach(field => {
+        const fieldValue = getStat(field);
+        if (fieldValue) {
+            const abilities = fieldValue.split(',').map(a => a.trim());
+            abilities.forEach(ability => {
+                const cleanedAbility = ability.replace(/(\d+\/day—|\d+\/week—|\d+\/month—|at will—)/i, '').split('(')[0].trim();
+                if (cleanedAbility) {
+                    specialAbilityNames.push(cleanedAbility);
+                }
+            });
+        }
+    });
+    
+    // Spells
+    const spellFields = ['spells prepared', 'spells known', 'spell-like abilities'];
+    spellFields.forEach(field => {
+        const spellString = getStat(field);
+        if (spellString) {
+            const spells = spellString.split(/[;,]/).map(s => s.replace(/\(.*\)/, '').trim());
+            spellNames.push(...spells.filter(Boolean));
+        }
+    });
+
+    // Deity
+    const deityString = getStat('deity') || getStat('religion');
+    if (deityString) {
+        deityName = deityString.trim();
+    }
+
+  /* ----  ALWAYS return canonical keys  ----  */
+  baseStats = normaliseAbilityKeys(baseStats);
+  return { baseStats, featNames: [...new Set(featNames)], specialAbilityNames, equipmentNames: [...new Set(equipmentNames)], spellNames: [...new Set(spellNames)], deityName };
+};
+
+/* Canonicalise ability keys and default missing ones to 10  */
+const normaliseAbilityKeys = (stats: any): any => {
+  const canon: Record<string, string> = {
+    strength: 'Str', str: 'Str',
+    dexterity: 'Dex', dex: 'Dex',
+    constitution: 'Con', con: 'Con',
+    intelligence: 'Int', int: 'Int',
+    wisdom: 'Wis', wis: 'Wis',
+    charisma: 'Cha', cha: 'Cha',
+  };
+  const out: any = {};
+  /* copy / rename abilities  */
+  for (const [k, v] of Object.entries(stats ?? {})) {
+    const key = canon[k.toLowerCase()] ?? k;
+    out[key] = v;
+  }
+  return out;
+};
+
+@Component({
+  selector: 'app-root',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <div class="bg-gray-900 text-gray-200 font-sans flex h-screen overflow-hidden">
+        <main class="flex-1 overflow-y-auto p-6">
+          @if(!isAuthReady()) {
+            <div class="flex items-center justify-center h-full text-white">Loading & Authenticating with your Firebase...</div>
+          } @else {
+              <div id="admin-panel">
+                  <h2 class="text-3xl font-bold text-white mb-4 text-yellow-500">Codex Admin Panel</h2>
+                  <p class="text-sm font-mono text-gray-500 mb-6">Codex Database Path: artifacts/{{codexAppId}}/public/data/codex/world_data</p>
+                  
+                  <div class="flex space-x-2 border-b border-gray-700 mb-6">
+                      <button (click)="activeAdminTab.set('load')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeAdminTab() === 'load', 'text-gray-400': activeAdminTab() !== 'load'}">Load Data</button>
+                      <button (click)="activeAdminTab.set('ai')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeAdminTab() === 'ai', 'text-gray-400': activeAdminTab() !== 'ai'}">AI Assistant</button>
+                      <button (click)="activeAdminTab.set('integrity')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeAdminTab() === 'integrity', 'text-gray-400': activeAdminTab() !== 'integrity'}">Data Integrity</button>
+                      <button (click)="activeAdminTab.set('backup')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-yellow-500': activeAdminTab() === 'backup', 'text-gray-400': activeAdminTab() !== 'backup'}">Backup/Restore</button>
+                      <button (click)="activeAdminTab.set('danger')" class="px-4 py-2 text-lg font-semibold rounded-t-md" [ngClass]="{'bg-gray-800/50 text-red-500': activeAdminTab() === 'danger', 'text-gray-400': activeAdminTab() !== 'danger'}">Danger Zone</button>
+                  </div>
+
+                  <div>
+                    @if(activeAdminTab() === 'load') {
+                      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                          <h3 class="text-xl font-semibold text-white mb-3">Load Data from Google Drive</h3>
+                          <p class="text-gray-400 mb-4 -mt-2">Paste a public 'Anyone with the link can view' Google Docs share URL containing your JSON data.</p>
+                          <div class="flex items-center space-x-2">
+                              <input type="text" [(ngModel)]="gdriveUrl" placeholder="https://docs.google.com/document/d/..." class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500" [disabled]="isLoadingAdminAction()" />
+                              <button (click)="handleLoadData()" [disabled]="isLoadingAdminAction()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-600 w-40">
+                                {{ isLoadingAdminAction() ? "Loading..." : "Load Data File" }}
+                              </button>
+                          </div>
+                      </div>
+                    }
+                    @if(activeAdminTab() === 'ai') {
+                      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                          <h3 class="text-xl font-semibold text-white mb-3">AI Assistant Configuration</h3>
+                           <p class="text-gray-400 mb-4 -mt-2">Enter your Gemini API key to use the AI Assistant to update your codex.</p>
+                            <div class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-400 mb-1">API Key Source</label>
+                                    <select [ngModel]="apiKeySource()" (ngModelChange)="apiKeySource.set($event); isEditingStoredKey.set(false);" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                        <option value="native">Native (Use built-in key)</option>
+                                        <option value="stored">Stored (From Firestore)</option>
+                                        <option value="customer">Customer (Enter manually)</option>
+                                    </select>
+                                </div>
+
+                                @if(apiKeySource() === 'native') {
+                                    <div class="bg-gray-900/50 p-3 rounded-md border border-gray-700">
+                                        <p class="text-sm text-gray-400">Using the application's native context.</p>
+                                    </div>
+                                }
+                                @if(apiKeySource() === 'customer') {
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-400 mb-1">Enter Custom API Key</label>
+                                        <input type="password" [ngModel]="customerApiKey()" (ngModelChange)="customerApiKey.set($event)" placeholder="Enter your Gemini API Key" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500" />
+                                    </div>
+                                }
+                                @if(apiKeySource() === 'stored') {
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-400 mb-1">Stored API Key</label>
+                                        @if(isEditingStoredKey()) {
+                                            <div class="flex items-center space-x-2">
+                                                <input type="password" [ngModel]="storedApiKey()" (ngModelChange)="storedApiKey.set($event)" placeholder="Enter key to store in Firestore" class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                                <button (click)="handleSaveStoredApiKey()" [disabled]="isLoadingAdminAction()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-500">
+                                                    {{ isLoadingAdminAction() ? '...' : 'Save' }}
+                                                </button>
+                                                <button (click)="isEditingStoredKey.set(false)" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md">Cancel</button>
+                                            </div>
+                                        } @else {
+                                            <div class="flex items-center space-x-2 bg-gray-900/50 p-3 rounded-md border border-gray-700">
+                                                <p class="flex-grow text-sm font-mono text-gray-400">
+                                                    {{ storedApiKey() ? '••••••••' + storedApiKey().slice(-4) : 'No key stored.' }}
+                                                </p>
+                                                <button (click)="isEditingStoredKey.set(true)" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded-md text-sm">Edit</button>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                           <div class="border-t border-gray-700 my-4"></div>
+                          <h3 class="text-xl font-semibold text-white mb-3">Update Data with AI Assistant</h3>
+                          <p class="text-gray-400 mb-4 -mt-2">Describe the change you want to make to the codex data in plain English.</p>
+                          <textarea [(ngModel)]="aiUpdateRequest" placeholder="e.g., Change Captain Valerius's alignment to Lawful Evil and add 'Power Attack' to his feats." class="w-full h-24 bg-gray-900 border border-gray-600 rounded-md p-3 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500 mb-4"></textarea>
+                          <div class="flex items-center">
+                              <input type="checkbox" id="aiDebug" [(ngModel)]="aiUpdateDebugMode" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                              <label for="aiDebug" class="ml-2 block text-sm text-gray-400">Enable AI Debug Logging</label>
+                          </div>
+                          <button (click)="handleProcessAiUpdate()" [disabled]="isProcessingAiUpdate() || (apiKeySource() !== 'native' && !assistantApiKey())" class="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+                              {{ isProcessingAiUpdate() ? 'Processing...' : 'Process Request' }}
+                          </button>
+                          @if(proposedDataUpdate()) {
+                              <div class="mt-4">
+                                  <h4 class="font-semibold mb-2" [ngClass]="{'text-green-400': isCreatingNewEntry(), 'text-yellow-400': !isCreatingNewEntry()}">
+                                    {{ isCreatingNewEntry() ? 'Proposed New Entry' : 'Proposed Changes' }}
+                                  </h4>
+                                  <p class="text-sm text-gray-400 mb-2">Review and confirm to save. Path: <code class="text-xs bg-black/50 p-1 rounded">{{ aiUpdateTargetPath()?.join(' / ') }}</code></p>
+                                  <pre class="bg-black/50 p-4 rounded-md max-h-96 overflow-auto text-xs whitespace-pre-wrap">{{ objectToJson(proposedDataUpdate()) }}</pre>
+                                  <div class="flex justify-end gap-2 mt-4">
+                                      <button (click)="handleCancelAiUpdate()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                                      <button (click)="handleConfirmAiUpdate()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Confirm & Save</button>
+                                  </div>
+                              </div>
+                          }
+                      </div>
+                    }
+                    @if(activeAdminTab() === 'integrity') {
+                      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4 col-span-1 md:col-span-2 lg:col-span-3">
+                            <h3 class="text-xl font-semibold text-white mb-3">Reconciliation Settings</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="iteration-count" class="block text-sm font-medium text-gray-400">Max Iterations per Job</label>
+                                    <input type="number" id="iteration-count" [ngModel]="reconciliationIterations()" (ngModelChange)="reconciliationIterations.set(+$event)" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                    <p class="text-xs text-gray-500 mt-1">Max number of batches to fetch for each job.</p>
+                                </div>
+                                <div>
+                                    <label for="batch-size" class="block text-sm font-medium text-gray-400">Items per Batch</label>
+                                    <input type="number" id="batch-size" [ngModel]="reconciliationBatchSize()" (ngModelChange)="reconciliationBatchSize.set(+$event)" class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                    <p class="text-xs text-gray-500 mt-1">Number of items to request from the AI per call.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-green-400 mb-3">Rules Engine</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Process the entire codex to extract numerical data from stat blocks, populating the rules and entities databases.</p>
+                            <button (click)="handleProcessCodex()" [disabled]="isLoadingAdminAction()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Processing..." : "Process Codex" }}
+                            </button>
+                        </div>
+                         <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-pink-400 mb-3">Smart Spell Linker</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Scan all non-PC entities, determine spellcasting capabilities, and use AI to assign & link a thematic prepared spell list.</p>
+                            <button (click)="handleSmartSpellLink()" [disabled]="isLoadingAdminAction()" class="bg-pink-600 hover:bg-pink-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Processing..." : "Link Spells for NPCs & Creatures" }}
+                            </button>
+                        </div>
+                        <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-yellow-400 mb-3">Item Prefix Normalization</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Migrates magic items to the equipment database and standardizes all item document IDs to use the 'eq_' prefix.</p>
+                            <button (click)="handlePrefixNormalization()" [disabled]="isLoadingAdminAction()" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Normalizing..." : "Normalize Item Prefixes" }}
+                            </button>
+                        </div>
+                        <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                              <h3 class="text-xl font-semibold text-purple-400 mb-3">Duplicate Scan</h3>
+                              <p class="text-gray-400 mb-4 -mt-2">Scan the codex, entities, and rules to find duplicate entries by content or name.</p>
+                              <button (click)="handleScanForDuplicates()" [disabled]="isLoadingAdminAction()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                  {{ isLoadingAdminAction() ? "Scanning..." : "Scan for Duplicates" }}
+                              </button>
+                        </div>
+                        <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-teal-400 mb-3">Items DB</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Iteratively fetch all Core Rulebook equipment and magic items to populate the items databases.</p>
+                            <button (click)="handleReconcileItems()" [disabled]="isLoadingAdminAction()" class="bg-teal-600 hover:bg-teal-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Processing..." : "Reconcile All Items" }}
+                            </button>
+                        </div>
+                        <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-cyan-400 mb-3">Rules DB</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Iteratively fetch all Core Rulebook feats and conditions to populate the rules database.</p>
+                            <button (click)="reconcileCoreRules()" [disabled]="isLoadingAdminAction()" class="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Processing..." : "Reconcile Rules" }}
+                            </button>
+                        </div>
+                        <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-lime-400 mb-3">Spells DB</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Iteratively fetch all Core Rulebook spells to populate the spells database.</p>
+                            <button (click)="handleReconcileSpells()" [disabled]="isLoadingAdminAction()" class="bg-lime-600 hover:bg-lime-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Processing..." : "Reconcile Spells" }}
+                            </button>
+                        </div>
+                        <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-fuchsia-400 mb-3">Deities DB</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Iteratively fetch all Core Rulebook deities to populate the deities database.</p>
+                            <button (click)="handleReconcileDeities()" [disabled]="isLoadingAdminAction()" class="bg-fuchsia-600 hover:bg-fuchsia-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Processing..." : "Reconcile Deities" }}
+                            </button>
+                        </div>
+                         <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-orange-400 mb-3">Hazards DB</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Iteratively fetch common traps and hazards to populate the hazards database.</p>
+                            <button (click)="handleReconcileHazards()" [disabled]="isLoadingAdminAction()" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Processing..." : "Reconcile Hazards" }}
+                            </button>
+                        </div>
+                         <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                            <h3 class="text-xl font-semibold text-blue-400 mb-3">Data Formatting</h3>
+                            <p class="text-gray-400 mb-4 -mt-2">Scan all codex data for common formatting errors (like incorrect table keys) and apply automatic fixes.</p>
+                            <button (click)="handleScanAndFixData()" [disabled]="isLoadingAdminAction()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md w-full">
+                                {{ isLoadingAdminAction() ? "Processing..." : "Scan & Fix Data" }}
+                            </button>
+                        </div>
+                      </div>
+                      
+                      @if(duplicateContentSets().length > 0 || duplicateEntitySets().length > 0 || duplicateRuleSets().length > 0 || duplicateEquipmentSets().length > 0 || duplicateSpellSets().length > 0 || duplicateDeitySets().length > 0 || duplicateHazardSets().length > 0) {
+                          <div class="mt-6 border-t border-gray-600 pt-4">
+                            <h4 class="font-semibold text-yellow-400 mb-2">Duplicate Sets Found</h4>
+                            @if(duplicateContentSets().length > 0) {
+                              <h5 class="font-semibold text-lg mt-4 text-purple-300">By Content</h5>
+                              @for(set of duplicateContentSets(); track set.id) {
+                                <div class="my-2 p-3 border border-gray-600 rounded-md bg-gray-900/50">
+                                  <p class="text-sm text-gray-500 mb-2">The following entries share identical content:</p>
+                                  <div class="space-y-2">
+                                    @for(path of set.paths; track path) {
+                                      <div class="flex items-center">
+                                        <input type="radio" [name]="'merge-set-' + set.id" [value]="path.join('/')" (change)="updateMergeSelection(set.id, path)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                        <label class="ml-3 block text-sm font-mono text-gray-300">{{ path.join(' / ') }}</label>
+                                      </div>
+                                    }
+                                  </div>
+                                  <div class="flex justify-end mt-3">
+                                    <button (click)="handleMergeContent(set.id)" [disabled]="!mergeSelections()[set.id]" class="font-bold py-1 px-3 rounded-md text-sm disabled:bg-gray-500 disabled:cursor-not-allowed" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === set.id, 'bg-green-600 hover:bg-green-500 text-white': confirmDelete() !== set.id}">
+                                      {{ confirmDelete() === set.id ? 'Confirm?' : 'Merge (Keep Selected)' }}
+                                    </button>
+                                  </div>
+                                </div>
+                              }
+                            }
+                            @if(duplicateEntitySets().length > 0) {
+                              <h5 class="font-semibold text-lg mt-4 text-purple-300">Entities by Name</h5>
+                               @for(set of duplicateEntitySets(); track set.id) {
+                                <div class="my-2 p-3 border border-gray-600 rounded-md bg-gray-900/50">
+                                  <p class="text-sm text-gray-500 mb-2">Entity named <span class="font-bold text-gray-300">{{ set.name }}</span> has multiple documents:</p>
+                                  <div class="space-y-2">
+                                    @for(docId of set.docIds; track docId) {
+                                      <div class="flex items-center">
+                                        <input type="radio" [name]="'merge-entity-' + set.id" [value]="docId" (change)="updateMergeByNameSelection(set.id, docId)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                        <label class="ml-3 block text-sm font-mono text-gray-400">{{ docId }}</label>
+                                      </div>
+                                    }
+                                  </div>
+                                  <div class="flex justify-end mt-3">
+                                    <button (click)="handleMergeByName(set)" [disabled]="!mergeByNameSelections()[set.id]" class="font-bold py-1 px-3 rounded-md text-sm disabled:bg-gray-500 disabled:cursor-not-allowed" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === set.id, 'bg-green-600 hover:bg-green-500 text-white': confirmDelete() !== set.id}">
+                                      {{ confirmDelete() === set.id ? 'Confirm?' : 'Merge Docs (Keep Selected)' }}
+                                    </button>
+                                  </div>
+                                </div>
+                              }
+                            }
+                             @if(duplicateRuleSets().length > 0) {
+                              <h5 class="font-semibold text-lg mt-4 text-purple-300">Rules by Name</h5>
+                               @for(set of duplicateRuleSets(); track set.id) {
+                                <div class="my-2 p-3 border border-gray-600 rounded-md bg-gray-900/50">
+                                  <p class="text-sm text-gray-500 mb-2">Rule named <span class="font-bold text-gray-300">{{ set.name }}</span> has multiple documents:</p>
+                                  <div class="space-y-2">
+                                    @for(docId of set.docIds; track docId) {
+                                      <div class="flex items-center">
+                                        <input type="radio" [name]="'merge-rule-' + set.id" [value]="docId" (change)="updateMergeByNameSelection(set.id, docId)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                        <label class="ml-3 block text-sm font-mono text-gray-400">{{ docId }}</label>
+                                      </div>
+                                    }
+                                  </div>
+                                  <div class="flex justify-end mt-3">
+                                    <button (click)="handleMergeByName(set)" [disabled]="!mergeByNameSelections()[set.id]" class="font-bold py-1 px-3 rounded-md text-sm disabled:bg-gray-500 disabled:cursor-not-allowed" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === set.id, 'bg-green-600 hover:bg-green-500 text-white': confirmDelete() !== set.id}">
+                                       {{ confirmDelete() === set.id ? 'Confirm?' : 'Merge Docs (Keep Selected)' }}
+                                    </button>
+                                  </div>
+                                </div>
+                              }
+                            }
+                             @if(duplicateEquipmentSets().length > 0) {
+                              <h5 class="font-semibold text-lg mt-4 text-teal-300">Equipment by Name</h5>
+                               @for(set of duplicateEquipmentSets(); track set.id) {
+                                <div class="my-2 p-3 border border-gray-600 rounded-md bg-gray-900/50">
+                                  <p class="text-sm text-gray-500 mb-2">Item named <span class="font-bold text-gray-300">{{ set.name }}</span> has multiple documents:</p>
+                                  <div class="space-y-2">
+                                    @for(docId of set.docIds; track docId) {
+                                      <div class="flex items-center">
+                                        <input type="radio" [name]="'merge-eq-' + set.id" [value]="docId" (change)="updateMergeByNameSelection(set.id, docId)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                        <label class="ml-3 block text-sm font-mono text-gray-400">{{ docId }}</label>
+                                      </div>
+                                    }
+                                  </div>
+                                  <div class="flex justify-end mt-3">
+                                    <button (click)="handleMergeByName(set)" [disabled]="!mergeByNameSelections()[set.id]" class="font-bold py-1 px-3 rounded-md text-sm disabled:bg-gray-500 disabled:cursor-not-allowed" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === set.id, 'bg-green-600 hover:bg-green-500 text-white': confirmDelete() !== set.id}">
+                                       {{ confirmDelete() === set.id ? 'Confirm?' : 'Merge Docs (Keep Selected)' }}
+                                    </button>
+                                  </div>
+                                </div>
+                              }
+                            }
+                             @if(duplicateSpellSets().length > 0) {
+                              <h5 class="font-semibold text-lg mt-4 text-lime-300">Spells by Name</h5>
+                               @for(set of duplicateSpellSets(); track set.id) {
+                                <div class="my-2 p-3 border border-gray-600 rounded-md bg-gray-900/50">
+                                  <p class="text-sm text-gray-500 mb-2">Spell named <span class="font-bold text-gray-300">{{ set.name }}</span> has multiple documents:</p>
+                                  <div class="space-y-2">
+                                    @for(docId of set.docIds; track docId) {
+                                      <div class="flex items-center">
+                                        <input type="radio" [name]="'merge-spell-' + set.id" [value]="docId" (change)="updateMergeByNameSelection(set.id, docId)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                        <label class="ml-3 block text-sm font-mono text-gray-400">{{ docId }}</label>
+                                      </div>
+                                    }
+                                  </div>
+                                  <div class="flex justify-end mt-3">
+                                    <button (click)="handleMergeByName(set)" [disabled]="!mergeByNameSelections()[set.id]" class="font-bold py-1 px-3 rounded-md text-sm disabled:bg-gray-500 disabled:cursor-not-allowed" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === set.id, 'bg-green-600 hover:bg-green-500 text-white': confirmDelete() !== set.id}">
+                                       {{ confirmDelete() === set.id ? 'Confirm?' : 'Merge Docs (Keep Selected)' }}
+                                    </button>
+                                  </div>
+                                </div>
+                              }
+                            }
+                             @if(duplicateDeitySets().length > 0) {
+                              <h5 class="font-semibold text-lg mt-4 text-fuchsia-300">Deities by Name</h5>
+                               @for(set of duplicateDeitySets(); track set.id) {
+                                <div class="my-2 p-3 border border-gray-600 rounded-md bg-gray-900/50">
+                                  <p class="text-sm text-gray-500 mb-2">Deity named <span class="font-bold text-gray-300">{{ set.name }}</span> has multiple documents:</p>
+                                  <div class="space-y-2">
+                                    @for(docId of set.docIds; track docId) {
+                                      <div class="flex items-center">
+                                        <input type="radio" [name]="'merge-deity-' + set.id" [value]="docId" (change)="updateMergeByNameSelection(set.id, docId)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                        <label class="ml-3 block text-sm font-mono text-gray-400">{{ docId }}</label>
+                                      </div>
+                                    }
+                                  </div>
+                                  <div class="flex justify-end mt-3">
+                                    <button (click)="handleMergeByName(set)" [disabled]="!mergeByNameSelections()[set.id]" class="font-bold py-1 px-3 rounded-md text-sm disabled:bg-gray-500 disabled:cursor-not-allowed" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === set.id, 'bg-green-600 hover:bg-green-500 text-white': confirmDelete() !== set.id}">
+                                       {{ confirmDelete() === set.id ? 'Confirm?' : 'Merge Docs (Keep Selected)' }}
+                                    </button>
+                                  </div>
+                                </div>
+                              }
+                            }
+                            @if(duplicateHazardSets().length > 0) {
+                              <h5 class="font-semibold text-lg mt-4 text-orange-300">Hazards by Name</h5>
+                               @for(set of duplicateHazardSets(); track set.id) {
+                                <div class="my-2 p-3 border border-gray-600 rounded-md bg-gray-900/50">
+                                  <p class="text-sm text-gray-500 mb-2">Hazard named <span class="font-bold text-gray-300">{{ set.name }}</span> has multiple documents:</p>
+                                  <div class="space-y-2">
+                                    @for(docId of set.docIds; track docId) {
+                                      <div class="flex items-center">
+                                        <input type="radio" [name]="'merge-hazard-' + set.id" [value]="docId" (change)="updateMergeByNameSelection(set.id, docId)" class="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+                                        <label class="ml-3 block text-sm font-mono text-gray-400">{{ docId }}</label>
+                                      </div>
+                                    }
+                                  </div>
+                                  <div class="flex justify-end mt-3">
+                                    <button (click)="handleMergeByName(set)" [disabled]="!mergeByNameSelections()[set.id]" class="font-bold py-1 px-3 rounded-md text-sm disabled:bg-gray-500 disabled:cursor-not-allowed" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === set.id, 'bg-green-600 hover:bg-green-500 text-white': confirmDelete() !== set.id}">
+                                       {{ confirmDelete() === set.id ? 'Confirm?' : 'Merge Docs (Keep Selected)' }}
+                                    </button>
+                                  </div>
+                                </div>
+                              }
+                            }
+                          </div>
+                        }
+                    }
+                    @if(activeAdminTab() === 'backup') {
+                      <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700 space-y-4">
+                          <h3 class="text-xl font-semibold text-orange-400 mb-3">Backup & Restore</h3>
+                          <p class="text-gray-400 mb-4 -mt-2">Download a ZIP backup of your entire codex and toolkit data, or restore from a previously saved backup file. <strong class="text-red-400">Restore is a destructive action.</strong></p>
+                          <div class="flex items-center space-x-2">
+                              <button (click)="handleBackupDatabase()" [disabled]="isLoadingAdminAction()" class="bg-orange-600 hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-600 w-48">
+                                {{ isLoadingAdminAction() && !restoreDataPreview() ? "Backing up..." : "Backup Database" }}
+                              </button>
+                              <input type="file" #restoreInput (change)="handleRestoreFileSelect($event)" accept=".zip" class="hidden" />
+                              <button (click)="restoreInput.value = ''; restoreInput.click()" [disabled]="isLoadingAdminAction()" class="bg-teal-600 hover:bg-teal-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-600 w-48">
+                                Restore from Backup
+                              </button>
+                          </div>
+                          @if(restoreDataPreview(); as preview) {
+                              <div class="mt-4 border-t border-gray-600 pt-4">
+                                  <h4 class="font-semibold text-yellow-400 mb-2">Backup File Loaded</h4>
+                                  <p class="text-sm text-gray-400">File: <span class="font-mono">{{ preview.fileName }}</span></p>
+                                  <p class="text-sm text-gray-400">Found Codex Data: <span [ngClass]="{'text-green-400': preview.hasCodex, 'text-red-400': !preview.hasCodex}">{{ preview.hasCodex ? 'Yes' : 'No' }}</span></p>
+                                  <p class="text-sm text-gray-400 mb-4">Found Collections: <span class="font-mono">{{ preview.collections.join(', ') || 'None' }}</span></p>
+                                  <p class="text-red-400 font-bold">WARNING: Proceeding will WIPE your current database and replace it with this backup.</p>
+                                  <div class="flex justify-end gap-2 mt-4">
+                                      <button (click)="handleCancelRestore()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                                      <button (click)="handleConfirmRestore()" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded">
+                                        {{ confirmDelete() === 'RESTORE_DB' ? 'Confirm Wipe & Restore?' : 'Wipe & Restore' }}
+                                      </button>
+                                  </div>
+                              </div>
+                          }
+                      </div>
+                    }
+                    @if(activeAdminTab() === 'danger') {
+                      <div>
+                          <h3 class="text-xl font-semibold text-red-400 mb-3">Destructive Actions</h3>
+                          <p class="text-gray-400 mb-4">Clear any top-level data section from Firestore, the entire rules engine entity collection, or clear cached dynamic lookups.</p>
+                          <div class="flex flex-wrap gap-2">
+                              @if(codex() && objectKeys(codex()).length > 0) {
+                                @for(key of objectKeys(codex()); track key) {
+                                    <button (click)="handleClearSection(key)" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === key, 'bg-red-700 hover:bg-red-600 text-white': confirmDelete() !== key}">
+                                      {{ confirmDelete() === key ? 'Confirm?' : 'Clear ' + formatKey(key) }}
+                                    </button>
+                                }
+                              } @else {
+                                <p class="text-gray-500">No data loaded to clear.</p>
+                              }
+                              @for(cacheName of cachedCollections; track cacheName) {
+                                <button (click)="handleClearCachedCollection(cacheName)" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-purple-700 hover:bg-purple-600 text-white': confirmDelete() !== cacheName}">
+                                  {{ confirmDelete() === cacheName ? 'Confirm?' : 'Clear Cached ' + formatKey(cacheName.split('_')[2]) }}
+                                </button>
+                              }
+                              <button (click)="handleClearEntities()" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === 'CLEAR_ENTITIES', 'bg-red-700 hover:bg-red-600 text-white': confirmDelete() !== 'CLEAR_ENTITIES'}">
+                                {{ confirmDelete() === 'CLEAR_ENTITIES' ? 'Confirm?' : 'Clear All Entities' }}
+                              </button>
+                              <button (click)="handleClearRules()" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === 'CLEAR_RULES', 'bg-red-700 hover:bg-red-600 text-white': confirmDelete() !== 'CLEAR_RULES'}">
+                                {{ confirmDelete() === 'CLEAR_RULES' ? 'Confirm?' : 'Clear All Rules' }}
+                              </button>
+                              <button (click)="handleClearEquipment()" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === 'CLEAR_EQUIPMENT', 'bg-red-700 hover:bg-red-600 text-white': confirmDelete() !== 'CLEAR_EQUIPMENT'}">
+                                {{ confirmDelete() === 'CLEAR_EQUIPMENT' ? 'Confirm?' : 'Clear All Equipment' }}
+                              </button>
+                              <button (click)="handleClearCollection('magic_items_pf1e')" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === 'magic_items_pf1e', 'bg-red-700 hover:bg-red-600 text-white': confirmDelete() !== 'magic_items_pf1e'}">
+                                {{ confirmDelete() === 'magic_items_pf1e' ? 'Confirm?' : 'Clear Magic Items' }}
+                              </button>
+                              <button (click)="handleClearCollection('spells_pf1e')" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === 'spells_pf1e', 'bg-red-700 hover:bg-red-600 text-white': confirmDelete() !== 'spells_pf1e'}">
+                                {{ confirmDelete() === 'spells_pf1e' ? 'Confirm?' : 'Clear Spells' }}
+                              </button>
+                              <button (click)="handleClearCollection('deities_pf1e')" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === 'deities_pf1e', 'bg-red-700 hover:bg-red-600 text-white': confirmDelete() !== 'deities_pf1e'}">
+                                {{ confirmDelete() === 'deities_pf1e' ? 'Confirm?' : 'Clear Deities' }}
+                              </button>
+                              <button (click)="handleClearCollection('hazards_pf1e')" class="font-bold py-2 px-4 rounded transition-colors" [ngClass]="{'bg-yellow-500 text-black': confirmDelete() === 'hazards_pf1e', 'bg-red-700 hover:bg-red-600 text-white': confirmDelete() !== 'hazards_pf1e'}">
+                                {{ confirmDelete() === 'hazards_pf1e' ? 'Confirm?' : 'Clear Hazards' }}
+                              </button>
+                          </div>
+                      </div>
+                    }
+                  </div>
+
+                  <div class="bg-gray-800 rounded-lg p-4 mt-6 h-64 overflow-y-auto border border-gray-700">
+                      @if(adminStatusLog().length === 0) {
+                        <p class="text-gray-500">Status logs will appear here...</p>
+                      } @else {
+                        @for(log of adminStatusLog(); track $index) {
+                            <p [ngClass]="{'text-red-400': log.isError, 'text-green-400': !log.isError}">
+                                <span class="text-gray-500 mr-2">[{{log.time}}]</span>{{log.message}}
+                            </p>
+                        }
+                      }
+                  </div>
+              </div>
+          }
+        </main>
+    </div>
+  `,
+  styles: [`
+    :host { display: block; height: 100vh; width: 100vw; }
+  `]
+})
+export class App {
+  // --- STATE SIGNALS ---
+  db: Firestore | null = null;
+  auth: Auth | null = null;
+  isAuthReady = signal(false);
+  codex = signal<any | null>(null);
+  error = signal<string | null>(null);
+
+  // Admin Panel State
+  activeAdminTab = signal<'load' | 'ai' | 'integrity' | 'backup' | 'danger'>('load');
+  adminStatusLog = signal<LogEntry[]>([]);
+  gdriveUrl = '';
+  confirmDelete = signal<string | null>(null);
+  isLoadingAdminAction = signal(false);
+  cachedCollections = ['dm_toolkit_feats', 'dm_toolkit_items', 'dm_toolkit_spells', 'dm_toolkit_found_creatures', 'dm_toolkit_effects'];
+  aiUpdateRequest = '';
+  isProcessingAiUpdate = signal(false);
+  proposedDataUpdate = signal<any | null>(null);
+  aiUpdateTargetPath = signal<string[] | null>(null);
+  isCreatingNewEntry = signal(false);
+  aiUpdateDebugMode = signal(false);
+  restoreDataPreview = signal<any | null>(null);
+  parsedRestoreData = signal<any | null>(null);
+  duplicateContentSets = signal<DuplicateContentSet[]>([]);
+  duplicateEntitySets = signal<DuplicateByNameSet[]>([]);
+  duplicateRuleSets = signal<DuplicateByNameSet[]>([]);
+  duplicateEquipmentSets = signal<DuplicateByNameSet[]>([]);
+  duplicateSpellSets = signal<DuplicateByNameSet[]>([]);
+  duplicateDeitySets = signal<DuplicateByNameSet[]>([]);
+  duplicateHazardSets = signal<DuplicateByNameSet[]>([]);
+  mergeSelections = signal<{ [key: string]: string[] }>({});
+  mergeByNameSelections = signal<{ [key: string]: string }>({});
+  reconciliationIterations = signal(20);
+  reconciliationBatchSize = signal(10);
+  
+  // --- API KEYS & CONFIG ---
+  apiKeySource = signal<'customer' | 'stored' | 'native'>('native');
+  customerApiKey = signal('');
+  storedApiKey = signal('');
+  isEditingStoredKey = signal(false);
+
+  assistantApiKey = computed(() => {
+    const source = this.apiKeySource();
+    if (source === 'customer') return this.customerApiKey();
+    if (source === 'stored') return this.storedApiKey();
+    if (source === 'native') return ''; // Use the application's native context
+    return '';
+  });
+  
+  firebaseConfig = {
+      apiKey: "AIzaSyDfRfUEpL7lQFhCtwGSjbJTIKEiGc3067Y",
+      authDomain: "aethelgard-d34cc.firebaseapp.com",
+      projectId: "aethelgard-d34cc",
+      storageBucket: "aethelgard-d34cc.firebasestorage.app",
+      messagingSenderId: "283129050747",
+      appId: "1:283129050747:web:3e88abd1f65d61fa6814de",
+      measurementId: "G-BQ4R0FN9Z4"
+  };
+  codexAppId = "aethelgard-codex-data";
+  
+  collectionsToBackup = ['dm_toolkit_fights', 'dm_toolkit_sessions', 'dm_toolkit_found_creatures', 'dm_toolkit_feats', 'dm_toolkit_items', 'dm_toolkit_spells', 'dm_toolkit_effects', 'rules_pf1e', 'entities_pf1e', 'equipment_pf1e', 'spells_pf1e', 'magic_items_pf1e', 'hazards_pf1e', 'deities_pf1e'];
+
+  constructor() {
+    try {
+      const app = initializeApp(this.firebaseConfig);
+      this.db = getFirestore(app);
+      this.auth = getAuth(app);
+      this.setupAuthListener();
+      
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+      document.head.appendChild(script);
+    } catch (e: any) { this.error.set(`Firebase init failed: ${e.message}`); }
+
+    effect(() => {
+      if(this.isAuthReady() && this.db) {
+          this.fetchCodexData();
+          this.listenToStoredApiKey();
+      }
+    });
+  }
+
+  // --- DATA FETCHING & AUTH ---
+  private fetchCodexData() {
+    if (!this.db) return;
+    const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+    onSnapshot(docRef, (docSnap) => this.codex.set(docSnap.exists() ? docSnap.data() : {}), 
+      (e) => this.logAdminStatus(`Error fetching codex: ${e.message}`, true)
+    );
+  }
+
+  private listenToStoredApiKey() {
+    if (!this.db) return;
+    const keyDocRef = doc(this.db, 'admin_settings/api_keys');
+    onSnapshot(keyDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+            this.storedApiKey.set(docSnap.data()?.gemini || '');
+        } else {
+            this.storedApiKey.set('');
+            this.logAdminStatus("No stored API key found in Firestore at 'admin_settings/api_keys'.", false);
+        }
+    }, (error) => {
+        this.logAdminStatus(`Error fetching stored API key: ${error.message}`, true);
+    });
+  }
+
+  private setupAuthListener() {
+    if (!this.auth) {
+        this.logAdminStatus("Auth service not available.", true);
+        this.isAuthReady.set(true);
+        return;
+    }
+    onAuthStateChanged(this.auth, (user) => {
+      if (!user) signInAnonymously(this.auth).catch(e => this.logAdminStatus(`Auth failed: ${e.message}`, true));
+      this.isAuthReady.set(true);
+    });
+  }
+
+  // --- ADMIN PANEL HANDLERS ---
+  async handleLoadData() {
+    if (!this.gdriveUrl) {
+        this.logAdminStatus("Please provide a Google Drive URL.", true);
+        return;
+    }
+    if (!this.db) {
+        this.logAdminStatus("Database not connected.", true);
+        return;
+    }
+    this.isLoadingAdminAction.set(true);
+    this.logAdminStatus("Fetching data from Google Drive...", false);
+    
+    const docIdMatch = this.gdriveUrl.match(/\/d\/([a-zA-Z0-9-_]+)/);
+    if (!docIdMatch || !docIdMatch[1]) {
+        this.logAdminStatus("Invalid Google Docs URL format.", true);
+        this.isLoadingAdminAction.set(false);
+        return;
+    }
+    const docId = docIdMatch[1];
+    const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=txt`;
+
+    try {
+        const response = await fetch(exportUrl);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch from Google Docs with status ${response.status}. Make sure the link is public.`);
+        }
+        let text = await response.text();
+        text = text.replace(/^\uFEFF/, '').replace(/```json|```/g, '').trim();
+
+        const data = JSON.parse(text);
+        this.logAdminStatus("Data successfully parsed. Saving to Firestore...", false);
+
+        const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+        await setDoc(docRef, data);
+
+        this.logAdminStatus("Codex data successfully loaded and saved!", false);
+        this.gdriveUrl = '';
+    } catch (e: any) {
+        this.logAdminStatus(`Error loading data: ${e.message}`, true);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+    }
+  }
+
+  async handleSaveStoredApiKey() {
+    if (!this.db) {
+        this.logAdminStatus("Database not connected, cannot save API key.", true);
+        return;
+    }
+    this.isLoadingAdminAction.set(true);
+    try {
+        const apiKeyRef = doc(this.db, 'admin_settings/api_keys');
+        await setDoc(apiKeyRef, { gemini: this.storedApiKey() }, { merge: true });
+        this.logAdminStatus("API key securely stored in Firestore.", false);
+        this.isEditingStoredKey.set(false);
+    } catch (e: any) {
+        this.logAdminStatus(`Error saving API key: ${e.message}`, true);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+    }
+  }
+
+  async handleScanAndFixData() {
+    if (!this.codex() || !this.db) {
+        this.logAdminStatus("Codex data not loaded. Cannot scan.", true);
+        return;
+    }
+
+    this.isLoadingAdminAction.set(true);
+    this.logAdminStatus("Starting data format scan and fix...", false);
+
+    try {
+        const originalData = this.codex();
+        const fixedData = processFirestoreData(JSON.parse(JSON.stringify(originalData)));
+
+        if (JSON.stringify(originalData) === JSON.stringify(fixedData)) {
+            this.logAdminStatus("Scan complete. No formatting changes were necessary.", false);
+        } else {
+            this.logAdminStatus("Formatting issues found. Saving corrected data...", false);
+            const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+            await setDoc(docRef, fixedData);
+            this.logAdminStatus("Successfully scanned and fixed data formatting.", false);
+        }
+    } catch (e: any) {
+        this.logAdminStatus(`An error occurred during the scan and fix process: ${e.message}`, true);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+    }
+  }
+
+  async reconcileCoreRules() {
+    const apiKey = this.assistantApiKey();
+    const apiKeySource = this.apiKeySource();
+    if (!this.db || (!apiKey && apiKeySource !== 'native')) {
+        this.logAdminStatus(`Rule reconciliation skipped: Firestore not available or API key for source '${apiKeySource}' not configured.`, true);
+        return;
+    }
+    
+    this.isLoadingAdminAction.set(true);
+    this.logAdminStatus("Starting full core rule reconciliation...", false);
+    try {
+        const rulesCollectionRef = collection(this.db, 'rules_pf1e');
+        const existingRulesSnapshot = await getDocs(rulesCollectionRef);
+        const existingRuleIds = new Set(existingRulesSnapshot.docs.map(doc => doc.id));
+        this.logAdminStatus(`Found ${existingRulesSnapshot.size} existing rules.`, false);
+
+        await this.reconcileRuleType('feat', 'pf1e-all-feats');
+        await this.reconcileRuleType('condition', 'pf1e-all-conditions');
+
+    } catch (e: any) {
+        this.logAdminStatus(`An error occurred during rule reconciliation: ${e.message}`, true);
+        console.error(e);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+    }
+  }
+
+  async handleReconcileItems() {
+    this.isLoadingAdminAction.set(true);
+    this.logAdminStatus("--- Starting Full Item Reconciliation ---", false);
+    try {
+      await this.handleReconcileGeneric('equipment_pf1e', 'equipment', 'pf1e-all-equipment', 'eq_');
+      await this.handleReconcileGeneric('magic_items_pf1e', 'magic item', 'pf1e-all-magic-items', 'mi_');
+    } catch (e: any) {
+        this.logAdminStatus(`An error occurred during item reconciliation: ${e.message}`, true);
+        console.error(e);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+        this.logAdminStatus("--- Full Item Reconciliation Complete ---", false);
+    }
+  }
+
+  async handleReconcileEquipment() {
+    await this.handleReconcileGeneric('equipment_pf1e', 'equipment', 'pf1e-all-equipment', 'eq_');
+  }
+  async handleReconcileMagicItems() {
+    await this.handleReconcileGeneric('magic_items_pf1e', 'magic item', 'pf1e-all-magic-items', 'mi_');
+  }
+  async handleReconcileSpells() {
+    await this.handleReconcileGeneric('spells_pf1e', 'spell', 'pf1e-all-spells', 'sp_');
+  }
+  async handleReconcileDeities() {
+    await this.handleReconcileGeneric('deities_pf1e', 'deity', 'pf1e-all-deities', 'de_');
+  }
+  async handleReconcileHazards() {
+    await this.handleReconcileGeneric('hazards_pf1e', 'hazard', 'pf1e-all-hazards', 'hz_');
+  }
+
+  private async handleReconcileGeneric(collectionName: string, itemType: string, geminiType: any, idPrefix: string) {
+    const apiKey = this.assistantApiKey();
+    if (!this.db || (!apiKey && this.apiKeySource() !== 'native')) {
+        this.logAdminStatus(`${itemType} reconciliation skipped: API key not available.`, true);
+        return;
+    }
+
+    this.isLoadingAdminAction.set(true);
+    this.logAdminStatus(`Starting full ${itemType} reconciliation...`, false);
+    try {
+        const collectionRef = collection(this.db, collectionName);
+        const snapshot = await getDocs(collectionRef);
+        this.logAdminStatus(`Found ${snapshot.size} existing ${itemType}s.`, false);
+
+        let knownItems = snapshot.docs.map(d => d.data().name);
+        const MAX_ITERATIONS = this.reconciliationIterations();
+        
+        for (let i = 0; i < MAX_ITERATIONS; i++) {
+            let batchString = await fetchFromGemini(apiKey, `next ${this.reconciliationBatchSize()} ${itemType}s`, geminiType, { codex: knownItems, batchSize: this.reconciliationBatchSize() });
+            batchString = batchString.replace(/```json|```/g, '').trim();
+            const newItemsBatch = JSON.parse(batchString) as any[];
+
+            if (newItemsBatch.length === 0) {
+                this.logAdminStatus(`${itemType} fetch complete. No new items found.`, false);
+                break;
+            }
+
+            this.logAdminStatus(`Fetched batch of ${newItemsBatch.length} ${itemType}(s). Processing...`, false);
+            const batch = writeBatch(this.db);
+            for(const item of newItemsBatch) {
+                if(item.name) {
+                    const itemId = `${idPrefix}${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+                    const itemRef = doc(this.db, collectionName, itemId);
+                    batch.set(itemRef, item);
+                }
+            }
+            await batch.commit();
+            const storedItemNames = newItemsBatch.map(item => item.name).filter(Boolean);
+            if (storedItemNames.length > 0) {
+                this.logAdminStatus(`  > Stored ${storedItemNames.length} new ${itemType}(s): ${storedItemNames.join(', ')}`, false);
+            }
+            
+            knownItems.push(...newItemsBatch.map(item => item.name));
+
+             if (i === MAX_ITERATIONS - 1) this.logAdminStatus(`${itemType} fetch hit max iterations.`, true);
+        }
+    } catch (e: any) {
+        this.logAdminStatus(`Error during ${itemType} reconciliation: ${e.message}`, true);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+    }
+  }
+
+  private async processNewEquipment(equipmentNames: string[]): Promise<void> {
+    if (!this.db) return;
+
+    for (const name of [...new Set(equipmentNames)]) {
+        if (!name) continue;
+        const equipId = `eq_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+        const equipRef = doc(this.db, 'equipment_pf1e', equipId);
+        const equipSnap = await getDoc(equipRef);
+
+        if (!equipSnap.exists()) {
+            this.logAdminStatus(`New equipment found: '${name}'. Fetching details...`, false);
+            try {
+                const apiKey = this.assistantApiKey();
+                if (!apiKey && this.apiKeySource() !== 'native') continue;
+                let jsonString = await fetchFromGemini(apiKey, name, 'equipment-rule');
+                jsonString = jsonString.replace(/```json|```/g, '').trim();
+                const equipData = JSON.parse(jsonString);
+
+                if (!equipData.name || !equipData.type) throw new Error("Invalid JSON structure from Gemini for equipment.");
+                
+                await setDoc(equipRef, equipData);
+                this.logAdminStatus(`Stored equipment details for '${name}'.`, false);
+
+            } catch (e: any) {
+                this.logAdminStatus(`Failed to process equipment for '${name}': ${e.message}`, true);
+            }
+        }
+    }
+  }
+
+  private async reconcileRuleType(ruleType: 'feat' | 'condition', geminiListType: 'pf1e-all-feats' | 'pf1e-all-conditions') {
+    this.logAdminStatus(`Reconciling all Core Rulebook ${ruleType}s...`, false);
+    const apiKey = this.assistantApiKey();
+    const apiKeySource = this.apiKeySource();
+    if (!apiKey && apiKeySource !== 'native') {
+        this.logAdminStatus(`Skipping ${ruleType} reconciliation: API key for source '${apiKeySource}' not available.`, true);
+        return;
+    }
+
+    if (ruleType === 'feat') {
+      await this.handleReconcileGeneric('rules_pf1e', 'feat', 'pf1e-all-feats', 'feat_');
+      return;
+    }
+
+    // --- Condition handling remains as it was (simple list of names) ---
+    try {
+        let allItemsString = await fetchFromGemini(apiKey, `all core ${ruleType}s`, geminiListType);
+        allItemsString = allItemsString.replace(/```json|```/g, '').trim();
+        const allItemNames = JSON.parse(allItemsString) as string[];
+        this.logAdminStatus(`Gemini provided ${allItemNames.length} Core Rulebook ${ruleType}s.`, false);
+
+        const rulesCollectionRef = collection(this.db!, 'rules_pf1e');
+        const existingRulesSnapshot = await getDocs(rulesCollectionRef);
+        const existingRuleIds = new Set(existingRulesSnapshot.docs.map(doc => doc.id));
+
+        const missingNames: string[] = [];
+        for (const name of allItemNames) {
+            const ruleId = `cond_${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+            if (!existingRuleIds.has(ruleId)) {
+                missingNames.push(name);
+            }
+        }
+
+        if (missingNames.length === 0) {
+            this.logAdminStatus(`No new ${ruleType}s to add. All core rules are up to date.`, false);
+            return;
+        }
+
+        this.logAdminStatus(`Found ${missingNames.length} missing ${ruleType}(s). Fetching details...`, false);
+        const addedRules = await this.processRules(missingNames, 'condition');
+        this.logAdminStatus(`Successfully added and stored ${addedRules.length} new ${ruleType}(s).`, false);
+    } catch (e: any) {
+        this.logAdminStatus(`Failed to fetch ${ruleType} list from Gemini: ${e.message}`, true);
+        return;
+    }
+  }
+
+  async handleScanForDuplicates() {
+    if (!this.codex() || !this.db) {
+        this.logAdminStatus("Codex data not loaded. Cannot scan for duplicates.", true);
+        return;
+    }
+    this.isLoadingAdminAction.set(true);
+    this.logAdminStatus("Scanning for all types of duplicates...", false);
+    this.duplicateContentSets.set([]);
+    this.duplicateEntitySets.set([]);
+    this.duplicateRuleSets.set([]);
+    this.duplicateEquipmentSets.set([]);
+    this.duplicateSpellSets.set([]);
+    this.duplicateDeitySets.set([]);
+    this.duplicateHazardSets.set([]);
+    this.mergeSelections.set({});
+    this.mergeByNameSelections.set({});
+
+    try {
+        const contentMap = new Map<string, string[][]>();
+        this.recursivelyFindDuplicateContent(this.codex(), [], contentMap);
+        const contentDuplicates = Array.from(contentMap.entries())
+            .filter(([key, paths]) => paths.length > 1)
+            .map(([content, paths], index) => ({
+                id: `content-set-${index}`,
+                contentPreview: content.substring(0, 150) + (content.length > 150 ? '...' : ''),
+                paths: paths
+            }));
+        this.duplicateContentSets.set(contentDuplicates);
+        this.logAdminStatus(`Found ${contentDuplicates.length} sets of duplicate content.`, false);
+        
+        await this.scanCollectionForDuplicatesByName('entities_pf1e');
+        await this.scanCollectionForDuplicatesByName('rules_pf1e');
+        await this.scanCollectionForDuplicatesByName('equipment_pf1e');
+        await this.scanCollectionForDuplicatesByName('spells_pf1e');
+        await this.scanCollectionForDuplicatesByName('deities_pf1e');
+        await this.scanCollectionForDuplicatesByName('hazards_pf1e');
+
+        this.logAdminStatus("Scan complete.", false);
+        
+    } catch (e: any) {
+        this.logAdminStatus(`An error occurred during duplicate scan: ${e.message}`, true);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+    }
+  }
+
+  private async scanCollectionForDuplicatesByName(collectionName: 'entities_pf1e' | 'rules_pf1e' | 'equipment_pf1e' | 'spells_pf1e' | 'deities_pf1e' | 'hazards_pf1e') {
+    if(!this.db) return;
+    const nameMap = new Map<string, string[]>();
+    const q = query(collection(this.db, collectionName));
+    const querySnapshot = await getDocs(q);
+
+    querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        const name = data.name;
+        if (name && !nameMap.has(name)) {
+            nameMap.set(name, []);
+        }
+        if (name) nameMap.get(name)!.push(doc.id);
+    });
+
+    const duplicatesByName = Array.from(nameMap.entries())
+        .filter(([name, docIds]) => docIds.length > 1);
+
+    if (duplicatesByName.length === 0) {
+        this.logAdminStatus(`No duplicates by name found in ${collectionName}.`, false);
+        return;
+    }
+
+    this.logAdminStatus(`Found ${duplicatesByName.length} sets of potential duplicates by name in ${collectionName}. Checking references...`, false);
+    
+    const manualMergeSets: DuplicateByNameSet[] = [];
+
+    for (const [name, docIds] of duplicatesByName) {
+        let referencedIds = new Set<string>();
+        if(collectionName === 'rules_pf1e') {
+            referencedIds = await this.findRuleReferences(docIds);
+        } else if (collectionName === 'entities_pf1e') {
+            referencedIds = this.findEntityReferences(this.codex(), docIds);
+        } else if (collectionName === 'equipment_pf1e') {
+            referencedIds = await this.findItemReferences(docIds);
+        }
+        // Spells, Deities, and Hazards are not currently referenced by ID, so we skip reference checks.
+
+        if(referencedIds.size === 1) {
+            const idToKeep = referencedIds.values().next().value;
+            const setToAutoMerge: DuplicateByNameSet = { id: `auto-merge-${name}`, name, docIds, collection: collectionName};
+            this.logAdminStatus(`Found 1 referenced doc for '${name}'. Auto-merging.`, false);
+            this.handleMergeByName(setToAutoMerge, idToKeep, false);
+        } else {
+            manualMergeSets.push({
+                id: `${collectionName}-set-${name}`,
+                name,
+                docIds,
+                collection: collectionName
+            });
+        }
+    }
+
+    if (collectionName === 'entities_pf1e') this.duplicateEntitySets.set(manualMergeSets);
+    else if (collectionName === 'rules_pf1e') this.duplicateRuleSets.set(manualMergeSets);
+    else if (collectionName === 'equipment_pf1e') this.duplicateEquipmentSets.set(manualMergeSets);
+    else if (collectionName === 'spells_pf1e') this.duplicateSpellSets.set(manualMergeSets);
+    else if (collectionName === 'deities_pf1e') this.duplicateDeitySets.set(manualMergeSets);
+    else if (collectionName === 'hazards_pf1e') this.duplicateHazardSets.set(manualMergeSets);
+     
+     if (manualMergeSets.length > 0) {
+        this.logAdminStatus(`Found ${manualMergeSets.length} sets of duplicates in ${collectionName} that require manual merging.`, false);
+     }
+  }
+  
+  private findEntityReferences(node: any, docIdsToFind: string[]): Set<string> {
+      let foundIds = new Set<string>();
+      if (!node || typeof node !== 'object') return foundIds;
+
+      for (const key in node) {
+          if (Object.prototype.hasOwnProperty.call(node, key)) {
+              const childNode = node[key];
+              if (isLeafNode(childNode)) {
+                  const statBlock = (childNode.content || []).find((b: any) => b.type === 'statblock' && b.entityId);
+                  if (statBlock && docIdsToFind.includes(statBlock.entityId)) {
+                      foundIds.add(statBlock.entityId);
+                  }
+              } else if (typeof childNode === 'object' && !Array.isArray(childNode)) {
+                  const deeperIds = this.findEntityReferences(childNode, docIdsToFind);
+                  deeperIds.forEach(id => foundIds.add(id));
+              }
+          }
+      }
+      return foundIds;
+  }
+  
+  private async findRuleReferences(ruleIds: string[]): Promise<Set<string>> {
+      const referencedIds = new Set<string>();
+      if (!this.db) return referencedIds;
+
+      const q = query(collection(this.db, 'entities_pf1e'), where('rules', 'array-contains-any', ruleIds));
+      const snapshot = await getDocs(q);
+
+      snapshot.forEach(doc => {
+          const entityRules = doc.data().rules as string[];
+          ruleIds.forEach(id => {
+              if (entityRules.includes(id)) {
+                  referencedIds.add(id);
+              }
+          });
+      });
+      return referencedIds;
+  }
+  
+  private async findItemReferences(itemIds: string[]): Promise<Set<string>> {
+      const referencedIds = new Set<string>();
+      if (!this.db) return referencedIds;
+
+      const equipmentQuery = query(collection(this.db, 'entities_pf1e'), where('equipment', 'array-contains-any', itemIds));
+      const magicItemsQuery = query(collection(this.db, 'entities_pf1e'), where('magicItems', 'array-contains-any', itemIds));
+
+      const [equipmentSnapshot, magicItemsSnapshot] = await Promise.all([getDocs(equipmentQuery), getDocs(magicItemsQuery)]);
+
+      const processSnapshot = (snapshot: any) => {
+          snapshot.forEach((doc: any) => {
+              const entityItems = [...(doc.data().equipment || []), ...(doc.data().magicItems || [])];
+              itemIds.forEach(id => {
+                  if (entityItems.includes(id)) {
+                      referencedIds.add(id);
+                  }
+              });
+          });
+      };
+      processSnapshot(equipmentSnapshot);
+      processSnapshot(magicItemsSnapshot);
+      return referencedIds;
+  }
+
+
+  private recursivelyFindDuplicateContent(node: any, path: string[], contentMap: Map<string, string[][]>) {
+    if (!node || typeof node !== 'object') return;
+
+    for (const key in node) {
+        if (Object.prototype.hasOwnProperty.call(node, key)) {
+            const childNode = node[key];
+            const currentPath = [...path, key];
+
+            if (isLeafNode(childNode)) {
+                const contentKey = JSON.stringify(childNode.content);
+                if (!contentMap.has(contentKey)) {
+                    contentMap.set(contentKey, []);
+                }
+                contentMap.get(contentKey)!.push(currentPath);
+            } else if (typeof childNode === 'object' && !Array.isArray(childNode)) {
+                this.recursivelyFindDuplicateContent(childNode, currentPath, contentMap);
+            }
+        }
+    }
+  }
+  
+  updateMergeSelection(setId: string, pathToKeep: string[]) {
+    this.mergeSelections.update(selections => ({...selections, [setId]: pathToKeep}));
+  }
+  
+  updateMergeByNameSelection(setId: string, docIdToKeep: string) {
+    this.mergeByNameSelections.update(selections => ({...selections, [setId]: docIdToKeep}));
+  }
+
+  async handleMergeContent(setId: string) {
+      const selection = this.mergeSelections()[setId];
+      if (!selection) {
+          this.logAdminStatus("Cannot merge: No entry selected to keep.", true);
+          return;
+      }
+      const setToMerge = this.duplicateContentSets().find(s => s.id === setId);
+      if (!setToMerge) return;
+
+      const pathsToDelete = setToMerge.paths.filter(p => p.join('/') !== selection.join('/'));
+      
+      if (this.confirmDelete() !== setId) {
+        this.confirmDelete.set(setId);
+        this.logAdminStatus(`This will keep '${selection.join(' / ')}' and delete ${pathsToDelete.length} other entries. Click again to confirm.`, false);
+        setTimeout(() => { if (this.confirmDelete() === setId) this.confirmDelete.set(null); }, 4000);
+        return;
+      }
+
+
+      this.isLoadingAdminAction.set(true);
+      const newCodexState = JSON.parse(JSON.stringify(this.codex()));
+      
+      pathsToDelete.forEach(path => {
+        this.deleteNestedProperty(newCodexState, path);
+        this.logAdminStatus(`Marked for deletion: ${path.join(' / ')}`, false);
+      });
+
+      try {
+        if (!this.db) throw new Error("Database not connected.");
+        const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+        await setDoc(docRef, newCodexState);
+        this.logAdminStatus("Merge successful. Codex has been updated.", false);
+        this.duplicateContentSets.update(sets => sets.filter(s => s.id !== setId));
+        this.mergeSelections.update(selections => {
+            const newSelections = {...selections};
+            delete newSelections[setId];
+            return newSelections;
+        });
+
+      } catch (e: any) {
+         this.logAdminStatus(`Failed to save merged data: ${e.message}`, true);
+      } finally {
+        this.confirmDelete.set(null);
+        this.isLoadingAdminAction.set(false);
+      }
+  }
+  
+  async handleMergeByName(set: DuplicateByNameSet, idToKeep?: string, showConfirmation: boolean = true) {
+    const docIdToKeep = idToKeep || this.mergeByNameSelections()[set.id];
+    if (!docIdToKeep) {
+        this.logAdminStatus(`Cannot merge ${set.collection}: No document selected to keep.`, true);
+        return;
+    }
+
+    const docIdsToDelete = set.docIds.filter(id => id !== docIdToKeep);
+    
+     if (showConfirmation && this.confirmDelete() !== set.id) {
+          this.confirmDelete.set(set.id);
+          this.logAdminStatus(`This will keep doc '${docIdToKeep}' and delete ${docIdsToDelete.length} others. Click again to confirm.`, false);
+          setTimeout(() => { if (this.confirmDelete() === set.id) this.confirmDelete.set(null); }, 4000);
+          return;
+      }
+      
+    this.isLoadingAdminAction.set(true);
+    if (!this.db) { this.logAdminStatus("DB error", true); this.isLoadingAdminAction.set(false); return; }
+
+    try {
+        const batch = writeBatch(this.db);
+        const codexRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+
+        if (set.collection === 'rules_pf1e') {
+            for (const docIdToDelete of docIdsToDelete) {
+                const q = query(collection(this.db, 'entities_pf1e'), where('rules', 'array-contains', docIdToDelete));
+                const snapshot = await getDocs(q);
+                snapshot.forEach(entityDoc => {
+                    batch.update(entityDoc.ref, { rules: arrayRemove(docIdToDelete) });
+                     batch.update(entityDoc.ref, { rules: arrayUnion(docIdToKeep) });
+                });
+                this.logAdminStatus(`Updated ${snapshot.size} entities referencing rule ${docIdToDelete}`, false);
+            }
+        } else if (set.collection === 'entities_pf1e') {
+            const codexDataCopy = JSON.parse(JSON.stringify(this.codex()));
+            let updatesMade = this.recursivelyUpdateEntityReferences(codexDataCopy, docIdsToDelete, docIdToKeep);
+            if(updatesMade) {
+                batch.set(codexRef, codexDataCopy);
+                this.logAdminStatus(`Updated codex with merged entity references.`, false);
+            }
+        } else if (set.collection === 'equipment_pf1e' || set.collection === 'magic_items_pf1e') {
+            for (const docIdToDelete of docIdsToDelete) {
+                const qEquip = query(collection(this.db, 'entities_pf1e'), where('equipment', 'array-contains', docIdToDelete));
+                const snapEquip = await getDocs(qEquip);
+                snapEquip.forEach(entityDoc => {
+                    batch.update(entityDoc.ref, { equipment: arrayRemove(docIdToDelete) });
+                    batch.update(entityDoc.ref, { equipment: arrayUnion(docIdToKeep) });
+                });
+
+                const qMagic = query(collection(this.db, 'entities_pf1e'), where('magicItems', 'array-contains', docIdToDelete));
+                const snapMagic = await getDocs(qMagic);
+                snapMagic.forEach(entityDoc => {
+                    batch.update(entityDoc.ref, { magicItems: arrayRemove(docIdToDelete) });
+                    batch.update(entityDoc.ref, { equipment: arrayUnion(docIdToKeep) }); // Add to equipment
+                });
+                this.logAdminStatus(`Updated ${snapEquip.size + snapMagic.size} entities referencing item ${docIdToDelete}`, false);
+            }
+        }
+
+        docIdsToDelete.forEach(id => {
+            const docRef = doc(this.db!, set.collection, id);
+            batch.delete(docRef);
+        });
+
+        await batch.commit();
+
+        this.logAdminStatus(`Successfully merged duplicates for '${set.name}'. Kept doc '${docIdToKeep}'.`, false);
+
+        if (set.collection === 'entities_pf1e') this.duplicateEntitySets.update(sets => sets.filter(s => s.id !== set.id));
+        else if (set.collection === 'rules_pf1e') this.duplicateRuleSets.update(sets => sets.filter(s => s.id !== set.id));
+        else if (set.collection === 'equipment_pf1e') this.duplicateEquipmentSets.update(sets => sets.filter(s => s.id !== set.id));
+        else if (set.collection === 'spells_pf1e') this.duplicateSpellSets.update(sets => sets.filter(s => s.id !== set.id));
+        else if (set.collection === 'deities_pf1e') this.duplicateDeitySets.update(sets => sets.filter(s => s.id !== set.id));
+        else if (set.collection === 'hazards_pf1e') this.duplicateHazardSets.update(sets => sets.filter(s => s.id !== set.id));
+       
+       this.mergeByNameSelections.update(s => {
+           const newS = {...s};
+           delete newS[set.id];
+           return newS;
+       });
+
+    } catch (e: any) {
+        this.logAdminStatus(`An error occurred during the merge: ${e.message}`, true);
+    } finally {
+        this.confirmDelete.set(null);
+        this.isLoadingAdminAction.set(false);
+    }
+  }
+
+  private recursivelyUpdateEntityReferences(node: any, idsToReplace: string[], idToKeep: string): boolean {
+    let changed = false;
+    if (!node || typeof node !== 'object') return false;
+
+    for (const key in node) {
+        if (Object.prototype.hasOwnProperty.call(node, key)) {
+            const childNode = node[key];
+             if (isLeafNode(childNode)) {
+                (childNode.content || []).forEach((block: any) => {
+                  if (block.type === 'statblock' && idsToReplace.includes(block.entityId)) {
+                    block.entityId = idToKeep;
+                    changed = true;
+                  }
+                });
+             } else if (typeof childNode === 'object' && !Array.isArray(childNode)) {
+                 if(this.recursivelyUpdateEntityReferences(childNode, idsToReplace, idToKeep)) {
+                    changed = true;
+                 }
+             }
+        }
+    }
+    return changed;
+  }
+
+
+  async handlePrefixNormalization() {
+    if (!this.db) {
+        this.logAdminStatus("Database not connected. Cannot normalize prefixes.", true);
+        return;
+    }
+    this.isLoadingAdminAction.set(true);
+    this.logAdminStatus("--- Starting Item Prefix & Location Normalization ---", false);
+
+    const idMigrationMap = new Map<string, string>();
+    const finalEquipmentData = new Map<string, any>(); // Use a map to handle name collisions automatically
+
+    try {
+        // Step 1: Ingest all items from both sources and determine their correct, final state.
+        this.logAdminStatus("Step 1: Consolidating and normalizing all items...", false);
+
+        // Ingest magic items
+        const magicItemsSnapshot = await getDocs(collection(this.db, 'magic_items_pf1e'));
+        magicItemsSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data.name) {
+                const correctId = `eq_${data.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+                finalEquipmentData.set(correctId, data);
+                idMigrationMap.set(docSnap.id, correctId);
+            }
+        });
+        this.logAdminStatus(`  > Ingested ${magicItemsSnapshot.size} magic items.`, false);
+
+        // Ingest equipment items, overwriting any magic items with the same normalized name
+        const equipmentSnapshot = await getDocs(collection(this.db, 'equipment_pf1e'));
+        equipmentSnapshot.forEach(docSnap => {
+            const data = docSnap.data();
+            if (data.name) {
+                const correctId = `eq_${data.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+                finalEquipmentData.set(correctId, data); // This will overwrite duplicates, equipment data takes precedence.
+                if (docSnap.id !== correctId) {
+                    idMigrationMap.set(docSnap.id, correctId);
+                }
+            }
+        });
+        this.logAdminStatus(`  > Ingested and reconciled ${equipmentSnapshot.size} equipment items. Final count: ${finalEquipmentData.size}.`, false);
+
+        // Step 2: Clear old collections and write the new, normalized collection in chunks.
+        this.logAdminStatus("Step 2: Performing batched delete-and-rewrite operation...", false);
+        const operations: {type: 'delete' | 'set', ref: any, data?: any}[] = [];
+
+        magicItemsSnapshot.forEach(docSnap => operations.push({ type: 'delete', ref: docSnap.ref }));
+        equipmentSnapshot.forEach(docSnap => operations.push({ type: 'delete', ref: docSnap.ref }));
+
+        finalEquipmentData.forEach((data, id) => {
+            const newDocRef = doc(this.db!, 'equipment_pf1e', id);
+            operations.push({ type: 'set', ref: newDocRef, data });
+        });
+        
+        await this.commitBatchInChunks(operations as any);
+        this.logAdminStatus(`  > Wrote ${finalEquipmentData.size} normalized items to equipment_pf1e after clearing old data.`, false);
+
+
+        // Step 3: Update references in entities_pf1e
+        this.logAdminStatus("Step 3: Updating entity references to reflect item changes...", false);
+        const entitiesSnapshot = await getDocs(collection(this.db, 'entities_pf1e'));
+        if (entitiesSnapshot.empty) {
+            this.logAdminStatus("  > No entities found to update.", false);
+        } else {
+            const entityUpdateOps: {type: 'update', ref: any, data: any}[] = [];
+            let entitiesUpdatedCount = 0;
+
+            for (const entityDoc of entitiesSnapshot.docs) {
+                let changed = false;
+                const entityData = entityDoc.data() as Pf1eEntity;
+                const oldItemIds = new Set([...(entityData.equipment || []), ...(entityData.magicItems || [])]);
+                const newItemIds = new Set<string>();
+                oldItemIds.forEach(oldId => {
+                    newItemIds.add(idMigrationMap.get(oldId) || oldId);
+                });
+
+                const finalEquipmentList = Array.from(newItemIds);
+                const originalEquipmentList = entityData.equipment || [];
+                
+                if (finalEquipmentList.length !== originalEquipmentList.length || 
+                    !finalEquipmentList.every(id => originalEquipmentList.includes(id)) || 
+                    (entityData.magicItems && entityData.magicItems.length > 0)) {
+                    changed = true;
+                }
+
+                if (changed) {
+                    entityUpdateOps.push({ type: 'update', ref: entityDoc.ref, data: { equipment: finalEquipmentList, magicItems: [] } });
+                    entitiesUpdatedCount++;
+                }
+            }
+            
+            if (entitiesUpdatedCount > 0) {
+                await this.commitBatchInChunks(entityUpdateOps as any);
+                this.logAdminStatus(`  > Successfully updated item references in ${entitiesUpdatedCount} entities.`, false);
+            } else {
+                this.logAdminStatus(`  > No entity references needed updating.`, false);
+            }
+        }
+
+    } catch (e: any) {
+        this.logAdminStatus(`An error occurred during prefix normalization: ${e.message}`, true);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+        this.logAdminStatus("--- Item Prefix & Location Normalization Complete ---", false);
+    }
+  }
+
+  private deleteNestedProperty(obj: any, path: string[]) {
+    const parentPath = path.slice(0, -1);
+    const finalKey = path[path.length - 1];
+    let parent = obj;
+    for (const key of parentPath) {
+        if (!parent[key]) return;
+        parent = parent[key];
+    }
+    delete parent[finalKey];
+  }
+
+  private async commitBatchInChunks(operations: {type: 'delete' | 'set' | 'update', ref: any, data?: any}[]) {
+    if (!this.db) return;
+    const batchSize = 499; // Keep it under 500 to be safe
+    for (let i = 0; i < operations.length; i += batchSize) {
+        const chunk = operations.slice(i, i + batchSize);
+        const batch = writeBatch(this.db);
+        chunk.forEach(op => {
+            if (op.type === 'delete') {
+                batch.delete(op.ref);
+            } else if (op.type === 'set') {
+                batch.set(op.ref, op.data);
+            } else if (op.type === 'update') {
+                batch.update(op.ref, op.data);
+            }
+        });
+        await batch.commit();
+        this.logAdminStatus(`  > Committed a chunk of ${chunk.length} database operations.`, false);
+    }
+  }
+
+  private logAdminStatus(message: string, isError: boolean) {
+    const time = new Date().toLocaleTimeString();
+    this.adminStatusLog.update(log => [{ message, isError, time }, ...log]);
+  }
+  
+  async handleClearSection(key: string) {
+      if (this.confirmDelete() !== key) {
+          this.confirmDelete.set(key);
+          setTimeout(() => { if (this.confirmDelete() === key) this.confirmDelete.set(null); }, 3000);
+          return;
+      }
+      if (!this.db) return;
+      this.isLoadingAdminAction.set(true);
+      try {
+          const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+          await updateDoc(docRef, { [key]: deleteField() });
+          this.logAdminStatus(`Section '${key}' has been cleared from Firestore.`, false);
+      } catch (e: any) {
+          this.logAdminStatus(`Failed to clear section '${key}': ${e.message}`, true);
+      } finally {
+          this.confirmDelete.set(null);
+          this.isLoadingAdminAction.set(false);
+      }
+  }
+
+  private async clearCollection(collectionName: string) {
+      if (!this.db) {
+          this.logAdminStatus(`Cannot clear ${collectionName}: DB not connected.`, true);
+          return;
+      }
+      const collectionRef = collection(this.db, collectionName);
+      const snapshot = await getDocs(collectionRef);
+      if (snapshot.empty) {
+          this.logAdminStatus(`Collection '${collectionName}' is already empty.`, false);
+          return;
+      }
+      const batch = writeBatch(this.db);
+      snapshot.docs.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      this.logAdminStatus(`Successfully cleared ${snapshot.size} documents from '${collectionName}'.`, false);
+  }
+  
+  async handleClearCollection(collectionName: string) {
+    if (this.confirmDelete() !== collectionName) {
+      this.confirmDelete.set(collectionName);
+      setTimeout(() => { if (this.confirmDelete() === collectionName) this.confirmDelete.set(null); }, 3000);
+      return;
+    }
+    this.isLoadingAdminAction.set(true);
+    try {
+      await this.clearCollection(collectionName);
+    } catch(e: any) {
+      this.logAdminStatus(`Failed to clear collection '${collectionName}': ${e.message}`, true);
+    } finally {
+      this.isLoadingAdminAction.set(false);
+      this.confirmDelete.set(null);
+    }
+  }
+
+  async handleClearCachedCollection(cacheName: string) {
+      if (this.confirmDelete() !== cacheName) {
+          this.confirmDelete.set(cacheName);
+          setTimeout(() => { if (this.confirmDelete() === cacheName) this.confirmDelete.set(null); }, 3000);
+          return;
+      }
+      await this.handleClearCollection(cacheName);
+      this.confirmDelete.set(null);
+  }
+
+  async handleClearEntities() { 
+    if (this.confirmDelete() !== 'CLEAR_ENTITIES') {
+        this.confirmDelete.set('CLEAR_ENTITIES');
+        setTimeout(() => { if (this.confirmDelete() === 'CLEAR_ENTITIES') this.confirmDelete.set(null); }, 3000);
+        return;
+    }
+    await this.handleClearCollection('entities_pf1e'); 
+    this.confirmDelete.set(null);
+  }
+  async handleClearRules() { 
+    if (this.confirmDelete() !== 'CLEAR_RULES') {
+        this.confirmDelete.set('CLEAR_RULES');
+        setTimeout(() => { if (this.confirmDelete() === 'CLEAR_RULES') this.confirmDelete.set(null); }, 3000);
+        return;
+    }
+    await this.handleClearCollection('rules_pf1e'); 
+    this.confirmDelete.set(null);
+  }
+  async handleClearEquipment() { 
+    if (this.confirmDelete() !== 'CLEAR_EQUIPMENT') {
+        this.confirmDelete.set('CLEAR_EQUIPMENT');
+        setTimeout(() => { if (this.confirmDelete() === 'CLEAR_EQUIPMENT') this.confirmDelete.set(null); }, 3000);
+        return;
+    }
+    await this.handleClearCollection('equipment_pf1e'); 
+    this.confirmDelete.set(null);
+  }
+
+  // --- UI HANDLERS & ACTIONS ---
+  
+  async handleProcessAiUpdate() {
+    this.logAdminStatus("Starting AI update process...", false);
+    this.isProcessingAiUpdate.set(true);
+    this.proposedDataUpdate.set(null);
+    this.aiUpdateTargetPath.set(null);
+    this.isCreatingNewEntry.set(false);
+    const apiKey = this.assistantApiKey();
+
+    try {
+        this.logAdminStatus(`AI is locating target for: "${this.aiUpdateRequest}"`, false);
+        let pathString = await fetchFromGemini(apiKey, this.aiUpdateRequest, 'codex-locate', { codex: this.codex() });
+        pathString = pathString.replace(/```json|```/g, '').trim();
+        const path = JSON.parse(pathString);
+        this.aiUpdateTargetPath.set(path);
+
+        let targetData: any = this.codex();
+        for (const key of path) {
+            targetData = targetData?.[key];
+        }
+
+        if (targetData) {
+            this.isCreatingNewEntry.set(false);
+            this.logAdminStatus(`AI found target at path: ${path.join(' / ')}. Generating update...`, false);
+            let updatedDataString = await fetchFromGemini(apiKey, this.aiUpdateRequest, 'codex-update', { codex: targetData });
+            updatedDataString = updatedDataString.replace(/```json|```/g, '').trim();
+            const updatedData = JSON.parse(updatedDataString);
+            this.proposedDataUpdate.set(updatedData);
+        } else {
+            this.isCreatingNewEntry.set(true);
+            this.logAdminStatus(`Target not found at path: ${path.join(' / ')}. Proposing new entry...`, false);
+            let newDataString = await fetchFromGemini(apiKey, this.aiUpdateRequest, 'codex-create', { codex: path });
+            newDataString = newDataString.replace(/```json|```/g, '').trim();
+            const newData = JSON.parse(newDataString);
+            this.proposedDataUpdate.set(newData);
+        }
+
+    } catch (e: any) {
+        this.logAdminStatus(`AI update failed: ${e.message}`, true);
+    } finally {
+        this.isProcessingAiUpdate.set(false);
+    }
+  }
+
+  handleCancelAiUpdate() {
+    this.proposedDataUpdate.set(null);
+    this.aiUpdateTargetPath.set(null);
+    this.logAdminStatus("AI update proposal cancelled.", false);
+  }
+
+  async handleConfirmAiUpdate() {
+    const path = this.aiUpdateTargetPath();
+    const data = this.proposedDataUpdate();
+    if (!path || !data || !this.db) {
+        this.logAdminStatus("Cannot confirm update: Missing data, path, or DB connection.", true);
+        return;
+    }
+
+    this.isProcessingAiUpdate.set(true);
+    try {
+        const newCodexState = JSON.parse(JSON.stringify(this.codex()));
+        let parent = newCodexState;
+        for (let i = 0; i < path.length - 1; i++) {
+            parent = parent[path[i]];
+            if (!parent) throw new Error("Invalid path to update.");
+        }
+        parent[path[path.length - 1]] = data;
+
+        const docRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+        await setDoc(docRef, newCodexState);
+        this.logAdminStatus(`Successfully saved changes to path: ${path.join(' / ')}`, false);
+
+    } catch (e: any) {
+        this.logAdminStatus(`Error saving confirmed changes: ${e.message}`, true);
+    } finally {
+        this.isProcessingAiUpdate.set(false);
+        this.proposedDataUpdate.set(null);
+        this.aiUpdateTargetPath.set(null);
+    }
+  }
+  
+  async handleBackupDatabase() {
+      if (!this.db) {
+          this.logAdminStatus("Database not initialized.", true);
+          return;
+      }
+      this.isLoadingAdminAction.set(true);
+      this.logAdminStatus("Starting database backup...", false);
+      const zip = new JSZip();
+      const backupData: any = {};
+
+      try {
+          const codexRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+          const codexSnap = await getDoc(codexRef);
+          if (codexSnap.exists()) {
+              backupData['codex.json'] = codexSnap.data();
+              this.logAdminStatus("Backed up codex data.", false);
+          }
+
+          for (const collectionName of this.collectionsToBackup) {
+              const collectionRef = collection(this.db, collectionName);
+              const snapshot = await getDocs(collectionRef);
+              if (!snapshot.empty) {
+                  const collectionData: any = {};
+                  snapshot.forEach(d => collectionData[d.id] = d.data());
+                  backupData[`${collectionName}.json`] = collectionData;
+                  this.logAdminStatus(`Backed up ${snapshot.size} documents from ${collectionName}.`, false);
+              }
+          }
+          
+          zip.file("backup.json", JSON.stringify(backupData));
+          const content = await zip.generateAsync({ type: "blob" });
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(content);
+          link.download = `codex_backup_${new Date().toISOString()}.zip`;
+          link.click();
+          URL.revokeObjectURL(link.href);
+          this.logAdminStatus("Backup ZIP file created and download initiated.", false);
+
+      } catch (e: any) {
+          this.logAdminStatus(`Backup failed: ${e.message}`, true);
+      } finally {
+          this.isLoadingAdminAction.set(false);
+      }
+  }
+
+  handleRestoreFileSelect(event: Event) {
+      const input = event.target as HTMLInputElement;
+      const file = input.files?.[0];
+      if (!file) return;
+
+      this.isLoadingAdminAction.set(true);
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+          try {
+              const zip = await JSZip.loadAsync(e.target!.result);
+              const backupFile = zip.file("backup.json");
+              if (!backupFile) throw new Error("backup.json not found in ZIP.");
+
+              const content = await backupFile.async("string");
+              const data = JSON.parse(content);
+              this.parsedRestoreData.set(data);
+              
+              const preview = {
+                  fileName: file.name,
+                  hasCodex: !!data['codex.json'],
+                  collections: Object.keys(data).filter(k => k !== 'codex.json').map(k => k.replace('.json', ''))
+              };
+              this.restoreDataPreview.set(preview);
+              this.logAdminStatus(`Backup file '${file.name}' loaded for review.`, false);
+          } catch (err: any) {
+              this.logAdminStatus(`Failed to read backup file: ${err.message}`, true);
+          } finally {
+              this.isLoadingAdminAction.set(false);
+          }
+      };
+      reader.readAsArrayBuffer(file);
+  }
+  
+  handleCancelRestore() {
+      this.restoreDataPreview.set(null);
+      this.parsedRestoreData.set(null);
+      this.confirmDelete.set(null);
+  }
+
+  async handleConfirmRestore() {
+      if (this.confirmDelete() !== 'RESTORE_DB') {
+          this.logAdminStatus("Please confirm the restore operation by clicking the button again.", true);
+          this.confirmDelete.set('RESTORE_DB');
+          setTimeout(() => { if (this.confirmDelete() === 'RESTORE_DB') this.confirmDelete.set(null); }, 3000);
+          return;
+      }
+      if (!this.db || !this.parsedRestoreData()) {
+          this.logAdminStatus("Cannot restore: Database or backup data is not ready.", true);
+          return;
+      }
+
+      this.isLoadingAdminAction.set(true);
+      this.logAdminStatus("--- STARTING DESTRUCTIVE RESTORE ---", true);
+      const data = this.parsedRestoreData();
+      
+      try {
+          // Clear existing collections first
+          for (const collectionName of this.collectionsToBackup) {
+              await this.clearCollection(collectionName);
+          }
+          this.logAdminStatus("All existing data cleared.", false);
+
+          const batch = writeBatch(this.db);
+          for (const fileName in data) {
+              const collectionData = data[fileName];
+              if (fileName === 'codex.json') {
+                  const codexRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+                  batch.set(codexRef, collectionData);
+              } else {
+                  const collectionName = fileName.replace('.json', '');
+                  for (const docId in collectionData) {
+                      const docRef = doc(this.db, collectionName, docId);
+                      batch.set(docRef, collectionData[docId]);
+                  }
+              }
+          }
+          
+          await batch.commit();
+          this.logAdminStatus("--- RESTORE COMPLETE ---", false);
+          this.handleCancelRestore();
+      } catch (e: any) {
+          this.logAdminStatus(`Restore failed during commit: ${e.message}`, true);
+      } finally {
+          this.isLoadingAdminAction.set(false);
+      }
+  }
+
+  async handleProcessCodex() {
+    if (!this.codex() || !this.db) {
+        this.logAdminStatus("Cannot process codex: Data not loaded or DB not connected.", true);
+        return;
+    }
+    this.isLoadingAdminAction.set(true);
+    this.logAdminStatus("--- Starting Full Codex Processing ---", false);
+    
+    try {
+        const allLeafNodes = this.findAllLeafNodes(this.codex(), []);
+        this.logAdminStatus(`Found ${allLeafNodes.length} leaf nodes (potential entities) to process.`, false);
+
+        for (const { node, path } of allLeafNodes) {
+            const name = path[path.length - 1];
+            const statBlock = (node.content || []).find((b: any) => b.type === 'statblock');
+
+            if (statBlock) {
+                this.logAdminStatus(`Processing statblock for: ${name}`, false);
+                let parsedData: ReturnType<typeof parseStatBlockToEntity> | null = null;
+
+                for (const block of node.content.filter((b: any) => b.type === 'statblock')) {
+                const tryParse = parseStatBlockToEntity(block, name, path, node.content);
+                if (['Str','Dex','Con','Int','Wis','Cha'].some(ab => tryParse.baseStats.hasOwnProperty(ab))) {
+                    parsedData = tryParse;
+                    break;               // <-- found the real creature block
+                }
+                }
+
+                if (!parsedData) {
+                this.logAdminStatus(`  > Skipping '${name}': No creature statblock with ability scores found.`, false);
+                continue;
+                }
+                
+                const hasCoreAbility = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'].some(ab => parsedData.baseStats.hasOwnProperty(ab));
+                if (!hasCoreAbility) {
+                    this.logAdminStatus(`  > Skipping '${name}': Not a creature statblock (missing ability scores).`, false);
+                    continue;
+                }
+                
+                const { baseStats, featNames, specialAbilityNames, equipmentNames, spellNames, deityName } = parsedData;
+                
+                let entityRef;
+                let existingEntityData: Pf1eEntity | null = null;
+                if (statBlock.entityId) {
+                    entityRef = doc(this.db, 'entities_pf1e', statBlock.entityId);
+                    const existingDoc = await getDoc(entityRef);
+                    if (existingDoc.exists()) existingEntityData = existingDoc.data() as Pf1eEntity;
+                }
+
+                const finalBaseStats = existingEntityData ? mergeBaseStats(baseStats, existingEntityData.baseStats) : baseStats;
+                const addedRules = await this.processRules([...featNames, ...specialAbilityNames], 'feat'); 
+                await this.processNewEquipment(equipmentNames);
+
+                const entityData: Pf1eEntity = {
+                    name,
+                    sourceCodexPath: path,
+                    baseStats: finalBaseStats,
+                    rules: addedRules.map(r => `feat_${r.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`),
+                    equipment: equipmentNames,
+                    magicItems: [],
+                    spells: {},
+                    ...(deityName && { deity: deityName }),
+                };
+                
+                if(entityRef) {
+                    const updateData: any = { ...entityData };
+                    if (!deityName && existingEntityData?.deity) {
+                        updateData.deity = deleteField();
+                    }
+                    await updateDoc(entityRef, updateData);
+                    this.logAdminStatus(`  > Updated entity document ${entityRef.id} for '${name}'.`, false);
+                } else {
+                    const newEntityRef = await addDoc(collection(this.db, 'entities_pf1e'), entityData);
+                    const codexDocRef = doc(this.db, `artifacts/${this.codexAppId}/public/data/codex`, "world_data");
+                    let updatePath = path.join('.') + '.content';
+                    // This part is tricky - need a reliable way to update a nested field.
+                    // For now, logging the need for manual update might be safest.
+                    this.logAdminStatus(`  > CREATED new entity ${newEntityRef.id} for '${name}'. You may need to manually link this ID in the codex.`, true);
+                }
+            }
+        }
+    } catch (e: any) {
+        this.logAdminStatus(`An error occurred during codex processing: ${e.message}`, true);
+    } finally {
+        this.isLoadingAdminAction.set(false);
+        this.logAdminStatus("--- Codex Processing Complete ---", false);
+    }
+  }
+
+  private findAllLeafNodes(node: any, path: string[]): { node: any; path: string[] }[] {
+    let leaves: { node: any; path: string[] }[] = [];
+    if (!node || typeof node !== 'object') return leaves;
+
+    for (const key in node) {
+        if (Object.prototype.hasOwnProperty.call(node, key)) {
+            const childNode = node[key];
+            const currentPath = [...path, key];
+            if (isLeafNode(childNode)) {
+                leaves.push({ node: childNode, path: currentPath });
+            } else if (typeof childNode === 'object' && !Array.isArray(childNode)) {
+                leaves = leaves.concat(this.findAllLeafNodes(childNode, currentPath));
+            }
+        }
+    }
+    return leaves;
+  }
+
+  private async processRules(ruleNames: string[], ruleType: 'feat' | 'condition' | 'special_ability'): Promise<Pf1eRule[]> {
+      const apiKey = this.assistantApiKey();
+      const addedRules: Pf1eRule[] = [];
+      if(!this.db) return [];
+      
+      for (const name of [...new Set(ruleNames)]) {
+          try {
+              if(!name) continue;
+              const prefix = ruleType === 'condition' ? 'cond_' : 'feat_';
+              const ruleId = `${prefix}${name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
+              const ruleRef = doc(this.db, 'rules_pf1e', ruleId);
+              const docSnap = await getDoc(ruleRef);
+
+              if(!docSnap.exists()){
+                let geminiType: 'feat-rule' | 'condition-rule' | 'special-ability-rule' = 'feat-rule'; // default
+                if (ruleType === 'condition') geminiType = 'condition-rule';
+                else if(ruleType === 'special_ability') geminiType = 'special-ability-rule';
+
+                this.logAdminStatus(`New rule found: '${name}'. Fetching from Gemini...`, false);
+                let ruleString = await fetchFromGemini(apiKey, name, geminiType);
+                ruleString = ruleString.replace(/```json|```/g, '').trim();
+                const ruleData = JSON.parse(ruleString) as Pf1eRule;
+                await setDoc(ruleRef, ruleData);
+                addedRules.push(ruleData);
+                this.logAdminStatus(`  > Stored rule details for '${name}'.`, false);
+              } else {
+                addedRules.push(docSnap.data() as Pf1eRule);
+              }
+          } catch (e: any) {
+              this.logAdminStatus(`Failed to process rule for '${name}': ${e.message}`, true);
+          }
+      }
+      return addedRules;
+  }
+
+  async handleSmartSpellLink() {
+      if (!this.db) { this.logAdminStatus("DB not connected", true); return; }
+      const apiKey = this.assistantApiKey();
+      if (!apiKey && this.apiKeySource() !== 'native') {
+          this.logAdminStatus("Smart Spell Linker requires an API key.", true);
+          return;
+      }
+
+      this.isLoadingAdminAction.set(true);
+      this.logAdminStatus("--- Starting Smart Spell Linker ---", false);
+
+      try {
+          const entitiesRef = collection(this.db, 'entities_pf1e');
+          const spellsRef = collection(this.db, 'spells_pf1e');
+          const allSpellsSnap = await getDocs(spellsRef);
+          const allSpells = allSpellsSnap.docs.map(d => d.data() as Pf1eSpell);
+          
+          const entitiesSnap = await getDocs(entitiesRef);
+          this.logAdminStatus(`Scanning ${entitiesSnap.size} entities for spellcasting ability...`, false);
+
+          for (const entityDoc of entitiesSnap.docs) {
+              const entity = entityDoc.data() as Pf1eEntity;
+              const stats = entity.baseStats;
+              
+              const casterInfo = this.determineCaster(stats);
+              if (casterInfo) {
+                  const { casterClass, casterLevel, castingScore } = casterInfo;
+                  const slotsToFill = this.getSpellsPerDay(casterClass, casterLevel, castingScore);
+                  
+                  if (Object.values(slotsToFill).some(v => v > 0)) {
+                      this.logAdminStatus(`Entity '${entity.name}' is a level ${casterLevel} ${casterClass}. Selecting spells...`, false);
+                      const availableSpells = allSpells.filter(s => s.level.includes(casterClass));
+                      
+                      let spellJson = await fetchFromGemini(apiKey, 'select spells', 'pf1e-select-spells', { codex: { casterClass, casterLevel, castingScore, slotsToFill, availableSpells: availableSpells.map(s=>s.name) } });
+                      spellJson = spellJson.replace(/```json|```/g, '').trim();
+                      const preparedSpells = JSON.parse(spellJson);
+                      
+                      await updateDoc(entityDoc.ref, { spells: preparedSpells });
+                      this.logAdminStatus(`  > Assigned prepared spells to '${entity.name}'.`, false);
+                  }
+              }
+          }
+      } catch (e: any) {
+          this.logAdminStatus(`An error occurred during Smart Spell Linking: ${e.message}`, true);
+      } finally {
+          this.isLoadingAdminAction.set(false);
+          this.logAdminStatus("--- Smart Spell Linker Finished ---", false);
+      }
+  }
+
+  private determineCaster(stats: any): { casterClass: string, casterLevel: number, castingScore: number } | null {
+      const classLine = stats.class?.toLowerCase() || '';
+      for (const cClass in CASTER_CLASSES) {
+          if (classLine.includes(cClass)) {
+              const levelMatch = classLine.match(new RegExp(`${cClass}\\s*(\\d+)`));
+              const casterLevel = levelMatch ? parseInt(levelMatch[1], 10) : 1;
+              const castingStat = CASTER_CLASSES[cClass].stat;
+              const castingScore = stats[castingStat] || 10;
+              return { casterClass: cClass, casterLevel, castingScore };
+          }
+      }
+      return null;
+  }
+
+  private getSpellsPerDay(casterClass: string, level: number, abilityScore: number): { [level: string]: number } {
+      const progression = CASTER_CLASSES[casterClass]?.progression[level - 1];
+      if (!progression) return {};
+
+      const abilityMod = getAbilityModifierAsNumber(abilityScore);
+      const spells: { [level: string]: number } = {};
+
+      progression.forEach((baseSpells, spellLevel) => {
+          if (baseSpells > 0 || spellLevel === 0) {
+              let bonusSpells = 0;
+              if (spellLevel > 0 && abilityMod >= spellLevel) {
+                  bonusSpells = Math.floor((abilityMod - spellLevel) / 4) + 1;
+              }
+              spells[String(spellLevel)] = baseSpells + bonusSpells;
+          }
+      });
+      return spells;
+  }
+
+
+  // --- HELPERS ---
+  objectKeys = Object.keys;
+  objectToJson = (obj: any) => JSON.stringify(obj, null, 2);
+  formatKey = (key: string) => key ? key.replace(/_/g, ' ') : '';
+}
