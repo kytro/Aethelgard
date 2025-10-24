@@ -26,6 +26,8 @@ export class DataIntegrityComponent {
   reconciliationIterations = signal<number>(5);
   reconciliationBatchSize = signal<number>(20);
   dryRun = signal<boolean>(true);
+  forceMigration = signal<boolean>(false);
+  orphanAction = signal<'delete' | 'create'>('delete');
 
   /* ----------  lifecycle  ----------  */
   ngOnInit(): void {
@@ -33,6 +35,18 @@ export class DataIntegrityComponent {
   }
 
   /* ----------  public API  ----------  */
+  async migrateCodex(): Promise<void> {
+    const confirmed = window.confirm(
+      'Are you sure you want to migrate the codex data? This is a major, one-way operation. The old codex collection will be backed up.'
+    );
+    if (!confirmed) {
+      this.log('Codex migration cancelled by user.');
+      return;
+    }
+
+    await this.triggerBackendJob('data-integrity', 'migrate-codex', { force: this.forceMigration() });
+  }
+
   async getDataIntegrityStatus(): Promise<void> {
     this.isLoading.set(true);
     this.log('Getting data integrity status...');
@@ -50,6 +64,10 @@ export class DataIntegrityComponent {
     } finally {
       this.isLoading.set(false);
     }
+  }
+
+  async normalizeStatblocks(): Promise<void> {
+    await this.triggerBackendJob('data-integrity', 'normalize-statblocks');
   }
 
   /* ----------  public API  ----------  */

@@ -22,6 +22,10 @@ export class DataBrowserComponent {
   error = signal<string | null>(null);
   isLoading = signal<boolean>(false);
 
+  // Edit state
+  editingDocument = signal<any | null>(null);
+  editedJson = signal<string>('');
+
   // Confirmation state for deletions
   confirmingDeleteCollection = signal<string | null>(null);
   confirmingDeleteDoc = signal<string | null>(null);
@@ -74,6 +78,7 @@ export class DataBrowserComponent {
 
   selectDocument(doc: any) {
     this.selectedDocument.set(doc);
+    this.cancelEdit(); // Ensure we're not in edit mode when selecting a new doc
   }
 
   backToCollections() {
@@ -81,13 +86,51 @@ export class DataBrowserComponent {
     this.documents.set([]);
     this.selectedDocument.set(null);
     this.filterTerm.set('');
+    this.cancelEdit();
   }
   
-  // --- New Helper Function ---
-  // This safely converts the selected document object to a formatted JSON string for display.
-  objectToJson(obj: any): string {
-    if (obj === null) return '';
-    return JSON.stringify(obj, null, 2);
+  // --- Edit Logic ---
+  editDocument(doc: any, event: MouseEvent) {
+    event.stopPropagation();
+    this.editingDocument.set(JSON.parse(JSON.stringify(doc))); // Deep copy for editing
+    this.editedJson.set(JSON.stringify(doc, null, 2));
+    this.selectedDocument.set(doc); // Also select the document to show the edit view
+  }
+
+  cancelEdit() {
+    this.editingDocument.set(null);
+    this.editedJson.set('');
+    // We don't reset selectedDocument here, so the user can go back to the read-only view
+  }
+
+  async saveDocument() {
+    const collectionName = this.selectedCollection();
+    const docToSave = this.editingDocument();
+    if (!collectionName || !docToSave) return;
+
+    this.isLoading.set(true);
+    this.error.set(null);
+
+    try {
+      const updatedDoc = JSON.parse(this.editedJson());
+      const docId = docToSave._id;
+      
+      await lastValueFrom(this.http.put(`api/admin/collections/${collectionName}/${docId}`, updatedDoc));
+      
+      // Update local state
+      this.documents.update(docs => docs.map(d => d._id === docId ? updatedDoc : d));
+      this.selectDocument(updatedDoc); // Reselect the doc to show the updated, non-edit view
+      this.cancelEdit(); // Exit edit mode
+
+    } catch (err: any) {
+        if (err instanceof SyntaxError) {
+            this.error.set('Invalid JSON format.');
+        } else {
+            this.error.set(err.error?.error || `Failed to save document ${docToSave._id}.`);
+        }
+    } finally {
+      this.isLoading.set(false);
+    }
   }
 
   // --- Deletion Logic ---
@@ -128,7 +171,7 @@ export class DataBrowserComponent {
   requestDeleteDocument(docId: string, event: MouseEvent) {
     event.stopPropagation();
     this.confirmingDeleteDoc.set(docId);
-     setTimeout(() => {
+      setTimeout(() => {
       if (this.confirmingDeleteDoc() === docId) {
         this.confirmingDeleteDoc.set(null);
       }
@@ -137,7 +180,7 @@ export class DataBrowserComponent {
 
   async deleteDocument(docId: string, event: MouseEvent) {
     event.stopPropagation();
-     if (this.confirmingDeleteDoc() !== docId) {
+      if (this.confirmingDeleteDoc() !== docId) {
       this.requestDeleteDocument(docId, event);
       return;
     }
@@ -161,4 +204,3 @@ export class DataBrowserComponent {
     }
   }
 }
-

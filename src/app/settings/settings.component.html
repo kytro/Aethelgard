@@ -4,14 +4,12 @@
   @if (apiKeysDoc(); as doc) {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
       
-      <!-- Left Side: Add and List Keys -->
       <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6">
         <h3 class="text-xl font-semibold text-white mb-3">API Key Management</h3>
         <p class="text-gray-400 mb-4">
           Add named API keys below. You can select which key is active for AI features from the dropdown on the right.
         </p>
 
-        <!-- Add Key Form -->
         <div class="flex items-start gap-4 mb-6">
           <div class="flex-grow">
             <label for="new-key-name" class="block text-sm font-medium text-gray-400">Key Name</label>
@@ -40,9 +38,8 @@
           </button>
         </div>
 
-        <!-- Key List -->
         <div class="space-y-2">
-          @if (doc.keys) {
+          @if (doc.keys && doc.keys.length > 0) {
             @for (key of doc.keys; track key.id) {
               <div class="flex items-center justify-between bg-gray-900/70 p-3 rounded-md">
                 <span class="text-white font-mono">{{ key.name }}</span>
@@ -51,35 +48,57 @@
                 </button>
               </div>
             }
-          }
-          @if (!doc.keys || doc.keys.length === 0) {
+          } @else {
             <p class="text-gray-500 text-center py-4">No API keys have been added yet.</p>
           }
         </div>
       </div>
 
-      <!-- Right Side: Select Active Key -->
-      <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6 h-fit">
-        <h3 class="text-xl font-semibold text-white mb-3">Active Key</h3>
-        <p class="text-gray-400 mb-4">
-          Select the API key to be used for all AI-powered features.
-        </p>
-        <select 
-          [(ngModel)]="doc.active_key_id" 
-          (ngModelChange)="setActiveKey()"
-          [disabled]="isLoading() || !doc.keys || doc.keys.length === 0"
-          class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700"
-        >
-          @if (doc.keys && doc.keys.length > 0) {
-            @for (key of doc.keys; track key.id) {
-              <option [value]="key.id">{{ key.name }}</option>
+      <div class="space-y-8">
+        <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6 h-fit">
+          <h3 class="text-xl font-semibold text-white mb-3">Active API Key</h3>
+          <p class="text-gray-400 mb-4">
+            Select the API key to be used for all AI-powered features.
+          </p>
+          <select 
+            [(ngModel)]="doc.active_key_id" 
+            (ngModelChange)="setActiveKey()"
+            [disabled]="isLoading() || !doc.keys || doc.keys.length === 0"
+            class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700"
+          >
+            @if (doc.keys && doc.keys.length > 0) {
+              @for (key of doc.keys; track key.id) {
+                <option [value]="key.id">{{ key.name }}</option>
+              }
+            } @else {
+              <option [value]="null" disabled>Add a key to get started</option>
             }
-          } @else {
-            <option [value]="null" disabled>Add a key to get started</option>
-          }
-        </select>
-      </div>
+          </select>
+        </div>
 
+        @if(generalSettingsDoc(); as gSettings) {
+            <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6 h-fit">
+                <h3 class="text-xl font-semibold text-white mb-3">Default AI Model</h3>
+                <p class="text-gray-400 mb-4">
+                  Select the default generative model for AI assistants.
+                </p>
+                <select 
+                  [(ngModel)]="gSettings.default_ai_model" 
+                  (ngModelChange)="saveDefaultModel()"
+                  [disabled]="isLoading() || availableModels().length === 0"
+                  class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700"
+                >
+                  @if (availableModels().length > 0) {
+                    @for (model of availableModels(); track model) {
+                      <option [value]="model">{{ formatModelName(model) }}</option>
+                    }
+                  } @else {
+                    <option [value]="null" disabled>Could not load models</option>
+                  }
+                </select>
+              </div>
+        }
+      </div>
     </div>
 
     @if (message(); as msg) {

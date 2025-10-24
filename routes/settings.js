@@ -113,5 +113,56 @@ module.exports = function (db) {
     }
   });
 
+  // ==================== NEW ROUTES START HERE ====================
+
+  // GET /codex/api/admin/settings/general
+  // Fetches the general settings document, creating a default one if it doesn't exist.
+  router.get('/settings/general', async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database not ready' });
+    try {
+      let generalSettings = await db.collection('settings').findOne({ _id: 'general' });
+
+      // If no general settings doc exists, create a default one
+      if (!generalSettings) {
+        console.log("[SETTINGS] No general settings found, creating default document.");
+        const defaultSettings = {
+          _id: 'general',
+          default_ai_model: 'models/gemini-1.5-flash' // A safe default
+        };
+        await db.collection('settings').insertOne(defaultSettings);
+        generalSettings = defaultSettings;
+      }
+
+      res.json(generalSettings);
+    } catch (err) {
+      console.error('[SETTINGS] Error fetching general settings:', err);
+      res.status(500).json({ error: 'Failed to fetch general settings.' });
+    }
+  });
+
+  // POST /codex/api/admin/settings/general
+  // Updates (or creates) the general settings document.
+  router.post('/settings/general', async (req, res) => {
+    const { default_ai_model } = req.body;
+    if (!default_ai_model) {
+        return res.status(400).json({ error: 'default_ai_model is required.' });
+    }
+    if (!db) return res.status(503).json({ error: 'Database not ready' });
+
+    try {
+        await db.collection('settings').updateOne(
+            { _id: 'general' },
+            { $set: { default_ai_model: default_ai_model } },
+            { upsert: true } // Creates the document if it doesn't exist
+        );
+        res.status(200).json({ message: 'General settings updated successfully.' });
+    } catch (err) {
+        console.error('[SETTINGS] Error updating general settings:', err);
+        res.status(500).json({ error: 'Failed to update general settings.' });
+    }
+  });
+
+  // ===================== NEW ROUTES END HERE =====================
+
   return router;
 };

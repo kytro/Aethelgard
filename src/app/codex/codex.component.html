@@ -6,7 +6,6 @@
       <p>{{ error() }}</p>
     </div>
   } @else {
-    <!-- Breadcrumb and Edit Controls -->
     <div class="flex justify-between items-center mb-6">
       <nav class="flex items-center text-sm text-gray-400 flex-wrap">
         <a (click)="goHome()" class="hover:text-yellow-400 cursor-pointer">Codex</a>
@@ -30,16 +29,30 @@
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-      <!-- Navigation Panel -->
       <div class="lg:col-span-2">
         <h3 class="text-2xl font-bold text-white mb-4">Entries</h3>
+        @if (isEditMode() && isCategoryNode()) {
+          <div class="mb-4 p-3 bg-gray-700/50 rounded-lg space-y-3">
+            <label class="flex items-center justify-between cursor-pointer">
+              <span class="text-sm font-medium text-gray-300">Enable Completion Tracking</span>
+              <input type="checkbox" [checked]="isCompletionTrackingActive()" (change)="toggleCompletionTracking()" class="h-4 w-4 rounded border-gray-300 text-yellow-600 focus:ring-yellow-500">
+            </label>
+            <label class="flex items-center justify-between cursor-pointer">
+              <span class="text-sm font-medium text-gray-300">Combat Manager Source</span>
+              <input type="checkbox" [checked]="isCombatManagerSourceActive()" (change)="toggleCombatManagerSource()" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+            </label>
+          </div>
+        }
         <ul class="space-y-2">
-          @for (entry of currentView().entries; track entry) {
-            <li>
+          @for (entry of currentView().entries; track entry.name) {
+            <li class="flex items-center">
+              @if (isCompletionTrackingActive() && isLeaf(entry)) {
+                <input type="checkbox" [checked]="safeIsCompleted(entry)" (change)="toggleCompletion(entry)" class="h-4 w-4 rounded border-gray-300 text-yellow-600 focus:ring-yellow-500 mr-3">
+              }
               <a (click)="navigateTo(entry)" 
-                 class="block p-3 rounded-lg bg-gray-800/50 hover:bg-gray-700 transition-colors cursor-pointer"
-                 [ngClass]="{'bg-yellow-500/20 border border-yellow-700': currentView().activeEntry === entry}">
-                {{ formatName(entry) }}
+                  class="flex-grow p-3 rounded-lg bg-gray-800/50 hover:bg-gray-700 transition-colors cursor-pointer"
+                  [ngClass]="{'bg-yellow-500/20 border border-yellow-700': currentView().activeEntry === entry}">
+                {{ formatName(entry.name) }}
               </a>
             </li>
           } @empty {
@@ -48,7 +61,6 @@
         </ul>
       </div>
 
-      <!-- Content Panel -->
       <div class="lg:col-span-10">
         @if (currentView().content; as content) {
           <div class="space-y-4">
@@ -70,8 +82,8 @@
                         <tbody>
                           @for(row of block.rows; track row; let rIndex = $index) {
                             <tr class="border-t border-gray-700">
-                               @for(header of block.headers; track header) { <td class="p-3" [attr.contenteditable]="isEditMode()" (blur)="handleCellUpdate(row, header, $event)">{{ row[header] }}</td> }
-                               @if(isEditMode()) { <td class="p-3"><button (click)="removeRow(block, rIndex)" class="text-red-500 hover:text-red-400">Remove</button></td> }
+                              @for(header of block.headers; track header) { <td class="p-3" [attr.contenteditable]="isEditMode()" (blur)="handleCellUpdate(row, header, $event)">{{ row[header] }}</td> }
+                              @if(isEditMode()) { <td class="p-3"><button (click)="removeRow(block, rIndex)" class="text-red-500 hover:text-red-400">Remove</button></td> }
                             </tr>
                           }
                         </tbody>
@@ -104,96 +116,93 @@
               </div>
             }
 
-            <!-- Linked Entity Details Section -->
             @if(linkedEntities().length > 0) {
               <div class="mt-8">
-                 <h3 class="text-2xl font-semibold text-yellow-500 border-b border-gray-700 pb-2 mb-4">Linked Entity Details</h3>
-                 @for(entity of linkedEntities(); track entity._id) {
-                   <div class="mb-6 bg-gray-900/50 p-4 rounded-xl border-2 border-yellow-500/50 shadow-2xl shadow-yellow-500/10">
-                      <div class="bg-black/20 p-4 rounded-lg">
-                        <h4 class="font-bold text-lg mb-3 text-white" [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'name', $event)">{{ entity.name }}</h4>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.ac', $event)"><strong class="font-semibold text-gray-400">AC:</strong> {{entity.baseStats?.ac ?? '10'}}</p>
-                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.hp', $event)"><strong class="font-semibold text-gray-400">HP:</strong> {{entity.baseStats?.hp ?? '1d8'}}</p>
-                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.saves', $event)"><strong class="font-semibold text-gray-400">Saves:</strong> {{entity.baseStats?.saves ?? 'Fort +0, Ref +0, Will +0'}}</p>
-                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.combat.bab', $event)"><strong class="font-semibold text-gray-400">BAB/CMB/CMD:</strong> {{ formatModifier(entity.baseStats?.combat?.bab) }} / {{entity.baseStats?.combat?.cmb ?? '-'}} / {{entity.baseStats?.combat?.cmd ?? '-'}}</p>
-                            <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
-                            <div class="grid grid-cols-3 gap-2 col-span-1 md:col-span-2">
-                                @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
-                                  <div class="text-center bg-gray-900/50 p-1 rounded">
-                                      <span class="font-semibold">{{ability}}</span>
-                                      <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.' + ability, $event)">{{ getCaseInsensitiveProp(entity.baseStats, ability) ?? 10 }} ({{getAbilityModifier(getCaseInsensitiveProp(entity.baseStats, ability))}})</p>
-                                  </div>
-                                }
-                            </div>
-                            
-                            <!-- Equipment Section -->
-                            <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
-                            <div class="col-span-1 md:col-span-2">
-                              <p class="font-semibold text-white">Equipment:</p>
-                              <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-green-400">
-                                @for(equipId of entity.equipment; track equipId) {
-                                  <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
-                                    <span class="cursor-pointer hover:text-green-300" (mouseenter)="showTooltip($event, equipId)" (mouseleave)="hideTooltip()">
-                                      {{ equipmentCache().get(equipId)?.name || formatItemId(equipId) }}
-                                    </span>
-                                    @if(isEditMode()) {
-                                      <button (click)="removeLinkedItem(entity, equipId, 'equipment')" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
-                                    }
-                                  </span>
-                                }
-                                @if(!entity.equipment || entity.equipment.length === 0) {
-                                  <span class="text-gray-500 italic">None</span>
-                                }
-                              </div>
-                              @if(isEditMode()) {
-                                <div class="mt-2 flex items-center gap-2">
-                                  <input #addEquipmentInput list="equipment-datalist" placeholder="Add equipment by ID..." class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full">
-                                  <datalist id="equipment-datalist">
-                                    @for(item of equipmentCache().entries(); track item[0]) {
-                                      <option value="{{item[0]}}">{{item[1].name}}</option>
-                                    }
-                                  </datalist>
-                                  <button (click)="addLinkedItem(entity, addEquipmentInput, 'equipment')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded">+</button>
-                                </div>
-                              }
-                            </div>
-
-                            <!-- Rules Section -->
-                            <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
-                            <div class="col-span-1 md:col-span-2">
-                              <p class="font-semibold text-white">Rules:</p>
-                              <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-indigo-400">
-                                @for(ruleId of entity.rules; track ruleId) {
-                                  <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
-                                    <span class="cursor-pointer hover:text-indigo-300" (mouseenter)="showTooltip($event, ruleId)" (mouseleave)="hideTooltip()">
-                                      {{ rulesCache().get(ruleId)?.name || formatItemId(ruleId) }}
-                                    </span>
-                                    @if(isEditMode()) {
-                                      <button (click)="removeLinkedItem(entity, ruleId, 'rules')" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
-                                    }
-                                  </span>
-                                }
-                                @if(!entity.rules || entity.rules.length === 0) {
-                                  <span class="text-gray-500 italic">None</span>
-                                }
-                              </div>
+                   <h3 class="text-2xl font-semibold text-yellow-500 border-b border-gray-700 pb-2 mb-4">Linked Entity Details</h3>
+                   @for(entity of linkedEntities(); track entity._id) {
+                     <div class="mb-6 bg-gray-900/50 p-4 rounded-xl border-2 border-yellow-500/50 shadow-2xl shadow-yellow-500/10">
+                       <div class="bg-black/20 p-4 rounded-lg">
+                         <h4 class="font-bold text-lg mb-3 text-white" [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'name', $event)">{{ entity.name }}</h4>
+                         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.ac', $event)"><strong class="font-semibold text-gray-400">AC:</strong> {{entity.baseStats?.ac ?? '10'}}</p>
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.hp', $event)"><strong class="font-semibold text-gray-400">HP:</strong> {{entity.baseStats?.hp ?? '1d8'}}</p>
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.saves', $event)"><strong class="font-semibold text-gray-400">Saves:</strong> {{entity.baseStats?.saves ?? 'Fort +0, Ref +0, Will +0'}}</p>
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.combat.bab', $event)"><strong class="font-semibold text-gray-400">BAB/CMB/CMD:</strong> {{ formatModifier(entity.baseStats?.combat?.bab) }} / {{entity.baseStats?.combat?.cmb ?? '-'}} / {{entity.baseStats?.combat?.cmd ?? '-'}}</p>
+                             <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                             <div class="grid grid-cols-3 gap-2 col-span-1 md:col-span-2">
+                                 @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
+                                   <div class="text-center bg-gray-900/50 p-1 rounded">
+                                       <span class="font-semibold">{{ability}}</span>
+                                       <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.' + ability, $event)">{{ getCaseInsensitiveProp(entity.baseStats, ability) ?? 10 }} ({{getAbilityModifier(getCaseInsensitiveProp(entity.baseStats, ability))}})</p>
+                                   </div>
+                                 }
+                             </div>
+                             
+                             <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                             <div class="col-span-1 md:col-span-2">
+                               <p class="font-semibold text-white">Equipment:</p>
+                               <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-green-400">
+                                 @for(equipId of entity.equipment; track equipId) {
+                                   <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
+                                     <span class="cursor-pointer hover:text-green-300" (mouseenter)="showTooltip($event, equipId)" (mouseleave)="hideTooltip()">
+                                       {{ equipmentCache().get(equipId)?.name || formatItemId(equipId) }}
+                                     </span>
+                                     @if(isEditMode()) {
+                                       <button (click)="removeLinkedItem(entity, equipId, 'equipment')" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
+                                     }
+                                   </span>
+                                 }
+                                 @if(!entity.equipment || entity.equipment.length === 0) {
+                                   <span class="text-gray-500 italic">None</span>
+                                 }
+                               </div>
                                @if(isEditMode()) {
-                                <div class="mt-2 flex items-center gap-2">
-                                  <input #addRuleInput list="rules-datalist" placeholder="Add rule by ID..." class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full">
-                                  <datalist id="rules-datalist">
-                                     @for(item of rulesCache().entries(); track item[0]) {
-                                      <option value="{{item[0]}}">{{item[1].name}}</option>
-                                    }
-                                  </datalist>
-                                  <button (click)="addLinkedItem(entity, addRuleInput, 'rules')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded">+</button>
-                                </div>
-                              }
-                            </div>
-                        </div>
-                      </div>
-                    </div>
-                 }
+                                 <div class="mt-2 flex items-center gap-2">
+                                   <input #addEquipmentInput list="equipment-datalist" placeholder="Add equipment by ID..." class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full">
+                                   <datalist id="equipment-datalist">
+                                     @for(item of equipmentCache().entries(); track item[0]) {
+                                       <option value="{{item[0]}}">{{item[1].name}}</option>
+                                     }
+                                   </datalist>
+                                   <button (click)="addLinkedItem(entity, addEquipmentInput, 'equipment')" class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded">+</button>
+                                 </div>
+                               }
+                             </div>
+
+                             <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                             <div class="col-span-1 md:col-span-2">
+                               <p class="font-semibold text-white">Rules:</p>
+                               <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-indigo-400">
+                                 @for(ruleId of entity.rules; track ruleId) {
+                                   <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
+                                     <span class="cursor-pointer hover:text-indigo-300" (mouseenter)="showTooltip($event, ruleId)" (mouseleave)="hideTooltip()">
+                                       {{ rulesCache().get(ruleId)?.name || formatItemId(ruleId) }}
+                                     </span>
+                                     @if(isEditMode()) {
+                                       <button (click)="removeLinkedItem(entity, ruleId, 'rules')" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
+                                     }
+                                   </span>
+                                 }
+                                 @if(!entity.rules || entity.rules.length === 0) {
+                                   <span class="text-gray-500 italic">None</span>
+                                 }
+                               </div>
+                                 @if(isEditMode()) {
+                                 <div class="mt-2 flex items-center gap-2">
+                                   <input #addRuleInput list="rules-datalist" placeholder="Add rule by ID..." class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full">
+                                   <datalist id="rules-datalist">
+                                       @for(item of rulesCache().entries(); track item[0]) {
+                                       <option value="{{item[0]}}">{{item[1].name}}</option>
+                                     }
+                                   </datalist>
+                                   <button (click)="addLinkedItem(entity, addRuleInput, 'rules')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-1 px-3 rounded">+</button>
+                                 </div>
+                               }
+                             </div>
+                         </div>
+                       </div>
+                     </div>
+                   }
               </div>
             }
           </div>
@@ -204,7 +213,6 @@
     </div>
   }
   
-  <!-- Global Tooltip -->
   @if(tooltipContent(); as content) {
     <div 
       class="fixed bg-gray-900 border border-indigo-700 text-white text-sm rounded-lg px-3 py-2 w-max max-w-md z-50 shadow-lg pointer-events-none"

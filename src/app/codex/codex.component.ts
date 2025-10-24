@@ -4,6 +4,12 @@ import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
 
 // --- TYPE INTERFACES ---
+interface CodexEntry {
+  name: string;
+  path_components: string[];
+  content?: any[];
+  isCompleted?: boolean;
+}
 interface Pf1eRule { name: string; description: string; }
 interface Pf1eEquipment { name: string; description: string; cost: string; weight: string; }
 interface TooltipContent { title: string; description: string; }
@@ -16,9 +22,83 @@ interface TooltipContent { title: string; description: string; }
   styleUrls: ['./codex.component.css']
 })
 export class CodexComponent implements OnInit {
+  /**
+   * Returns the full path to a leaf entry for template use.
+   */
+  getFullLeafPath(leafPath: string[]): string[] {
+    return [...this.currentPath(), ...leafPath];
+  }
+  /**
+   * Returns an array of objects for hierarchical leaf display:
+   * [{ category: string, leaves: string[][] }]
+   */
+  get leafDisplayGroups() {
+    const node = this.currentCategoryNode();
+    if (!node) return [];
+    const entries = this.currentView().entries;
+    return entries.map((entry: any) => {
+      const entryNode = this.getNode([...this.currentPath(), entry]);
+      if (!entryNode) return null;
+      if (Array.isArray(entryNode.content)) {
+        // Direct leaf
+        return { category: entry, leaves: [[entry]] };
+      } else {
+        // Category: collect all leaf paths under this entry
+        const leafPaths = this.getAllLeafEntries(entryNode);
+        return { category: entry, leaves: leafPaths };
+      }
+    }).filter(Boolean);
+  }
+  /**
+   * Safely checks if the leaf entry at a given path is completed.
+   */
+  safeIsCompletedPath(path: string[]): boolean {
+    const node = this.getNode(path);
+    return node && typeof node.isCompleted !== 'undefined' ? node.isCompleted : false;
+  }
+
+  /**
+   * Toggles completion for a leaf entry at a given path.
+   */
+  async toggleCompletionPath(path: string[]) {
+    const node = this.getNode(path);
+    if (!node) return;
+    const isCompleted = !node.isCompleted;
+    try {
+      node.isCompleted = isCompleted;
+      this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
+      await lastValueFrom(this.http.patch('api/codex/item', { path, isCompleted }));
+    } catch (err) {
+      node.isCompleted = !isCompleted;
+      this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
+      console.error('Failed to update completion status', err);
+      this.error.set('Failed to update completion status.');
+    }
+  }
+  /**
+   * Recursively collects all leaf entry keys under a given node.
+   */
+  getAllLeafEntries(node: any, path: string[] = []): string[][] {
+    if (!node || typeof node !== 'object') return [];
+    if (Array.isArray(node.content)) {
+      return [path];
+    }
+    let leaves: string[][] = [];
+    for (const key of Object.keys(node)) {
+      if (['content', 'summary', 'category', 'isCompleted', 'enableCompletionTracking', 'isCombatManagerSource'].includes(key)) continue;
+      leaves = leaves.concat(this.getAllLeafEntries(node[key], [...path, key]));
+    }
+    return leaves;
+  }
+  /**
+   * Safely checks if the entry is completed for template binding.
+   */
+  safeIsCompleted(entry: CodexEntry): boolean {
+    return entry && typeof entry.isCompleted !== 'undefined' ? entry.isCompleted : false;
+  }
   http = inject(HttpClient);
 
-  private codexData = signal<any | null>(null);
+  private codexData = signal<CodexEntry[] | null>(null);
   currentPath = signal<string[]>([]);
   isLoading = signal<boolean>(true);
   error = signal<string | null>(null);
@@ -35,50 +115,114 @@ export class CodexComponent implements OnInit {
     const data = this.codexData();
     const path = this.currentPath();
     if (!data) return { entries: [], content: null, activeEntry: null };
-    
+
+    // Find the current entry based on the path
     const currentNode = this.getNode(path);
     const content = currentNode?.content || null;
-    const hasChildEntries = currentNode && Object.keys(currentNode).some(k => typeof currentNode[k] === 'object' && k !== 'content');
-    
-    let entriesNode;
-    let activeEntry = null;
 
-    if (hasChildEntries) {
-      entriesNode = currentNode;
-    } else {
-      entriesNode = this.getNode(path.slice(0, -1));
-      activeEntry = path[path.length - 1];
-    }
+    // Find child entries
+    const children = data.filter((entry: CodexEntry) => 
+        entry.path_components.length === path.length + 1 &&
+        path.every((p, i) => entry.path_components[i] === p)
+    );
 
-    const entries = entriesNode ? Object.keys(entriesNode).filter(k => typeof entriesNode[k] === 'object' && k !== 'content' && k !== 'summary' && k !== 'category') : [];
+    // Determine the active entry if the current node is a leaf
+    const isLeaf = currentNode && Array.isArray(currentNode.content);
+    const activeEntry = isLeaf ? currentNode : null;
 
-    return { entries, content, activeEntry };
+    return { entries: children, content, activeEntry };
+  });
+
+  isCategoryNode = computed(() => {
+    const path = this.currentPath();
+    const currentNode = this.getNode(path);
+    // It's a category node if it's an object that doesn't have a 'content' array.
+    return currentNode && typeof currentNode === 'object' && !Array.isArray(currentNode.content);
   });
 
   currentCategoryNode = computed(() => {
     const path = this.currentPath();
     if (path.length === 0) {
+      // At the root, the codexData itself is the category node
       return this.codexData();
     }
-    // If we are at a leaf, we want the parent.
+  
     const currentNode = this.getNode(path);
-    const hasChildEntries = currentNode && Object.keys(currentNode).some(k => typeof currentNode[k] === 'object' && k !== 'content');
-    if (hasChildEntries) {
-        return currentNode;
+  
+    // Check if the current node is a leaf (has content). If so, the parent is the category.
+    const isLeafNode = currentNode && Array.isArray(currentNode.content);
+  
+    if (isLeafNode) {
+      return this.getNode(path.slice(0, -1));
     } else {
-        return this.getNode(path.slice(0, -1));
+      // Otherwise, the current node is the category.
+      return currentNode;
     }
+  });
+
+  isCompletionTrackingActive = computed(() => {
+    const path = this.currentPath();
+    const isCurrentNodeCategory = this.isCategoryNode();
+    let checkPath = isCurrentNodeCategory ? path : path.slice(0, -1);
+
+    // Check from current node up to the root
+    for (let i = checkPath.length; i >= 0; i--) {
+        const node = this.getNode(checkPath.slice(0, i));
+        if (typeof node?.enableCompletionTracking === 'boolean') {
+            return node.enableCompletionTracking;
+        }
+    }
+
+    return false; // Default to false if not set anywhere
+  });
+  
+  // --- NEW ---
+  isCombatManagerSourceActive = computed(() => {
+    const path = this.currentPath();
+    const isCurrentNodeCategory = this.isCategoryNode();
+    let checkPath = isCurrentNodeCategory ? path : path.slice(0, -1);
+
+    // Check from current node up to the root
+    for (let i = checkPath.length; i >= 0; i--) {
+        const node = this.getNode(checkPath.slice(0, i));
+        if (typeof node?.isCombatManagerSource === 'boolean') {
+            return node.isCombatManagerSource;
+        }
+    }
+    return false; // Default to false if not set anywhere
   });
 
   constructor() {
     effect(async () => {
-      const content = this.currentView().content;
+      const path = this.currentPath();
+      const currentNode = this.getNode(path);
+      
+      // Always reset when the current node changes.
       this.linkedEntities.set([]);
+
+      if (!currentNode) return;
+
+      const entityIds = new Set<string>();
+
+      // Case 1: The entry itself has an entityId
+      const entityId = currentNode.entity_id || currentNode.entityId;
+      if (entityId) {
+        entityIds.add(entityId);
+      }
+
+      // Case 2: Blocks within the content have entityIds
+      const content = currentNode.content;
       if (content && Array.isArray(content)) {
-        const entityIds = content
-          .filter(block => block.type === 'statblock' && block.entityId)
-          .map(block => block.entityId);
-        if (entityIds.length > 0) await this.fetchLinkedEntities(entityIds);
+        for (const block of content) {
+          const blockEntityId = block.entity_id || block.entityId;
+          if (blockEntityId) {
+            entityIds.add(blockEntityId);
+          }
+        }
+      }
+
+      if (entityIds.size > 0) {
+        await this.fetchLinkedEntities(Array.from(entityIds));
       }
     });
     
@@ -104,8 +248,9 @@ export class CodexComponent implements OnInit {
     this.isLoading.set(true);
     this.error.set(null);
     try {
-      const data = await lastValueFrom(this.http.get<any>('api/codex/data'));
-      this.codexData.set(data);
+      // Fetch codex_entries array from backend
+      const entries: CodexEntry[] = await lastValueFrom(this.http.get<CodexEntry[]>('api/codex/data'));
+      this.codexData.set(entries);
     } catch (err: any) {
       this.error.set(err.error?.error || 'Failed to load Codex data.');
     } finally {
@@ -121,8 +266,9 @@ export class CodexComponent implements OnInit {
         ]);
         this.rulesCache.set(new Map(rules.map(item => [item._id, item])));
         this.equipmentCache.set(new Map(equipment.map(item => [item._id, item])));
-    } catch (err) {
+    } catch (err: any) {
         console.error("Failed to load caches for tooltips", err);
+        this.error.set('Failed to load reference data (rules/equipment). Tooltips may not work correctly.');
     }
   }
   
@@ -146,22 +292,8 @@ export class CodexComponent implements OnInit {
     }
   }
 
-  // --- Navigation ---
-  navigateTo(key: string) {
-    const path = this.currentPath();
-    const currentNode = this.getNode(path);
-    const hasChildEntries = currentNode && Object.keys(currentNode).some(k => typeof currentNode[k] === 'object' && k !== 'content');
-
-    if (hasChildEntries) {
-      // It's a category; append to the path to go deeper.
-      this.currentPath.update(p => [...p, key]);
-    } else {
-      // It's a leaf; replace the last segment of the path to navigate to a sibling.
-      this.currentPath.update(p => {
-        const parentPath = p.slice(0, -1);
-        return [...parentPath, key];
-      });
-    }
+  navigateTo(entry: CodexEntry) {
+    this.currentPath.set(entry.path_components);
   }
 
   navigateToBreadcrumb(index: number) { this.currentPath.update(path => path.slice(0, index + 1)); }
@@ -355,12 +487,10 @@ export class CodexComponent implements OnInit {
   }
   
   public getNode(path: string[]): any {
-    let node = this.codexData();
-    for (const key of path) {
-      if (node && node[key]) node = node[key];
-      else return null;
-    }
-    return node;
+    // Find the entry in codex_entries with matching path_components
+    const entries = this.codexData();
+    if (!Array.isArray(entries)) return null;
+    return entries.find(e => JSON.stringify(e.path_components) === JSON.stringify(path)) || null;
   }
 
   // --- Formatting Helpers ---
@@ -389,10 +519,10 @@ export class CodexComponent implements OnInit {
     const objKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
     return objKey ? obj[objKey] : undefined;
   }
-  formatItemId = (id: string) => this.formatName(id.replace(/^(feat_|sa_|cond_|equip_)/, ''));
+  formatItemId = (id: string) => this.formatName(id.replace(/^(feat_|sa_|cond_|eq_)/, ''));
 
-  async toggleCompletion(entryKey: string) {
-    const path = [...this.currentPath(), entryKey];
+  async toggleCompletion(entry: CodexEntry) {
+    const path = entry.path_components;
     const node = this.getNode(path);
     if (!node) return;
 
@@ -434,12 +564,34 @@ export class CodexComponent implements OnInit {
     }
   }
 
-  isLeaf(entryKey: string): boolean {
-    const path = [...this.currentPath(), entryKey];
-    const node = this.getNode(path);
-    if (!node) return false;
-    const keys = Object.keys(node);
-    return !keys.some(k => typeof node[k] === 'object' && k !== 'content' && k !== 'summary' && k !== 'category' && k !== 'isCompleted' && k !== 'enableCompletionTracking');
+  // --- NEW ---
+  async toggleCombatManagerSource() {
+    const path = this.currentPath();
+    const categoryNode = this.getNode(path);
+    if (!categoryNode) return;
+
+    const isCombatManagerSource = !categoryNode.isCombatManagerSource;
+    try {
+      // Optimistically update the UI
+      categoryNode.isCombatManagerSource = isCombatManagerSource;
+      this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
+
+      const categoryPath = path.join('.');
+      await lastValueFrom(this.http.patch('api/codex/category', { category: categoryPath, isCombatManagerSource }));
+    } catch (err) {
+      // Revert on error
+      categoryNode.isCombatManagerSource = !isCombatManagerSource;
+      this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
+      console.error('Failed to update Combat Manager Source setting', err);
+      this.error.set('Failed to update Combat Manager Source setting.');
+    }
+  }
+
+  /**
+   * Checks if the entry is a leaf node (has content array).
+   */
+  isLeaf(entry: CodexEntry): boolean {
+    return entry && Array.isArray(entry.content);
   }
 
   // --- Tooltip Logic ---
@@ -447,13 +599,16 @@ export class CodexComponent implements OnInit {
     let title = '';
     let description = 'Item not found in cache.';
 
-    if (itemId.startsWith('equip_')) {
-        const item = this.equipmentCache().get(itemId);
-        title = item?.name || this.formatName(itemId.replace('equip_', ''));
+    // Aggressively clean the string to remove any non-word characters except underscore.
+    const cleanedItemId = itemId.replace(/[^\w_]/g, '');
+
+    if (cleanedItemId.startsWith('eq_')) {
+        const item = this.equipmentCache().get(cleanedItemId);
+        title = item?.name || this.formatName(cleanedItemId.replace('eq_', ''));
         if(item) description = `${item.description}\nCost: ${item.cost} | Weight: ${item.weight}`;
     } else {
-        const item = this.rulesCache().get(itemId);
-        title = item?.name || this.formatName(itemId.replace(/^(feat_|sa_|cond_)/, ''));
+        const item = this.rulesCache().get(cleanedItemId);
+        title = item?.name || this.formatName(cleanedItemId.replace(/^(feat_|sa_|cond_)/, ''));
         if (item) description = item.description;
     }
     this.tooltipContent.set({ title, description });

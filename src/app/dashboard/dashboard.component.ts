@@ -6,7 +6,7 @@ import { lastValueFrom } from 'rxjs';
 interface DashboardStats {
   entityCount: number;
   ruleCount: number;
-  itemCound: number;
+  itemCount: number;
   spellCount: number;
   deityCount: number;
 }

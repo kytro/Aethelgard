@@ -79,19 +79,61 @@
                 class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
             Scan & Fix Data
         </button>
+        <button (click)="normalizeStatblocks()" [disabled]="isLoading()" 
+                class="bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+            Normalize Statblocks
+        </button>
 
-        <div class="col-span-full flex items-center gap-4 border-t border-gray-700 pt-4 mt-4">
-            <div class="flex items-center">
-              <input type="checkbox" id="dryRun" name="dryRun" [ngModel]="dryRun()" (ngModelChange)="dryRun.set($event)" class="h-4 w-4 text-red-600 border-gray-300 rounded focus:ring-red-500">
-              <label for="dryRun" class="ml-2 text-sm text-gray-400">Dry Run</label>
+            <div class="col-span-full flex items-center gap-4 border-t border-gray-700 pt-4 mt-4">
+                <div class="flex items-center">
+                  <input type="checkbox" id="dryRun" name="dryRun" [ngModel]="dryRun()" (ngModelChange)="dryRun.set($event)" class="h-4 w-4 text-red-600 border-gray-300 rounded focus:ring-red-500">
+                  <label for="dryRun" class="ml-2 text-sm text-gray-400">Dry Run</label>
+                </div>
+                <div class="flex items-center gap-4 pl-4">
+                  <label class="flex items-center cursor-pointer">
+                      <input type="radio" name="orphanAction" value="delete" [checked]="orphanAction() === 'delete'" (change)="orphanAction.set('delete')" class="h-4 w-4 text-red-500 bg-gray-700 border-gray-600 focus:ring-red-600">
+                      <span class="ml-2 text-sm text-gray-300">Delete Orphans</span>
+                  </label>
+                  <label class="flex items-center cursor-pointer">
+                      <input type="radio" name="orphanAction" value="create" [checked]="orphanAction() === 'create'" (change)="orphanAction.set('create')" class="h-4 w-4 text-green-500 bg-gray-700 border-gray-600 focus:ring-green-600">
+                      <span class="ml-2 text-sm text-gray-300">Create Entries</span>
+                  </label>
+                </div>
+                <button (click)="triggerBackendJob('data-integrity', 'cleanup-orphans', { dryRun: dryRun(), action: orphanAction() })" [disabled]="isLoading()" 
+                        class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+                  Run Orphan Job
+                </button>
             </div>
-            <button (click)="triggerBackendJob('data-integrity', 'cleanup-orphans', { dryRun: dryRun() })" [disabled]="isLoading()" 
-                    class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
-              Cleanup Orphans
-            </button>
-        </div>
     </div>
     
+    <h2 class="text-xl font-semibold mb-4 text-gray-300">Database Migration</h2>
+    <div class="grid grid-cols-1 gap-4 mb-6 border-t border-red-500/30 pt-4 mt-4">
+        <div class="col-span-full flex items-center gap-4">
+            <button (click)="migrateCodex()" [disabled]="isLoading()" 
+                    class="bg-red-800 hover:bg-red-900 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+              Migrate Codex to Hierarchical Format
+            </button>
+            <div class="flex items-center">
+              <input type="checkbox" id="forceMigration" name="forceMigration" [ngModel]="forceMigration()" (ngModelChange)="forceMigration.set($event)" class="h-4 w-4 text-red-600 border-gray-300 rounded focus:ring-red-500">
+              <label for="forceMigration" class="ml-2 text-sm text-gray-400">Force Re-run</label>
+            </div>
+        </div>
+        <p class="text-sm text-gray-500 col-span-full">
+            <strong>Warning:</strong> This is a major, one-time operation to convert the old, single-document 'codex' collection into a new, more robust 'codex_entries' collection.
+            The old collection will be backed up. This operation is not easily reversible.
+        </p>
+
+        <div class="col-span-full flex items-center gap-4 mt-4">
+            <button (click)="triggerBackendJob('data-integrity', 'migrate-dm-toolkit')" [disabled]="isLoading()" 
+                    class="bg-orange-800 hover:bg-orange-900 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
+              Migrate DM Toolkit
+            </button>
+        </div>
+        <p class="text-sm text-gray-500 col-span-full">
+            This operation finds all fights with the old `initialCombatants` array and migrates them to the new, separate `dm_toolkit_combatants` collection.
+        </p>
+    </div>
+
     <h2 class="text-xl font-semibold mb-4 text-gray-300">Status Check</h2>
     <div class="grid grid-cols-2 gap-4">
         <button (click)="getDataIntegrityStatus()" [disabled]="isLoading()" 

@@ -128,7 +128,16 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
 
         const getAllStats = () => {
             let all = [];
-            (content || []).filter(b => b.type === 'statblock' && b.stats).forEach(block => all.push(...block.stats));
+            (content || []).filter(b => b.type === 'statblock' && b.stats).forEach(block => {
+                if (Array.isArray(block.stats)) {
+                    all.push(...block.stats);
+                } else if (typeof block.stats === 'object') {
+                    // Handle object format, convert to array format
+                    for (const key in block.stats) {
+                        all.push({ label: key, value: block.stats[key] });
+                    }
+                }
+            });
             return all;
         }
 
@@ -213,29 +222,22 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         console.log(`[PROCESS CODEX] Job initiated.`);
         try {
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
-            if (!codexDoc) return res.status(404).json({ error: 'Codex data not found.' });
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
+            if (!codexEntries || codexEntries.length === 0) {
+                return res.status(404).json({ error: 'No entries found in codex_entries collection.' });
+            }
 
             let entities = [];
-            const codexData = codexDoc;
-
-            async function findStatblocks(node, path) {
-                if (node && node.content && Array.isArray(node.content)) {
-                    const statBlock = node.content.find(b => b.type === 'statblock');
+            for (const entry of codexEntries) {
+                if (entry.content && Array.isArray(entry.content)) {
+                    const statBlock = entry.content.find(b => b.type === 'statblock');
                     if (statBlock && statBlock.entityId) {
-                        const name = (path[path.length - 1] || 'Unknown').replace(/_/g, ' ');
-                        const entity = await parseStatBlockToEntity(statBlock, name, path, node.content);
+                        const name = entry.name.replace(/_/g, ' ');
+                        const entity = await parseStatBlockToEntity(statBlock, name, entry.path_components, entry.content);
                         if (entity) entities.push(entity);
                     }
                 }
-                for (const key in node) {
-                    if (typeof node[key] === 'object' && node[key] !== null && key !== 'content') {
-                        await findStatblocks(node[key], [...path, key]);
-                    }
-                }
             }
-
-            await findStatblocks(codexData, []);
 
             const entitiesCollection = db.collection('entities_pf1e');
             await entitiesCollection.deleteMany({});
@@ -266,7 +268,8 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
             const entsToProcess = await db.collection('entities_pf1e')
                                             .find({ equipment: { $size: 0 } })
                                             .toArray();
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
+            // Fetch all codex entries
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
 
             if (entsToProcess.length === 0) {
                 return res.json({ message: 'No entities need equipment linking (equipment array is non-empty for all).' });
@@ -347,7 +350,7 @@ Constraints:
                         const entityName = ent.name || 'Unknown Entity';
 
                         // 4a. Reconstruct the free-text equipment sentence from codex
-                        const node = getNodeData(codexDoc, ent.sourceCodexPath);
+                        const node = codexEntries.find(e => JSON.stringify(e.path_components) === JSON.stringify(ent.sourceCodexPath));
                         if (!node?.content) return;
 
                         const equipmentHeadingIndex = node.content.findIndex(c => c.type === 'heading' && c.text?.toLowerCase() === 'equipment');
@@ -423,7 +426,7 @@ Constraints:
             const entsToProcess = await db.collection('entities_pf1e')
                                             .find({ rules: { $size: 0 } })
                                             .toArray();
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
 
             if (entsToProcess.length === 0) {
                 return res.json({ message: 'No entities need rule linking.' });
@@ -434,7 +437,7 @@ Constraints:
             for (const ent of entsToProcess) {
                 try {
                     const entityName = ent.name || 'Unknown Entity';
-                    const node = getNodeData(codexDoc, ent.sourceCodexPath);
+                    const node = codexEntries.find(e => JSON.stringify(e.path_components) === JSON.stringify(ent.sourceCodexPath));
                     if (!node?.content) continue;
 
                     const featsTables = node.content.filter(b => b.type === 'table' && b.title?.toLowerCase() === 'feats');
@@ -490,8 +493,8 @@ Constraints:
     // -------------------------------------------------------------
     router.post('/cleanup-orphans', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
-        const { dryRun = true } = req.body;
-        console.log(`[CLEANUP ORPHANS] Job started. ${dryRun ? '(Dry Run)' : '(LIVE RUN)'}`);
+        const { dryRun = true, action = 'delete' } = req.body;
+        console.log(`[CLEANUP ORPHANS] Job started. Action: ${action}. ${dryRun ? '(Dry Run)' : '(LIVE RUN)'}`);
 
         try {
             const results = {
@@ -501,32 +504,50 @@ Constraints:
             };
 
             // 1. Find all entity IDs from the codex
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
             const validEntityIds = new Set();
-            function findEntityIds(node) {
-                if (node && node.content && Array.isArray(node.content)) {
-                    node.content.forEach(block => {
+            codexEntries.forEach(entry => {
+                if (entry.content && Array.isArray(entry.content)) {
+                    entry.content.forEach(block => {
                         if (block.type === 'statblock' && block.entityId) {
                             validEntityIds.add(block.entityId);
                         }
                     });
                 }
-                for (const key in node) {
-                    if (typeof node[key] === 'object' && node[key] !== null && key !== 'content') {
-                        findEntityIds(node[key]);
-                    }
-                }
-            }
-            findEntityIds(codexDoc);
+            });
 
             // 2. Find orphaned entities
             const allDbEntities = await db.collection('entities_pf1e').find({}, { projection: { _id: 1, name: 1 } }).toArray();
-            const entitiesToDelete = allDbEntities.filter(ent => !validEntityIds.has(ent._id.toString()));
-            results.orphanedEntities = entitiesToDelete.map(e => ({ id: e._id, name: e.name }));
+            const entitiesToProcess = allDbEntities.filter(ent => !validEntityIds.has(ent._id.toString()));
+            results.orphanedEntities = entitiesToProcess.map(e => ({ id: e._id, name: e.name }));
 
-            if (!dryRun && entitiesToDelete.length > 0) {
-                const deleteIds = entitiesToDelete.map(e => e._id);
-                await db.collection('entities_pf1e').deleteMany({ _id: { $in: deleteIds } });
+            if (!dryRun && entitiesToProcess.length > 0) {
+                if (action === 'delete') {
+                    const deleteIds = entitiesToProcess.map(e => e._id);
+                    await db.collection('entities_pf1e').deleteMany({ _id: { $in: deleteIds } });
+                } else if (action === 'create') {
+                    const bulkOps = entitiesToProcess.map(entity => {
+                        const entryName = entity.name.replace(/\s+/g, '_');
+                        const path = ['Orphaned_Entries', entryName];
+                        return {
+                            updateOne: {
+                                filter: { path_components: path },
+                                update: {
+                                    $setOnInsert: {
+                                        name: entryName,
+                                        path_components: path,
+                                        content: [{ type: 'statblock', entityId: entity._id.toString() }],
+                                        summary: `Auto-generated entry for orphaned entity: ${entity.name}`
+                                    }
+                                },
+                                upsert: true
+                            }
+                        };
+                    });
+                    if (bulkOps.length > 0) {
+                        await db.collection('codex_entries').bulkWrite(bulkOps);
+                    }
+                }
             }
 
             // 3. Find broken links in remaining entities
@@ -599,23 +620,17 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         console.log(`[UNLINKED STATBLOCKS] Job started.`);
 
         try {
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
             const statblocksInCodex = [];
-            function findStatblocks(node, path) {
-                if (node && node.content && Array.isArray(node.content)) {
-                    node.content.forEach(block => {
+            codexEntries.forEach(entry => {
+                if (entry.content && Array.isArray(entry.content)) {
+                    entry.content.forEach(block => {
                         if (block.type === 'statblock' && block.entityId) {
-                            statblocksInCodex.push({ entityId: block.entityId, path });
+                            statblocksInCodex.push({ entityId: block.entityId, path: entry.path_components });
                         }
                     });
                 }
-                for (const key in node) {
-                    if (typeof node[key] === 'object' && node[key] !== null && key !== 'content') {
-                        findStatblocks(node[key], [...path, key]);
-                    }
-                }
-            }
-            findStatblocks(codexDoc, []);
+            });
 
             const allEntityIds = new Set((await db.collection('entities_pf1e').find({}, { projection: { _id: 1 } }).toArray()).map(e => e._id.toString()));
 
@@ -637,52 +652,89 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         console.log(`[CREATE MISSING ENTITIES] Job started.`);
 
         try {
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
-            if (!codexDoc) return res.status(404).json({ error: 'Codex data not found.' });
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
+            const allEntities = await db.collection('entities_pf1e').find({}).toArray();
 
-            const statblocksInCodex = [];
-            function findStatblocks(node, path) {
-                if (node && node.content && Array.isArray(node.content)) {
-                    node.content.forEach(block => {
-                        if (block.type === 'statblock' && block.entityId) {
-                            statblocksInCodex.push({ entityId: block.entityId, path, content: node.content });
-                        }
-                    });
-                }
-                for (const key in node) {
-                    if (typeof node[key] === 'object' && node[key] !== null && key !== 'content') {
-                        findStatblocks(node[key], [...path, key]);
-                    }
-                }
-            }
-            findStatblocks(codexDoc, []);
-
-            const allEntityIds = new Set((await db.collection('entities_pf1e').find({}, { projection: { _id: 1 } }).toArray()).map(e => e._id.toString()));
-
-            const unlinkedStatblocks = statblocksInCodex.filter(sb => !allEntityIds.has(sb.entityId));
-
-            if (unlinkedStatblocks.length === 0) {
-                return res.json({ message: 'No missing entities to create.' });
-            }
-
-            console.log(`[CREATE MISSING ENTITIES] Found ${unlinkedStatblocks.length} unlinked statblocks to process.`);
+            const entitiesById = new Map(allEntities.map(e => [e._id.toString(), e]));
+            const entitiesByPath = new Map(allEntities.map(e => e.sourceCodexPath ? [JSON.stringify(e.sourceCodexPath), e] : null).filter(Boolean));
 
             let createdCount = 0;
-            for (const statblock of unlinkedStatblocks) {
-                try {
-                    const name = (statblock.path[statblock.path.length - 1] || 'Unknown').replace(/_/g, ' ');
-                    const entity = await parseStatBlockToEntity({ entityId: statblock.entityId }, name, statblock.path, statblock.content);
-                    if (entity) {
-                        await db.collection('entities_pf1e').insertOne(entity);
-                        createdCount++;
-                        console.log(`[CREATE MISSING ENTITIES] Created entity for ${name} (${statblock.entityId})`);
+            let linkedCount = 0;
+            const bulkCodexUpdates = [];
+            const entitiesToInsert = [];
+
+            for (const entry of codexEntries) {
+                // Skip if already has a valid top-level entityId
+                if (entry.entityId && entitiesById.has(entry.entityId)) {
+                    continue;
+                }
+
+                const pathString = JSON.stringify(entry.path_components);
+                let entityForThisCodex = null;
+                let entityIdForThisCodex = null;
+
+                // Find entity
+                const mainStatblock = entry.content?.find(b => b.type === 'statblock' && b.entityId);
+                if (entry.entityId && entitiesById.has(entry.entityId)) { // Check top-level first
+                    entityForThisCodex = entitiesById.get(entry.entityId);
+                    entityIdForThisCodex = entityForThisCodex._id.toString();
+                } else if (mainStatblock && entitiesById.has(mainStatblock.entityId)) { // Then check statblock
+                    entityForThisCodex = entitiesById.get(mainStatblock.entityId);
+                    entityIdForThisCodex = entityForThisCodex._id.toString();
+                } else if (entitiesByPath.has(pathString)) { // Then check by path
+                    entityForThisCodex = entitiesByPath.get(pathString);
+                    entityIdForThisCodex = entityForThisCodex._id.toString();
+                }
+
+                // Create if not found
+                if (!entityForThisCodex) {
+                    // Continue if there is no statblock to parse
+                    if (!entry.content?.some(b => b.type === 'statblock')) {
+                        continue;
                     }
-                } catch (error) {
-                    console.error(`[CREATE MISSING ENTITIES] Error processing statblock ${statblock.entityId}:`, error);
+                    const newEntityId = new ObjectId();
+                    entityIdForThisCodex = newEntityId.toString();
+                    const name = (entry.path_components[entry.path_components.length - 1] || 'Unknown').replace(/_/g, ' ');
+                    const entityData = await parseStatBlockToEntity({ entityId: entityIdForThisCodex }, name, entry.path_components, entry.content);
+                    if (entityData) {
+                        entitiesToInsert.push({ ...entityData, _id: newEntityId });
+                        createdCount++;
+                    }
+                }
+
+                // If we have an entityId, update the codex entry
+                if (entityIdForThisCodex) {
+                    // Clean up content: remove all statblocks
+                    const newContent = entry.content.filter(block => block.type !== 'statblock');
+                    
+                    // Check if update is needed
+                    if (entry.entityId !== entityIdForThisCodex || JSON.stringify(entry.content) !== JSON.stringify(newContent)) {
+                        bulkCodexUpdates.push({
+                            updateOne: {
+                                filter: { _id: entry._id },
+                                update: { 
+                                    $set: { 
+                                        entityId: entityIdForThisCodex,
+                                        content: newContent 
+                                    } 
+                                }
+                            }
+                        });
+                        linkedCount++;
+                    }
                 }
             }
 
-            res.status(200).json({ message: `Entity creation complete. ${createdCount} entities created.` });
+            if (bulkCodexUpdates.length > 0) {
+                console.log(`[CREATE MISSING ENTITIES] Updating ${bulkCodexUpdates.length} codex entries.`);
+                await db.collection('codex_entries').bulkWrite(bulkCodexUpdates);
+            }
+            if (entitiesToInsert.length > 0) {
+                console.log(`[CREATE MISSING ENTITIES] Creating ${entitiesToInsert.length} new entities.`);
+                await db.collection('entities_pf1e').insertMany(entitiesToInsert);
+            }
+
+            res.status(200).json({ message: `Entity creation and linking complete. Created ${createdCount} entities, linked ${linkedCount} codex entries.` });
 
         } catch (e) {
             console.error('[CREATE MISSING ENTITIES] Fatal error:', e);
@@ -698,26 +750,20 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         console.log(`[DATA INTEGRITY STATUS] Job started.`);
 
         try {
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
-            if (!codexDoc) return res.status(404).json({ error: 'Codex data not found.' });
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
+            if (!codexEntries || codexEntries.length === 0) return res.status(404).json({ error: 'Codex entries not found.' });
 
             // 1. Get unlinked statblocks
             const statblocksInCodex = [];
-            function findStatblocks(node, path) {
-                if (node && node.content && Array.isArray(node.content)) {
-                    node.content.forEach(block => {
+            codexEntries.forEach(entry => {
+                if (entry.content && Array.isArray(entry.content)) {
+                    entry.content.forEach(block => {
                         if (block.type === 'statblock' && block.entityId) {
-                            statblocksInCodex.push({ entityId: block.entityId, path });
+                            statblocksInCodex.push({ entityId: block.entityId, path: entry.path_components });
                         }
                     });
                 }
-                for (const key in node) {
-                    if (typeof node[key] === 'object' && node[key] !== null && key !== 'content') {
-                        findStatblocks(node[key], [...path, key]);
-                    }
-                }
-            }
-            findStatblocks(codexDoc, []);
+            });
             const allEntityIds = new Set((await db.collection('entities_pf1e').find({}, { projection: { _id: 1 } }).toArray()).map(e => e._id.toString()));
             const unlinkedStatblocks = statblocksInCodex.filter(sb => !allEntityIds.has(sb.entityId));
 
@@ -924,45 +970,18 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
             };
 
             // 1. Scan for duplicate content in the codex
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
-            if (codexDoc) {
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
+            if (codexEntries && codexEntries.length > 0) {
                 const contentMap = new Map();
-                
-                function isLeafNode(data) {
-                    if (!data || typeof data !== 'object') return false;
-                    const keys = Object.keys(data);
-                    const hasContent = keys.includes('content') && Array.isArray(data.content);
-                    const hasSubCategories = keys.some(
-                        k => !['content', 'category', 'summary'].includes(k) &&
-                             typeof data[k] === 'object' &&
-                             !Array.isArray(data[k])
-                    );
-                    return hasContent && !hasSubCategories; 
-                }
-
-                function recursivelyFindDuplicateContent(node, path) {
-                    if (!node || typeof node !== 'object') return;
-
-                    for (const key in node) {
-                        if (Object.prototype.hasOwnProperty.call(node, key)) {
-                            const childNode = node[key];
-                            const currentPath = [...path, key];
-
-                            if (isLeafNode(childNode)) {
-                                const contentKey = JSON.stringify(childNode.content);
-                                if (!contentMap.has(contentKey)) {
-                                    contentMap.set(contentKey, []);
-                                }
-                                contentMap.get(contentKey).push(currentPath);
-                            } else if (typeof childNode === 'object' && !Array.isArray(childNode)) {
-                                recursivelyFindDuplicateContent(childNode, currentPath);
-                            }
+                codexEntries.forEach(entry => {
+                    if (entry.content && Array.isArray(entry.content)) {
+                        const contentKey = JSON.stringify(entry.content);
+                        if (!contentMap.has(contentKey)) {
+                            contentMap.set(contentKey, []);
                         }
+                        contentMap.get(contentKey).push(entry.path_components);
                     }
-                }
-
-                recursivelyFindDuplicateContent(codexDoc, []);
-
+                });
                 for (const [content, paths] of contentMap.entries()) {
                     if (paths.length > 1) {
                         results.duplicateContent.push({ contentPreview: content.substring(0, 150) + (content.length > 150 ? '...' : ''), paths });
@@ -1154,59 +1173,270 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         console.log(`[SCAN AND FIX DATA] Job started.`);
 
         try {
-            const codexDoc = await db.collection('codex').findOne({ _id: 'world_data' });
-            if (!codexDoc) {
-                return res.status(404).json({ error: 'Codex data not found.' });
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
+            if (!codexEntries || codexEntries.length === 0) {
+                return res.status(404).json({ error: 'Codex entries not found.' });
             }
 
-            function processData(data) {
-                if (Array.isArray(data)) {
-                    return data.map(item => processData(item));
-                }
-                if (data !== null && typeof data === 'object') {
-                    const newData = {};
-                    for (const key in data) {
-                        if (key === 'content' && Array.isArray(data[key])) {
-                            newData[key] = data[key].map(block => {
-                                if (block.type === 'table' && Array.isArray(block.rows)) {
-                                    const newRows = block.rows.map(row => {
-                                        if (Array.isArray(row)) {
-                                            const rowObj = {};
-                                            (block.headers || []).forEach((h, i) => {
-                                                const headerKey = h.replace(/\s+/g, '');
-                                                rowObj[headerKey] = row[i] ?? null;
-                                            });
-                                            return rowObj;
-                                        }
-                                        return row;
+            let changesMade = 0;
+            for (const entry of codexEntries) {
+                let changed = false;
+                if (entry.content && Array.isArray(entry.content)) {
+                    const newContent = entry.content.map(block => {
+                        if (block.type === 'table' && Array.isArray(block.rows)) {
+                            const newRows = block.rows.map(row => {
+                                if (Array.isArray(row)) {
+                                    const rowObj = {};
+                                    (block.headers || []).forEach((h, i) => {
+                                        const headerKey = h.replace(/\s+/g, '');
+                                        rowObj[headerKey] = row[i] ?? null;
                                     });
-                                    return { ...block, rows: newRows };
+                                    changed = true;
+                                    return rowObj;
                                 }
-                                return block;
+                                return row;
                             });
-                        } else {
-                            newData[key] = processData(data[key]);
+                            return { ...block, rows: newRows };
                         }
+                        return block;
+                    });
+                    if (changed) {
+                        await db.collection('codex_entries').updateOne(
+                            { path_components: entry.path_components },
+                            { $set: { content: newContent } }
+                        );
+                        changesMade++;
                     }
-                    return newData;
                 }
-                return data;
             }
-
-            const originalData = JSON.stringify(codexDoc);
-            const fixedData = processData(codexDoc);
-            const fixedDataString = JSON.stringify(fixedData);
-
-            if (originalData === fixedDataString) {
+            if (changesMade === 0) {
                 res.status(200).json({ message: 'Scan complete. No formatting changes were necessary.' });
             } else {
-                await db.collection('codex').replaceOne({ _id: 'world_data' }, fixedData);
-                res.status(200).json({ message: 'Successfully scanned and fixed data formatting.' });
+                res.status(200).json({ message: `Successfully scanned and fixed data formatting in ${changesMade} entries.` });
             }
 
         } catch (e) {
             console.error('[SCAN AND FIX DATA] Fatal error:', e);
             res.status(500).json({ error: e.message || 'An unknown error occurred during scan and fix.' });
+        }
+    });
+
+    // ------------------------------------------------------------
+    // ROUTE 13: NORMALIZE STATBLOCKS
+    // ------------------------------------------------------------
+    router.post('/normalize-statblocks', async (req, res) => {
+        if (!db) return res.status(503).json({ error: 'Database not ready' });
+        console.log(`[NORMALIZE STATBLOCKS] Job started.`);
+
+        try {
+            // Part 1: Normalize statblocks in codex_entries
+            const codexEntries = await db.collection('codex_entries').find({}).toArray();
+            const bulkOps = [];
+            let codexModifiedCount = 0;
+
+            for (const entry of codexEntries) {
+                if (!entry.content || !Array.isArray(entry.content)) {
+                    continue;
+                }
+
+                let hasChanged = false;
+                const newContent = entry.content.map(block => {
+                    if (block.type === 'statblock' && block.entityId) {
+                        // Check if there are any extra keys besides 'type' and 'entityId'
+                        const keys = Object.keys(block);
+                        if (keys.length > 2 || !keys.includes('type') || !keys.includes('entityId')) {
+                            hasChanged = true;
+                            return {
+                                type: 'statblock',
+                                entityId: block.entityId
+                            };
+                        }
+                    }
+                    return block;
+                });
+
+                if (hasChanged) {
+                    codexModifiedCount++;
+                    bulkOps.push({
+                        updateOne: {
+                            filter: { _id: entry._id },
+                            update: { $set: { content: newContent } }
+                        }
+                    });
+                }
+            }
+
+            if (bulkOps.length > 0) {
+                await db.collection('codex_entries').bulkWrite(bulkOps);
+            }
+            console.log(`[NORMALIZE STATBLOCKS] Scanned ${codexEntries.length} codex entries and normalized ${codexModifiedCount}.`);
+
+            // Part 2: Rename 'stats' to 'baseStats' in entities_pf1e
+            const entityUpdateResult = await db.collection('entities_pf1e').updateMany(
+                { stats: { $exists: true } },
+                { $rename: { stats: 'baseStats' } }
+            );
+
+            const entitiesModifiedCount = entityUpdateResult.modifiedCount;
+            console.log(`[NORMALIZE STATBLOCKS] Renamed 'stats' to 'baseStats' in ${entitiesModifiedCount} entities.`);
+
+            res.status(200).json({ 
+                message: `Statblock normalization complete.`,
+                codexUpdates: `Scanned ${codexEntries.length} entries and updated ${codexModifiedCount}.`,
+                entityUpdates: `Renamed 'stats' to 'baseStats' in ${entitiesModifiedCount} entities.`
+            });
+
+        } catch (e) {
+            console.error('[NORMALIZE STATBLOCKS] Fatal error:', e);
+            res.status(500).json({ error: e.message || 'An unknown error occurred during statblock normalization.' });
+        }
+    });
+
+    // ------------------------------------------------------------
+    // NEW ROUTE: MIGRATE DM TOOLKIT
+    // ------------------------------------------------------------
+    router.post('/migrate-dm-toolkit', async (req, res) => {
+        if (!db) return res.status(503).json({ error: 'Database not ready' });
+        console.log(`[MIGRATE DM TOOLKIT] Job started.`);
+
+        try {
+            const fightsToMigrate = await db.collection('dm_toolkit_fights').find({ 
+                initialCombatants: { $exists: true, $ne: [] } 
+            }).toArray();
+
+            if (fightsToMigrate.length === 0) {
+                return res.status(200).json({ message: 'No DM Toolkit fights require migration.' });
+            }
+
+            let migratedFightsCount = 0;
+            let migratedCombatantsCount = 0;
+
+            for (const fight of fightsToMigrate) {
+                console.log(`[MIGRATE DM TOOLKIT] Migrating fight: ${fight.name || fight._id}`);
+                const combatantsToInsert = fight.initialCombatants.map(c => ({
+                    ...c,
+                    fightId: fight._id.toString(),
+                    initiative: c.initiative || 10,
+                    effects: c.effects || [],
+                    tempMods: c.tempMods || {},
+                    activeFeats: c.activeFeats || []
+                }));
+
+                if (combatantsToInsert.length > 0) {
+                    await db.collection('dm_toolkit_combatants').insertMany(combatantsToInsert);
+                    await db.collection('dm_toolkit_fights').updateOne(
+                        { _id: fight._id },
+                        { $unset: { initialCombatants: "" } }
+                    );
+                    migratedFightsCount++;
+                    migratedCombatantsCount += combatantsToInsert.length;
+                    console.log(`[MIGRATE DM TOOLKIT] Migrated ${combatantsToInsert.length} combatants for fight: ${fight.name || fight._id}`);
+                }
+            }
+
+            res.status(200).json({ 
+                message: `DM Toolkit migration successful. Migrated ${migratedCombatantsCount} combatants across ${migratedFightsCount} fights.` 
+            });
+
+        } catch (e) {
+            console.error('[MIGRATE DM TOOLKIT] Fatal error:', e);
+            res.status(500).json({ error: e.message || 'An unknown error occurred during DM Toolkit migration.' });
+        }
+    });
+
+    // ------------------------------------------------------------
+    // ROUTE 17: MIGRATE CODEX TO HIERARCHICAL FORMAT
+    // ------------------------------------------------------------
+    router.post('/migrate-codex', async (req, res) => {
+        if (!db) return res.status(503).json({ error: 'Database not ready' });
+        const { force = false } = req.body;
+        console.log(`[MIGRATE CODEX] Job started. ${force ? '(FORCE RUN)' : ''}`);
+
+        try {
+            // 1. Check if migration has already been run
+            const newCollectionName = 'codex_entries';
+            const newCollection = db.collection(newCollectionName);
+            const count = await newCollection.countDocuments();
+
+            if (count > 0 && !force) {
+                return res.status(400).json({ message: `Migration already complete. The '${newCollectionName}' collection contains ${count} documents. Use 'force: true' to re-run.` });
+            }
+
+            // 2. Fetch the old single-document codex
+            const oldCollection = db.collection('codex');
+            const codexDoc = await oldCollection.findOne({ _id: 'world_data' });
+            if (!codexDoc) {
+                return res.status(404).json({ error: 'Original codex document (_id: \'world_data\') not found.' });
+            }
+
+            // 3. Recursively traverse and create new documents
+            const entries = [];
+            function traverse(node, path) {
+                if (!node || typeof node !== 'object') return;
+
+                const newEntryData = {};
+                const childNodes = {};
+
+                for(const key in node) {
+                    if(Object.prototype.hasOwnProperty.call(node, key)) {
+                        const value = node[key];
+                        // Child nodes are identified as non-null, non-array objects, excluding the 'content' field itself.
+                        if(typeof value === 'object' && value !== null && !Array.isArray(value) && key !== 'content') {
+                            childNodes[key] = value;
+                        } else {
+                            newEntryData[key] = value;
+                        }
+                    }
+                }
+
+                // Only add an entry if it has some data or is the root.
+                if (Object.keys(newEntryData).length > 0 || path.length === 0) {
+                    entries.push({
+                        name: path.length > 0 ? path[path.length - 1] : 'Root',
+                        path_components: path,
+                        ...newEntryData
+                    });
+                }
+
+                for (const key in childNodes) {
+                    traverse(childNodes[key], [...path, key]);
+                }
+            }
+
+            console.log('[MIGRATE CODEX] Starting traversal of world_data...');
+            traverse(codexDoc, []); // Start with an empty path for the root
+
+            if (entries.length === 0) {
+                return res.status(500).json({ error: 'No entries were generated from the codex document.' });
+            }
+            
+            console.log(`[MIGRATE CODEX] Traversal complete. Generated ${entries.length} entries.`);
+
+            // 4. Clear the new collection if forcing, and insert new data
+            if (force) {
+                await newCollection.deleteMany({});
+            }
+            await newCollection.insertMany(entries);
+            console.log(`[MIGRATE CODEX] Successfully inserted ${entries.length} documents into '${newCollectionName}'.`);
+
+            // 5. Rename the old collection to back it up
+            try {
+                await db.renameCollection('codex', `codex_backup_${Date.now()}`);
+                console.log(`[MIGRATE CODEX] Renamed old 'codex' collection to a backup.`);
+            } catch (renameError) {
+                if (renameError.codeName === 'NamespaceNotFound') {
+                     console.log(`[MIGRATE CODEX] Old 'codex' collection not found, skipping rename.`);
+                } else {
+                    // ignore other errors, like collection already exists
+                    console.warn(`[MIGRATE CODEX] Could not rename old 'codex' collection: ${renameError.message}`);
+                }
+            }
+
+            res.status(200).json({ message: `Codex migration successful. Migrated ${entries.length} documents.` });
+
+        } catch (e) {
+            console.error('[MIGRATE CODEX] Fatal error:', e);
+            res.status(500).json({ error: e.message || 'An unknown error occurred during codex migration.' });
         }
     });
 

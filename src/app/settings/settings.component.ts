@@ -17,6 +17,12 @@ export interface ApiKeysDoc {
   active_key_id: string | null;
 }
 
+// NEW: Interface for a general settings document
+export interface GeneralSettingsDoc {
+    _id: 'general';
+    default_ai_model: string;
+}
+
 @Component({
   selector: 'app-settings',
   standalone: true,
@@ -28,6 +34,9 @@ export class SettingsComponent {
   http = inject(HttpClient);
 
   apiKeysDoc: WritableSignal<ApiKeysDoc | null> = signal(null);
+  generalSettingsDoc: WritableSignal<GeneralSettingsDoc | null> = signal(null); // NEW
+  availableModels = signal<string[]>([]); // NEW
+
   newKeyName = signal<string>('');
   newKeyValue = signal<string>('');
 
@@ -35,17 +44,26 @@ export class SettingsComponent {
   message = signal<{ text: string, isError: boolean } | null>(null);
 
   constructor() {
-    this.loadApiKeys();
+    this.loadAllSettings();
   }
 
-  async loadApiKeys() {
+  async loadAllSettings() {
     this.isLoading.set(true);
     this.message.set(null);
     try {
-      const doc = await lastValueFrom(this.http.get<ApiKeysDoc>('api/admin/settings/api-keys'));
-      this.apiKeysDoc.set(doc);
+      // Fetch all settings in parallel
+      const [keysDoc, generalDoc, modelsResult] = await Promise.all([
+        lastValueFrom(this.http.get<ApiKeysDoc>('/codex/api/admin/settings/api-keys')),
+        lastValueFrom(this.http.get<GeneralSettingsDoc>('/codex/api/admin/settings/general')),
+        lastValueFrom(this.http.get<{models: string[]}>('/codex/api/ai-assistant/models'))
+      ]);
+
+      this.apiKeysDoc.set(keysDoc);
+      this.generalSettingsDoc.set(generalDoc);
+      this.availableModels.set(modelsResult.models);
+
     } catch (err: any) {
-      this.message.set({ text: err.error?.error || 'Failed to load API keys.', isError: true });
+      this.message.set({ text: err.error?.error || 'Failed to load settings.', isError: true });
     } finally {
       this.isLoading.set(false);
     }
@@ -59,20 +77,18 @@ export class SettingsComponent {
     this.isLoading.set(true);
     this.message.set(null);
     try {
-      const newKey = await lastValueFrom(this.http.post<ApiKey>('api/admin/settings/api-keys', { 
+      const newKey = await lastValueFrom(this.http.post<ApiKey>('/codex/api/admin/settings/api-keys', { 
         name: this.newKeyName(), 
         key: this.newKeyValue() 
       }));
       
-      // Optimistically update the UI
       this.apiKeysDoc.update(doc => {
         if (!doc) return null;
         doc.keys.push(newKey);
-        // If it's the first key, it becomes active automatically on the backend
         if (doc.keys.length === 1) {
             doc.active_key_id = newKey.id;
         }
-        return doc;
+        return { ...doc };
       });
 
       this.newKeyName.set('');
@@ -92,10 +108,10 @@ export class SettingsComponent {
     this.isLoading.set(true);
     this.message.set(null);
     try {
-      await lastValueFrom(this.http.delete(`api/admin/settings/api-keys/${id}`));
+      await lastValueFrom(this.http.delete(`/codex/api/admin/settings/api-keys/${id}`));
       
-      // After deletion, reload the keys to get the new active key if it changed
-      await this.loadApiKeys();
+      // After deletion, reload all settings to get the new active key if it changed
+      await this.loadAllSettings();
 
       this.message.set({ text: 'API Key deleted successfully.', isError: false });
     } catch (err: any) {
@@ -112,14 +128,37 @@ export class SettingsComponent {
     this.isLoading.set(true);
     this.message.set(null);
     try {
-        await lastValueFrom(this.http.post('api/admin/settings/set-active', { id: doc.active_key_id }));
+        await lastValueFrom(this.http.post('/codex/api/admin/settings/set-active', { id: doc.active_key_id }));
         this.message.set({ text: 'Active key updated successfully.', isError: false });
     } catch (err: any) {
         this.message.set({ text: err.error?.error || 'Failed to set active key.', isError: true });
-        // If setting fails, reload to revert the change in the UI
-        await this.loadApiKeys();
+        await this.loadAllSettings(); // Revert on failure
     } finally {
         this.isLoading.set(false);
     }
+  }
+
+  // NEW Method to save the default AI model
+  async saveDefaultModel() {
+    const doc = this.generalSettingsDoc();
+    if (!doc) return;
+
+    this.isLoading.set(true);
+    this.message.set(null);
+    try {
+        await lastValueFrom(this.http.post('/codex/api/admin/settings/general', { default_ai_model: doc.default_ai_model }));
+        this.message.set({ text: 'Default AI model updated successfully.', isError: false });
+    } catch (err: any) {
+        this.message.set({ text: err.error?.error || 'Failed to save default model.', isError: true });
+        await this.loadAllSettings(); // Revert on failure
+    } finally {
+        this.isLoading.set(false);
+    }
+  }
+
+  // Helper to format model names for the dropdown
+  formatModelName(name: string): string {
+    if (!name) return '';
+    return name.replace('models/', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   }
 }
