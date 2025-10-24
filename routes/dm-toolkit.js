@@ -204,6 +204,7 @@ module.exports = function(db) {
     
     // --- Sessions ---
     router.get('/sessions', async (req, res) => {
+        res.set('Cache-Control', 'no-store');
         const sessions = await db.collection('dm_toolkit_sessions').find().sort({ createdAt: -1 }).toArray();
         res.json(sessions);
     });
@@ -218,7 +219,8 @@ module.exports = function(db) {
         const { id } = req.params;
         const { _id, ...updateData } = req.body; // Destructure and exclude _id
         await db.collection('dm_toolkit_sessions').updateOne(getIdQuery(id), { $set: updateData });
-        res.status(200).json({ message: 'Session updated successfully.' });
+        const updatedSession = await db.collection('dm_toolkit_sessions').findOne(getIdQuery(id));
+        res.status(200).json(updatedSession);
     });
     
     router.delete('/sessions/:id', async (req, res) => {

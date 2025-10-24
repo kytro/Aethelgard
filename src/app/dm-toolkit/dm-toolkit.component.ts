@@ -1,4 +1,4 @@
-import { Component, signal, inject, computed, effect, WritableSignal } from '@angular/core';
+import { Component, signal, inject, computed, effect, WritableSignal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
@@ -143,46 +143,6 @@ export class DmToolkitComponent {
       }
     });
     effect(() => {
-        const session = this.currentSession();
-        const notes = this.sessionNotes();
-        if(!session || this.saveStatus() === 'Idle') return;
-        
-        const handler = setTimeout(async () => {
-            if (this.saveStatus() === 'Unsaved' && notes !== (session.notes || "")) {
-                this.saveStatus.set('Saving');
-                try {
-                    await lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/sessions/${session._id}`, { notes }));
-                    this.saveStatus.set('Saved');
-                    
-                    // Update the current session signal with the newly saved notes
-                    this.currentSession.update(current => {
-                        if (current && current._id === session._id) {
-                            return { ...current, notes: notes };
-                        }
-                        return current;
-                    });
-
-                    // Also update the sessions array
-                    this.sessions.update(sessions => {
-                        const index = sessions.findIndex(s => s._id === session._id);
-                        if (index > -1) {
-                            const newSessions = [...sessions];
-                            newSessions[index] = { ...newSessions[index], notes: notes };
-                            return newSessions;
-                        }
-                        return sessions;
-                    });
-
-                } catch(e) {
-                    console.error("Failed to auto-save notes:", e);
-                    this.saveStatus.set('Error');
-                }
-            }
-        }, 1000);
-
-        return () => clearTimeout(handler);
-    });
-    effect(() => {
       const source = this.addFormSource();
       const path = this.selectedCodexPath();
       if (!source || ['Custom', 'Found', 'Find'].includes(source)) {
@@ -212,7 +172,7 @@ export class DmToolkitComponent {
         lastValueFrom(this.http.get<any[]>('/codex/api/admin/collections/magic_items_pf1e')),
         lastValueFrom(this.http.get<any[]>('/codex/api/admin/collections/dm_toolkit_effects')),
         lastValueFrom(this.http.get<any[]>('/codex/api/admin/collections/spells_pf1e')),
-        lastValueFrom(this.http.get<{models: string[], defaultModel: string}>('/cod/api/dm-toolkit-ai/models')),
+        lastValueFrom(this.http.get<{models: string[], defaultModel: string}>('/codex/api/dm-toolkit-ai/models')),
       ]);
       this.fights.set(fights);
       this.sessions.set(sessions);
@@ -688,28 +648,52 @@ export class DmToolkitComponent {
       if (this.currentSession()?._id === id) this.currentSession.set(null);
   }
 
-  async saveSession(session: Session) {
-    const current = this.currentSession();
-    if (current && this.saveStatus() === 'Unsaved') {
-        try {
-            this.saveStatus.set('Saving');
-            await lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/sessions/${current._id}`, { notes: this.sessionNotes() }));
-            this.saveStatus.set('Saved');
-            this.sessions.update(sessions => {
-                const index = sessions.findIndex(s => s._id === current._id);
-                if (index > -1) {
-                    const newSessions = [...sessions];
-                    newSessions[index] = { ...newSessions[index], notes: this.sessionNotes() };
-                    return newSessions;
-                }
-                return sessions;
-            });
-        } catch (e) {
-            console.error("Failed to save session:", e);
-            this.saveStatus.set('Error');
-        }
+  @HostListener('window:beforeunload', ['$event'])
+  unloadNotification($event: any): void {
+    if (this.saveStatus() === 'Unsaved') {
+      this.saveCurrentSession();
+    }
+  }
+
+  @HostListener('document:visibilitychange', ['$event'])
+  onVisibilityChange() {
+    if (document.visibilityState === 'hidden' && this.saveStatus() === 'Unsaved') {
+      this.saveCurrentSession();
+    }
+  }
+
+  async selectSession(session: Session) {
+    if (this.saveStatus() === 'Unsaved') {
+      await this.saveCurrentSession();
     }
     this.setCurrentSession(session);
+  }
+
+  async saveCurrentSession() {
+    const session = this.currentSession();
+    const notes = this.sessionNotes();
+    if (!session || this.saveStatus() !== 'Unsaved' || notes === (session.notes || '')) {
+      return;
+    }
+
+    this.saveStatus.set('Saving');
+    try {
+      const updatedSession = await lastValueFrom(this.http.patch<Session>(`/codex/api/dm-toolkit/sessions/${session._id}`, { notes }));
+      this.saveStatus.set('Saved');
+      this.currentSession.set(updatedSession);
+      this.sessions.update(sessions => {
+        const index = sessions.findIndex(s => s._id === session._id);
+        if (index > -1) {
+          const newSessions = [...sessions];
+          newSessions[index] = updatedSession;
+          return newSessions;
+        }
+        return sessions;
+      });
+    } catch (e) {
+      console.error("Failed to save session:", e);
+      this.saveStatus.set('Error');
+    }
   }
 
   setCurrentSession(session: Session) {
