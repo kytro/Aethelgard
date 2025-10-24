@@ -1,5 +1,10 @@
 <div class="settings">
-  <h2 class="text-3xl font-bold text-white mb-6">Settings</h2>
+  <div class="flex justify-between items-center mb-6">
+    <h2 class="text-3xl font-bold text-white">Settings</h2>
+    <button (click)="saveAllSettings()" [disabled]="!isDirty() || isLoading()" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed">
+      {{ isLoading() ? 'Saving...' : 'Save Settings' }}
+    </button>
+  </div>
 
   @if (apiKeysDoc(); as doc) {
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -62,7 +67,7 @@
           </p>
           <select 
             [(ngModel)]="doc.active_key_id" 
-            (ngModelChange)="setActiveKey()"
+            (ngModelChange)="onSettingsChange()"
             [disabled]="isLoading() || !doc.keys || doc.keys.length === 0"
             class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700"
           >
@@ -84,7 +89,7 @@
                 </p>
                 <select 
                   [(ngModel)]="gSettings.default_ai_model" 
-                  (ngModelChange)="saveDefaultModel()"
+                  (ngModelChange)="onSettingsChange()"
                   [disabled]="isLoading() || availableModels().length === 0"
                   class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700"
                 >

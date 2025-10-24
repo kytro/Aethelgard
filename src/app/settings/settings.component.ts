@@ -1,4 +1,4 @@
-import { Component, signal, inject, WritableSignal } from '@angular/core';
+import { Component, signal, inject, WritableSignal, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
@@ -41,10 +41,19 @@ export class SettingsComponent {
   newKeyValue = signal<string>('');
 
   isLoading = signal<boolean>(false);
+  isDirty = signal<boolean>(false);
   message = signal<{ text: string, isError: boolean } | null>(null);
 
   constructor() {
     this.loadAllSettings();
+  }
+
+  @HostListener('window:beforeunload', ['$event'])
+  canDeactivate(event: BeforeUnloadEvent): void {
+    if (this.isDirty()) {
+      this.saveAllSettings();
+      event.returnValue = true;
+    }
   }
 
   async loadAllSettings() {
@@ -61,6 +70,7 @@ export class SettingsComponent {
       this.apiKeysDoc.set(keysDoc);
       this.generalSettingsDoc.set(generalDoc);
       this.availableModels.set(modelsResult.models);
+      this.isDirty.set(false);
 
     } catch (err: any) {
       this.message.set({ text: err.error?.error || 'Failed to load settings.', isError: true });
@@ -94,6 +104,7 @@ export class SettingsComponent {
       this.newKeyName.set('');
       this.newKeyValue.set('');
       this.message.set({ text: `API Key '${newKey.name}' added successfully!`, isError: false });
+      this.isDirty.set(true);
 
     } catch (err: any) {
       this.message.set({ text: err.error?.error || 'Failed to add API key.', isError: true });
@@ -121,35 +132,26 @@ export class SettingsComponent {
     }
   }
 
-  async setActiveKey() {
-    const doc = this.apiKeysDoc();
-    if (!doc) return;
-
-    this.isLoading.set(true);
-    this.message.set(null);
-    try {
-        await lastValueFrom(this.http.post('/codex/api/admin/settings/set-active', { id: doc.active_key_id }));
-        this.message.set({ text: 'Active key updated successfully.', isError: false });
-    } catch (err: any) {
-        this.message.set({ text: err.error?.error || 'Failed to set active key.', isError: true });
-        await this.loadAllSettings(); // Revert on failure
-    } finally {
-        this.isLoading.set(false);
-    }
+  onSettingsChange(): void {
+    this.isDirty.set(true);
   }
 
-  // NEW Method to save the default AI model
-  async saveDefaultModel() {
-    const doc = this.generalSettingsDoc();
-    if (!doc) return;
+  async saveAllSettings() {
+    const keysDoc = this.apiKeysDoc();
+    const generalDoc = this.generalSettingsDoc();
+    if (!keysDoc || !generalDoc) return;
 
     this.isLoading.set(true);
     this.message.set(null);
     try {
-        await lastValueFrom(this.http.post('/codex/api/admin/settings/general', { default_ai_model: doc.default_ai_model }));
-        this.message.set({ text: 'Default AI model updated successfully.', isError: false });
+      await Promise.all([
+        lastValueFrom(this.http.post('/codex/api/admin/settings/set-active', { id: keysDoc.active_key_id })),
+        lastValueFrom(this.http.post('/codex/api/admin/settings/general', { default_ai_model: generalDoc.default_ai_model }))
+      ]);
+      this.message.set({ text: 'Settings saved successfully.', isError: false });
+      this.isDirty.set(false);
     } catch (err: any) {
-        this.message.set({ text: err.error?.error || 'Failed to save default model.', isError: true });
+        this.message.set({ text: err.error?.error || 'Failed to save settings.', isError: true });
         await this.loadAllSettings(); // Revert on failure
     } finally {
         this.isLoading.set(false);
