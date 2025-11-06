@@ -121,164 +121,383 @@ ${JSON.stringify(existingNames)}`;
     function escapeRegExp(string) {
         return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& = whole match
     }
-    function getAbilityModifierAsNumber(score) {
-        const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
-        if (isNaN(numScore)) return 0;
-        return Math.floor((numScore - 10) / 2);
+// [NEW Helper Functions - Add these to routes/data-integrity.js]
+const getAbilityModifierAsNumber = (score) => {
+    const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
+    if (isNaN(numScore)) return 0;
+    return Math.floor((numScore - 10) / 2);
+};
+
+/* Canonicalise ability keys and default missing ones to 10  */
+const normaliseAbilityKeys = (stats) => {
+  const canon = {
+    strength: 'Str', str: 'Str',
+    dexterity: 'Dex', dex: 'Dex',
+    constitution: 'Con', con: 'Con',
+    intelligence: 'Int', int: 'Int',
+    wisdom: 'Wis', wis: 'Wis',
+    charisma: 'Cha', cha: 'Cha',
+  };
+  const out = {};
+  /* copy / rename abilities  */
+  for (const [k, v] of Object.entries(stats ?? {})) {
+    const key = canon[k.toLowerCase()] ?? k;
+    out[key] = v;
+  }
+  return out;
+};
+
+const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17];
+const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
+const cleanHeader = (h) => typeof h !== 'string' ? '' : h.replace(/[^a-zA-Z0-9]/g, '');
+
+
+// [NEW, FIXED FUNCTION]
+function mergeBaseStats(
+  fresh,   // what the parser just found (may have bad defaults)
+  old    // what is already in Firestore (good data)
+) {
+  
+  const out = { ...old }; // Start with the old, good data.
+
+  // --- Intelligently merge 'fresh' data ---
+
+  // 1. Abilities: Overwrite only if fresh data was explicitly found (not default 10).
+  const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+  let abilitiesFoundInFresh = false;
+  for (const ab of abilities) {
+      if (fresh[ab] !== undefined && fresh[ab] !== 10) {
+          out[ab] = fresh[ab];
+          abilitiesFoundInFresh = true;
+      }
+  }
+
+  // 2. Skills: Always take from fresh parser, as it's the source of truth from the codex.
+  if (fresh.skills) {
+      out.skills = fresh.skills;
+  }
+
+  // 3. HP: Only overwrite if fresh.hp was found (is not 0 or undefined).
+  if (fresh.hp) {
+      out.hp = fresh.hp;
+  }
+
+  // 4. AC: Only overwrite if fresh.armorClass was found (is not default 10).
+  if (fresh.armorClass && fresh.armorClass.total !== 10) {
+      out.armorClass = fresh.armorClass;
+  }
+
+  // 5. Saves: Only overwrite if abilities were parsed (meaning saves are valid)
+  //    OR if saves were explicitly parsed (not default 0s).
+  if (abilitiesFoundInFresh || (fresh.saves && (fresh.saves.fortitude !== 0 || fresh.saves.reflex !== 0 || fresh.saves.will !== 0))) {
+    out.saves = fresh.saves;
+  }
+
+  // 6. Combat: Only overwrite if abilities were parsed (meaning combat stats are valid)
+  //    OR if BAB was explicitly parsed.
+  if (abilitiesFoundInFresh || (fresh.combat && fresh.combat.bab !== null && fresh.combat.bab !== 1)) {
+    out.combat = fresh.combat;
+  }
+
+  // 7. Ensure core abilities exist (safety net)
+  for (const a of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']) {
+    if (out[a] === undefined) {
+      out[a] = 10;
     }
+  }
 
-    // This function is still used by the /process-codex route
-    async function parseStatBlockToEntity(statBlock, name, path, content) {
-        const baseStats = {};
-        const abilityVariations = { str: ['str', 'strength'], dex: ['dex', 'dexterity'], con: ['con', 'constitution'], int: ['int', 'intelligence'], wis: ['wis', 'wisdom'], cha: ['cha', 'charisma'] };
+  return out;
+}
 
-        const getAllStats = () => {
-            let all = [];
-            (content || []).filter(b => b.type === 'statblock' && b.stats).forEach(block => {
-                if (Array.isArray(block.stats)) {
-                    all.push(...block.stats);
-                } else if (typeof block.stats === 'object') {
-                    // Handle object format, convert to array format
-                    for (const key in block.stats) {
-                        all.push({ label: key, value: block.stats[key] });
-                    }
-                }
-            });
-            return all;
-        }
-
-        const allStats = getAllStats();
-        for (const ability in abilityVariations) {
-            for (const variation of abilityVariations[ability]) {
-                const stat = allStats.find(s => s.label && s.label.toLowerCase() === variation);
-                if (stat && stat.value) {
-                    const match = String(stat.value).match(/-?\d+/);
-                    if (match) {
-                        baseStats[ability] = parseInt(match[0], 10);
-                        break;
-                    }
+// [REPLACE the old parseStatBlockToEntity with this one from admin.txt]
+async function parseStatBlockToEntity(statBlock, name, path, content) {
+    // This helper function must be defined inside or available to parseStatBlockToEntity
+    const getAllStats = () => {
+        let all = [];
+        (content || []).filter(b => b.type === 'statblock' && b.stats).forEach(block => {
+            if (Array.isArray(block.stats)) {
+                all.push(...block.stats);
+            } else if (typeof block.stats === 'object') {
+                for (const key in block.stats) {
+                    all.push({ label: key, value: block.stats[key] });
                 }
             }
-        }
-
-        if (Object.keys(baseStats).length < 6) {
-            return null;
-        }
-
-        const getStat = (label) => {
-            const stat = allStats.find(s => s.label && s.label.toLowerCase() === label.toLowerCase());
-            return stat ? stat.value : null;
-        }
-
-        baseStats.hp = getStat('HP');
-        baseStats.ac = getStat('AC');
-
-        const combat = { bab: null, cmb: null, cmd: null };
-
-        const babString = getStat('Base Atk');
-        const cmbString = getStat('CMB');
-        const cmdString = getStat('CMD');
-
-        if (babString) {
-            combat.bab = parseInt(babString.match(/[+-]?\d+/)?.[0] || '0', 10);
-        }
-        if (cmbString) {
-            combat.cmb = cmbString;
-        }
-        if (cmdString) {
-            combat.cmd = cmdString;
-        }
-
-        const strMod = getAbilityModifierAsNumber(baseStats.str);
-        const dexMod = getAbilityModifierAsNumber(baseStats.dex);
-
-        const crString = getStat('cr') || '1';
-        let level = 1;
-        if (crString.includes('/')) {
-            const parts = crString.split('/');
-            level = parseInt(parts[0], 10) / parseInt(parts[1], 10);
-        } else {
-            level = parseInt(crString, 10);
-        }
-        if (isNaN(level) || level < 1) level = 1;
-        const levelInt = Math.floor(level);
-
-        if (combat.bab === null) {
-            combat.bab = levelInt;
-        }
-        if (combat.cmb === null && combat.bab !== null) {
-            combat.cmb = combat.bab + strMod;
-        }
-        if (combat.cmd === null && combat.bab !== null) {
-            combat.cmd = 10 + combat.bab + strMod + dexMod;
-        }
-
-        baseStats.combat = combat;
-        baseStats.saves = getStat('Saves');
-
-        const rules = [];
-        const featsTables = content.filter(b => b.type === 'table' && b.title && b.title.toLowerCase() === 'feats');
-        const featNames = [];
-        featsTables.forEach(table => {
-            (table.rows || []).forEach(row => {
-                if (row.Feat) featNames.push(row.Feat.trim());
-            });
         });
-        if (featNames.length > 0) {
-            const ruleDocs = await db.collection('rules_pf1e').find({ name: { $in: featNames.map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
-            rules.push(...ruleDocs.map(d => d._id.toString()));
-        }
+        return all;
+    }
 
-        const equipment = [];
-        const equipmentHeadingIndex = content.findIndex(b => b.type === 'heading' && b.text && b.text.toLowerCase() === 'equipment');
-        if (equipmentHeadingIndex > -1) {
-            const equipmentParagraph = content.find((b, i) => i > equipmentHeadingIndex && b.type === 'paragraph');
-            if (equipmentParagraph && equipmentParagraph.text) {
-                const itemNames = equipmentParagraph.text.split(/[,.]+/).map(item => item.trim()).filter(Boolean);
-                if (itemNames.length > 0) {
-                    const equipDocs = await db.collection('equipment_pf1e').find({ name: { $in: itemNames.map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
-                    equipment.push(...equipDocs.map(d => d._id.toString()));
+    const allStats = getAllStats();
+    const statsMap = new Map();
+    allStats.forEach((stat) => {
+        if (stat.label) {
+            statsMap.set(stat.label.trim().toLowerCase(), String(stat.value));
+        }
+    });
+    const getStat = (key) => statsMap.get(key.trim().toLowerCase());
+
+    let baseStats = {};
+    const featNames = [];
+    const specialAbilityNames = [];
+    const equipmentNames = [];
+    const spellNames = [];
+    let deityName = null;
+
+    // --- Ability Scores ---
+    const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+    const abilityVariations = {
+      'Str': ['str', 'strength'],
+      'Dex': ['dex', 'dexterity'],
+      'Con': ['con', 'constitution'],
+      'Int': ['int', 'intelligence'],
+      'Wis': ['wis', 'wisdom'],
+      'Cha': ['cha', 'charisma']
+    };
+    
+    const abilityString = getStat('ability scores');
+    if (abilityString) {
+      abilities.forEach(ab => {
+        const variationsRegex = `(?:${abilityVariations[ab].join('|')})`;
+        const match = abilityString.match(
+          new RegExp(`${variationsRegex}\s*[:—-]?\s*(-?\d+)`, 'i')
+        );
+        if (match) {
+          baseStats[ab] = parseInt(match[1], 10);
+        }
+      });
+    }
+
+    abilities.forEach(ab => {
+      if (baseStats[ab] === undefined) {
+        for (const variation of abilityVariations[ab]) {
+          const individualStat = getStat(variation);
+          if (individualStat) {
+            const statValueMatch = String(individualStat).match(/-?\d+/);
+            if (statValueMatch) {
+              baseStats[ab] = parseInt(statValueMatch[0], 10);
+              break;
+            }
+          }
+        }
+      }
+    });
+
+    abilities.forEach(ab => {
+      if (baseStats[ab] === undefined) {
+        const statValue = getStat(ab);
+        if (statValue) {
+          const statValueMatch = String(statValue).match(/-?\d+/);
+          if (statValueMatch) {
+            baseStats[ab] = parseInt(statValueMatch[0], 10);
+          }
+        }
+      }
+    });
+    
+    // (Parsing from tables - simplified, add back if needed from admin.txt sources 266-280)
+
+    // --- AC ---
+    const ac = {};
+    const acString = getStat('AC') || getStat('Armor Class') || '';
+    const totalACMatch = acString.match(/^(\d+)/);
+    ac.total = totalACMatch ? parseInt(totalACMatch[1], 10) : 10;
+    const touchACMatch = acString.match(/touch\s*(\d+)/);
+    ac.touch = touchACMatch ? parseInt(touchACMatch[1], 10) : ac.total;
+    const ffACMatch = acString.match(/flat-footed\s*(\d+)/);
+    ac.flatFooted = ffACMatch ? parseInt(ffACMatch[1], 10) : ac.total;
+    baseStats.armorClass = ac;
+
+    // HP
+    baseStats.hp = getStat('hp') || 0;
+
+    // --- Saves & Combat Stats (with calculation fallbacks) ---
+    const saves = {};
+    const combat = { bab: null, cmb: null, cmd: null };
+    const saveString = getStat('Saves');
+    const babString = getStat('Base Atk');
+    const cmbString = getStat('CMB');
+    const cmdString = getStat('CMD');
+    if (saveString) {
+        saves.fortitude = parseInt(saveString.match(/Fort\s*([+-]?\d+)/)?.[1] || '0', 10);
+        saves.reflex = parseInt(saveString.match(/Ref\s*([+-]?\d+)/)?.[1] || '0', 10);
+        saves.will = parseInt(saveString.match(/Will\s*([+-]?\d+)/)?.[1] || '0', 10);
+    }
+    if (babString) {
+        combat.bab = parseInt(babString.match(/[+-]?\d+/)?.[0] || '0', 10);
+    }
+    if (cmbString) {
+        combat.cmb = cmbString;
+    }
+    if (cmdString) {
+        combat.cmd = cmdString;
+    }
+    
+    const strMod = getAbilityModifierAsNumber(baseStats.Str);
+    const dexMod = getAbilityModifierAsNumber(baseStats.Dex);
+    const conMod = getAbilityModifierAsNumber(baseStats.Con);
+    const wisMod = getAbilityModifierAsNumber(baseStats.Wis);
+
+    const crString = getStat('cr') || '1';
+    let level = 1;
+    if (crString.includes('/')) {
+        const parts = crString.split('/');
+        level = parseInt(parts[0], 10) / parseInt(parts[1], 10);
+    } else {
+        level = parseInt(crString, 10);
+    }
+    if (isNaN(level) || level < 1) level = 1;
+    const levelInt = Math.floor(level);
+
+    if (!saveString) {
+        const isFortGood = baseStats.Con >= 14 || (baseStats.Con >= baseStats.Dex && baseStats.Con >= baseStats.Wis);
+        const isRefGood = baseStats.Dex >= 14 || (baseStats.Dex >= baseStats.Con && baseStats.Dex >= baseStats.Wis);
+        const isWillGood = baseStats.Wis >= 14 || (baseStats.Wis >= baseStats.Con && baseStats.Wis >= baseStats.Dex);
+        const safeLevelIndex = Math.max(0, Math.min(levelInt - 1, GOOD_SAVES.length - 1));
+        saves.fortitude = (isFortGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + conMod;
+        saves.reflex = (isRefGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + dexMod;
+        saves.will = (isWillGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + wisMod;
+    }
+    
+    if (combat.bab === null) combat.bab = levelInt;
+    if (combat.cmb === null && combat.bab !== null) combat.cmb = combat.bab + strMod;
+    if (combat.cmd === null && combat.bab !== null) combat.cmd = 10 + combat.bab + strMod + dexMod;
+
+    baseStats.saves = saves;
+    baseStats.combat = combat;
+
+    // --- Skills (This is the improved part) ---
+    const skills = {};
+    let skillsString = getStat('Skills');
+    const featsValueForSkills = getStat('Feats');
+    if (featsValueForSkills) {
+        const parts = featsValueForSkills.split(/\s*;\s*Skills|\s*Skills:/i);
+        if (parts.length > 1) {
+            const skillsPart = parts[1];
+            skillsString = skillsString ? `${skillsString}, ${skillsPart}` : skillsPart;
+        }
+    }
+
+    if (skillsString) {
+        const skillEntries = skillsString.split(',');
+        skillEntries.forEach(entry => {
+            const match = entry.trim().match(/^(.*?)\s*([+-]\d+)/);
+            if (match) {
+                const skillName = match[1].trim();
+                const skillValue = parseInt(match[2], 10);
+                if (skillName && !isNaN(skillValue)) {
+                  skills[skillName] = skillValue;
                 }
             }
-        }
+        });
+    }
+    
+    // --- Skills from Tables ---
+    const skillTables = (content || []).filter((b) => {
+        if (b.type !== 'table' || !Array.isArray(b.headers)) return false;
+        const lowerCaseHeaders = b.headers.map((h) => (h || '').toLowerCase());
+        const hasSkillHeader = lowerCaseHeaders.includes('skill');
+        const hasBonusHeader = lowerCaseHeaders.includes('bonus') || lowerCaseHeaders.includes('total');
+        return hasSkillHeader && hasBonusHeader;
+    });
+    skillTables.forEach((table) => {
+        const skillHeader = table.headers.find((h) => (h || '').toLowerCase() === 'skill');
+        const bonusHeader = table.headers.find((h) => (h || '').toLowerCase() === 'bonus' || (h || '').toLowerCase() === 'total');
+        
+        if (skillHeader && bonusHeader) {
+            const skillKey = cleanHeader(skillHeader);
+            const bonusKey = cleanHeader(bonusHeader);
 
-        const skills = [];
-        const skillsTables = content.filter(b => b.type === 'table' && b.title && b.title.toLowerCase() === 'skills');
-        const skillNames = [];
-        skillsTables.forEach(table => {
-            (table.rows || []).forEach(row => {
-                if (row.Skill) { // Assuming the column is named 'Skill'
-                    const skillNameMatch = row.Skill.match(/^([a-zA-Z\s()]+)/);
-                    if (skillNameMatch && skillNameMatch[1]) {
-                        skillNames.push(skillNameMatch[1].trim());
+            (table.rows || []).forEach((row) => {
+                const skillName = row[skillKey];
+                const skillValueText = String(row[bonusKey] || '');
+                const skillValueMatch = skillValueText.match(/[+-]?\d+/);
+                if (skillName && skillValueMatch) {
+                    const skillValue = parseInt(skillValueMatch[0], 10);
+                    if (!isNaN(skillValue)) {
+                       skills[skillName.trim()] = skillValue;
                     }
                 }
             });
-        });
-        if (skillNames.length > 0) {
-            const skillDocs = await db.collection('skills_pf1e').find({ name: { $in: skillNames.map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
-            skills.push(...skillDocs.map(d => d._id.toString()));
         }
+    });
+    baseStats.skills = skills;
+    
+    // --- Feats ---
+    const allFeatStrings = [];
+    statsMap.forEach((value, key) => {
+        if (key.toLowerCase().includes('feat')) {
+            allFeatStrings.push(value);
+        }
+    });
+    const featsValue = allFeatStrings.join(', ');
+    
+    if (featsValue) {
+        let featsOnlyString = featsValue.split(/\s*;\s*Skills|\s*Skills:/i)[0];
+        featsOnlyString = featsOnlyString.replace(/^Feats\s+/i, '').trim();
+        const potentialFeats = featsOnlyString.split(/[;,]/);
+        const actualFeats = potentialFeats
+            .map(f => f.replace(/\s*\([^)]+\)\s*$/, '').trim().replace(/[.,;]$/, '').trim())
+            .filter(f => f && !/\s+[+-]?\d+$/.test(f));
+        featNames.push(...actualFeats);
+    }
+    
+    // (Add Feats from tables if needed from admin.txt sources 334-339)
 
-        return {
-            _id: statBlock.entityId,
-            name,
-            sourceCodexPath: path,
-            baseStats,
-            rules,
-            equipment,
-            skills,
-        };
+    // --- Equipment ---
+    const equipmentString = getStat('Equipment') || getStat('Gear');
+    if (equipmentString) {
+        equipmentNames.push(...equipmentString.split(',').map(e => e.trim()));
+    }
+    // (Add Equipment from tables if needed from admin.txt sources 331-333)
+
+    // --- Special Abilities ---
+    const specialAbilityFields = ['Special Attacks', 'Special Qualities', 'Spell-Like Abilities'];
+    specialAbilityFields.forEach(field => {
+        const fieldValue = getStat(field);
+        if (fieldValue) {
+            const abilities = fieldValue.split(',').map(a => a.trim());
+            abilities.forEach(ability => {
+                const cleanedAbility = ability.replace(/(\d+\/day—|\d+\/week—|\d+\/month—|at will—)/i, '').split('(')[0].trim();
+                if (cleanedAbility) {
+                     specialAbilityNames.push(cleanedAbility);
+                }
+            });
+        }
+    });
+    
+    // --- Spells ---
+    const spellFields = ['spells prepared', 'spells known', 'spell-like abilities'];
+    spellFields.forEach(field => {
+        const spellString = getStat(field);
+        if (spellString) {
+            const spells = spellString.split(/[;,]/).map(s => s.replace(/\(.*\)/, '').trim());
+            spellNames.push(...spells.filter(Boolean));
+        }
+    });
+
+    // --- Deity ---
+    const deityString = getStat('deity') || getStat('religion');
+    if (deityString) {
+        deityName = deityString.trim();
     }
 
-    // Helper function to get node data from codex
-    function getNodeData(codexDoc, path) {
-        let node = codexDoc;
-        for (const p of path) {
-            node = node?.[p];
-        }
-        return node;
-    }
+    /* ----  ALWAYS return canonical keys  ----  */
+    baseStats = normaliseAbilityKeys(baseStats);
+    
+    // Find rule/equipment IDs
+    const ruleDocs = await db.collection('rules_pf1e').find({ name: { $in: [...featNames, ...specialAbilityNames].map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
+    const equipDocs = await db.collection('equipment_pf1e').find({ name: { $in: equipmentNames.map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
+
+    return { 
+        _id: new ObjectId(statBlock.entityId), // Use the ID from the statblock
+        name, 
+        sourceCodexPath: path, 
+        baseStats, 
+        rules: [...new Set(ruleDocs.map(d => d._id.toString()))], 
+        equipment: [...new Set(equipDocs.map(d => d._id.toString()))], 
+        spellNames: [...new Set(spellNames)], 
+        deityName 
+    };
+};
 
     // --- DATA INTEGRITY ENDPOINTS ---
 
@@ -294,23 +513,48 @@ ${JSON.stringify(existingNames)}`;
                 return res.status(404).json({ error: 'No entries found in codex_entries collection.' });
             }
 
+            const entitiesCollection = db.collection('entities_pf1e');
+            const existingEntities = await entitiesCollection.find({}).toArray();
+            const existingEntitiesMap = new Map(existingEntities.map(e => [e._id.toString(), e]));
+
             let entities = [];
             for (const entry of codexEntries) {
                 if (entry.content && Array.isArray(entry.content)) {
                     const statBlock = entry.content.find(b => b.type === 'statblock');
                     if (statBlock && statBlock.entityId) {
                         const name = entry.name.replace(/_/g, ' ');
-                        const entity = await parseStatBlockToEntity(statBlock, name, entry.path_components, entry.content);
-                        if (entity) entities.push(entity);
+                        const freshEntity = await parseStatBlockToEntity(statBlock, name, entry.path_components, entry.content);
+                        if (freshEntity) {
+                            const oldEntity = existingEntitiesMap.get(freshEntity._id.toString());
+                            const oldBaseStats = oldEntity ? oldEntity.baseStats : {};
+                            freshEntity.baseStats = mergeBaseStats(freshEntity.baseStats, oldBaseStats);
+                            entities.push(freshEntity);
+                        }
                     }
                 }
             }
 
-            const entitiesCollection = db.collection('entities_pf1e');
-            await entitiesCollection.deleteMany({});
-            if (entities.length > 0) await entitiesCollection.insertMany(entities);
+            if (entities.length > 0) {
+                const bulkOps = entities.map(entity => {
+                    // We use the 'entityId' from the codex statblock (which parseStatBlockToEntity assigns to _id)
+                    // as the unique key for the entity.
+                    const entityId = entity._id; 
+                    delete entity._id; // Remove _id from the data payload
 
-            res.status(200).json({ message: `Codex processing complete. Found and processed ${entities.length} entities.` });
+                    return {
+                        updateOne: {
+                            filter: { _id: entityId },   // Find the entity by its ID
+                            update: { $set: entity },   // Set all parsed data (name, baseStats, rules, etc.)
+                            upsert: true              // Create it if it doesn't exist
+                        }
+                    };
+                });
+
+                await entitiesCollection.bulkWrite(bulkOps, { ordered: false });
+            }
+
+            const entityNames = entities.map(e => e.name);
+            res.status(200).json({ message: `Codex processing complete. Upserted ${entities.length} entities: ${entityNames.join(', ')}` });
         } catch (error) {
             console.error('[PROCESS CODEX] Error:', error);
             res.status(500).json({ error: `Codex processing failed: ${error.message}` });
@@ -457,7 +701,7 @@ Constraints:
                         );
 
                         if (updateResult.modifiedCount > 0) {
-                             console.log(`[LINK EQUIPMENT] SUCCESS: ${entityName} updated with ${ids.length} item links.`);
+                             console.log(`[LINK EQUIPMENT] SUCCESS: ${entityName} updated with ${ids.length} item links: ${matches.map(m => m.name).join(', ')}`);
                              linked++; 
                         }
                     } catch (error) {
@@ -528,7 +772,7 @@ Constraints:
                                                 .toArray();
 
                     if (matches.length === 0) {
-                        console.log(`[LINK RULES] No database matches found for ${entityName}.`);
+                        console.log(`[LINK RULES] No database matches found for ${entityName} with names: ${featNames.join(', ')}`);
                         continue;
                     }
 
@@ -539,7 +783,7 @@ Constraints:
                     );
 
                     if (updateResult.modifiedCount > 0) {
-                        console.log(`[LINK RULES] SUCCESS: ${entityName} updated with ${ids.length} rule links.`);
+                        console.log(`[LINK RULES] SUCCESS: ${entityName} updated with ${ids.length} rule links: ${matches.map(m => m.name).join(', ')}`);
                         linked++;
                     }
                 } catch (error) {
