@@ -211,6 +211,13 @@ function mergeBaseStats(
 
 // [REPLACE the old parseStatBlockToEntity with this one from admin.txt]
 async function parseStatBlockToEntity(statBlock, name, path, content) {
+    // FIX: Add validation to ensure the entityId is a valid ObjectId before proceeding.
+    // This prevents crashes if an entry has a malformed or missing ID.
+    if (!statBlock.entityId || !ObjectId.isValid(statBlock.entityId)) {
+        console.log(`[PROCESS CODEX] Skipping entry "${name}" due to invalid or missing entityId.`);
+        return null; // Skip this entry
+    }
+
     // This helper function must be defined inside or available to parseStatBlockToEntity
     const getAllStats = () => {
         let all = [];
@@ -519,14 +526,33 @@ async function parseStatBlockToEntity(statBlock, name, path, content) {
 
             let entities = [];
             for (const entry of codexEntries) {
-                if (entry.content && Array.isArray(entry.content)) {
-                    const statBlock = entry.content.find(b => b.type === 'statblock');
-                    if (statBlock && statBlock.entityId) {
-                        const name = entry.name.replace(/_/g, ' ');
-                        const freshEntity = await parseStatBlockToEntity(statBlock, name, entry.path_components, entry.content);
-                        if (freshEntity) {
+                let statBlock;
+                let entityId;
+
+                // Handle both migrated (top-level entityId) and unmigrated (entityId in statblock) entries.
+                if (entry.entityId) { 
+                    entityId = entry.entityId;
+                    statBlock = { entityId: entityId }; // Create a minimal statblock for parsing
+                } else if (entry.content && Array.isArray(entry.content)) {
+                    statBlock = entry.content.find(b => b.type === 'statblock');
+                }
+
+                if (statBlock && statBlock.entityId) {
+                    const name = entry.name.replace(/_/g, ' ');
+                    const freshEntity = await parseStatBlockToEntity(statBlock, name, entry.path_components, entry.content);
+                    
+                    if (freshEntity) {
+                        // Only process entities if the parser found meaningful data.
+                        const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+                        const hasStats = abilities.some(ab => freshEntity.baseStats[ab] !== undefined);
+                        const hasSkills = freshEntity.baseStats.skills && Object.keys(freshEntity.baseStats.skills).length > 0;
+                        const hasEquipment = freshEntity.equipment && freshEntity.equipment.length > 0;
+
+                        if (hasStats || hasSkills || hasEquipment) {
                             const oldEntity = existingEntitiesMap.get(freshEntity._id.toString());
                             const oldBaseStats = oldEntity ? oldEntity.baseStats : {};
+                            
+                            // The fresh parse is for links; merge with existing stats.
                             freshEntity.baseStats = mergeBaseStats(freshEntity.baseStats, oldBaseStats);
                             entities.push(freshEntity);
                         }
