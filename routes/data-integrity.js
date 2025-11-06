@@ -211,10 +211,9 @@ function mergeBaseStats(
 
 // [REPLACE the old parseStatBlockToEntity with this one from admin.txt]
 async function parseStatBlockToEntity(statBlock, name, path, content) {
-    // FIX: Add validation to ensure the entityId is a valid ObjectId before proceeding.
-    // This prevents crashes if an entry has a malformed or missing ID.
-    if (!statBlock.entityId || !ObjectId.isValid(statBlock.entityId)) {
-        console.log(`[PROCESS CODEX] Skipping entry "${name}" due to invalid or missing entityId.`);
+    // FIX: We only need to check for existence, as some valid IDs are strings, not ObjectIds.
+    if (!statBlock.entityId) {
+        console.log(`[PROCESS CODEX] Skipping entry "${name}" due to missing entityId.`);
         return null; // Skip this entry
     }
 
@@ -494,8 +493,9 @@ async function parseStatBlockToEntity(statBlock, name, path, content) {
     const ruleDocs = await db.collection('rules_pf1e').find({ name: { $in: [...featNames, ...specialAbilityNames].map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
     const equipDocs = await db.collection('equipment_pf1e').find({ name: { $in: equipmentNames.map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
 
+    const entityId = ObjectId.isValid(statBlock.entityId) ? new ObjectId(statBlock.entityId) : statBlock.entityId;
     return { 
-        _id: new ObjectId(statBlock.entityId), // Use the ID from the statblock
+        _id: entityId, // Use the ID from the statblock
         name, 
         sourceCodexPath: path, 
         baseStats, 
