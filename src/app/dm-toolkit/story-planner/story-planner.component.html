@@ -1,0 +1,40 @@
+<div class="story-planner p-4">
+  <h2 class="text-2xl font-bold mb-4">AI Story Planner</h2>
+  <p class="text-gray-400 mb-4">
+    Provide the recent events of your campaign, and the AI will suggest potential paths the story could take.
+  </p>
+
+  <div class="mb-4">
+    <textarea 
+      class="w-full h-64 bg-gray-800 text-white p-2 rounded border border-gray-700"
+      [value]="storyContext()"
+      (input)="onStoryContextChange($event)"
+      placeholder="e.g., The party has just defeated the goblin king and found a mysterious map..."
+    ></textarea>
+  </div>
+
+  <button 
+    (click)="getSuggestions()" 
+    [disabled]="isLoading() || !storyContext()"
+    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-500"
+  >
+    {{ isLoading() ? 'Generating...' : 'Get Suggestions' }}
+  </button>
+
+  @if (error()) {
+    <div class="mt-4 bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg">
+      <p>{{ error() }}</p>
+    </div>
+  }
+
+  @if (suggestions().length > 0) {
+    <div class="mt-6">
+      <h3 class="text-xl font-bold mb-2">Suggestions:</h3>
+      <ul class="list-disc list-inside space-y-2">
+        @for(suggestion of suggestions(); track $index) {
+          <li>{{ suggestion }}</li>
+        }
+      </ul>
+    </div>
+  }
+</div>

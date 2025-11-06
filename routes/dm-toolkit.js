@@ -69,8 +69,8 @@ module.exports = function(db) {
 
         // If an entityId is provided, fetch the source entity to get its stats.
         if (combatantData.entityId) {
-            // THE CORE FIX: Query against '_id' which matches your database schema.
-            const entity = await db.collection('entities_pf1e').findOne({ _id: combatantData.entityId });
+            const query = ObjectId.isValid(combatantData.entityId) ? { _id: new ObjectId(combatantData.entityId) } : { _id: combatantData.entityId };
+            const entity = await db.collection('entities_pf1e').findOne(query);
 
             // If the entity is not found, it's a critical error. Abort and send an error.
             if (!entity) {

@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
 import { FormsModule } from '@angular/forms';
+import { StoryPlannerComponent } from './story-planner/story-planner.component';
 
 // --- TYPE INTERFACES ---
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
@@ -36,7 +37,7 @@ const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 
 @Component({
   selector: 'app-dm-toolkit',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, StoryPlannerComponent],
   templateUrl: './dm-toolkit.component.html',
   styleUrls: ['./dm-toolkit.component.css']
 })
@@ -44,7 +45,7 @@ export class DmToolkitComponent {
   http = inject(HttpClient);
 
   // --- STATE SIGNALS ---
-  activeTool = signal<'assistant' | 'npc-generator' | 'session' | 'combat-manager'>('assistant');
+  activeTool = signal<'assistant' | 'npc-generator' | 'session' | 'combat-manager' | 'story-planner'>('assistant');
   
   fights = signal<Fight[]>([]);
   sessions = signal<Session[]>([]);
@@ -109,6 +110,7 @@ export class DmToolkitComponent {
   tooltipContent = signal<{ title: string, data: any, status: 'loading' | 'loaded' | 'error' } | null>(null);
   tooltipPosition = signal({ top: '0px', left: '0px' });
   isLogVisible = signal<boolean>(false);
+  private autoSaveTimer: any;
   
   addFormSource = signal<string>('Custom');
   selectedCodexPath = signal<string[]>([]);
@@ -655,7 +657,7 @@ export class DmToolkitComponent {
     }
   }
 
-  @HostListener('document:visibilitychange', ['$event'])
+  @HostListener('document:visibilitychange')
   onVisibilityChange() {
     if (document.visibilityState === 'hidden' && this.saveStatus() === 'Unsaved') {
       this.saveCurrentSession();
@@ -702,10 +704,20 @@ export class DmToolkitComponent {
     this.saveStatus.set('Idle');
   }
   
-  onNotesChange(notes: string) { 
-    this.sessionNotes.set(notes); 
+  onNotesChange(notes: string) {
+    this.sessionNotes.set(notes);
     this.saveStatus.set('Unsaved');
-  } 
+
+    // Clear the existing timer to debounce
+    if (this.autoSaveTimer) {
+      clearTimeout(this.autoSaveTimer);
+    }
+
+    // Set a new timer
+    this.autoSaveTimer = setTimeout(() => {
+      this.saveCurrentSession();
+    }, 5000); // 5 seconds debounce
+  }
   
   async lookupTerm(term: string, type: 'effect') {
     if (!term || this.effectsCache().has(term)) return;
@@ -929,11 +941,11 @@ private buildCodexObject(entries: any[]): any {
             else if (['Fortitude', 'Fort'].includes(stat)) modifiedSaves.Fort += bonus;
             else if (stat === 'Will') modifiedSaves.Will += bonus;
             else if (typeof this.getCaseInsensitiveProp(modifiedStats, stat) !== 'undefined') {
-                const baseVal = parseInt(String(this.getCaseInsensitiveProp(modifiedStats, stat)).match(/-?\d+/)?.[0] || '0', 10);
+                const baseVal = parseInt(String(this.getCaseInsensitiveProp(modifiedStats, stat)).match(/-?\\d+/)?.[0] || '0', 10);
                 if (!isNaN(baseVal)) modifiedStats[stat] = baseVal + bonus;
             }
         }
-        (stringyMods['Speed'] || []).forEach(v => { if (v === 'half') modifiedStats['Speed'] = `${Math.floor(parseInt(String(this.getCaseInsensitiveProp(modifiedStats, 'Speed')).match(/\d+/)?.[0] || '30', 10) / 2)} ft.`; });
+        (stringyMods['Speed'] || []).forEach(v => { if (v === 'half') modifiedStats['Speed'] = `${Math.floor(parseInt(String(this.getCaseInsensitiveProp(modifiedStats, 'Speed')).match(/\\d+/)?.[0] || '30', 10) / 2)} ft.`; });
 
         const dexModDiff = this.getAbilityModifierAsNumber(this.getCaseInsensitiveProp(modifiedStats, 'Dex')) - this.getAbilityModifierAsNumber(this.getCaseInsensitiveProp(baseStats, 'Dex'));
         const conModDiff = this.getAbilityModifierAsNumber(this.getCaseInsensitiveProp(modifiedStats, 'Con')) - this.getAbilityModifierAsNumber(this.getCaseInsensitiveProp(baseStats, 'Con'));
@@ -1269,10 +1281,9 @@ private buildCodexObject(entries: any[]): any {
     this.tooltipContent.set({ title: item?.name || 'Unknown', data: item, status: item ? 'loaded' : 'error' });
     this.tooltipPosition.set({ top: `${e.clientY + 15}px`, left: `${e.clientX + 15}px` });
   }
-  
   showSkillsTooltip(e: MouseEvent, combatant: CombatantWithModifiers) {
       if (!combatant.skills || Object.keys(combatant.skills).length === 0) {
-          this.tooltipContent.set({ title: 'Skills', data: { description: 'No skills data available.' }, status: 'loaded' });
+          this.tooltipContent.set({ title: 'Skills', data: { description: 'This combatant has no listed skills.' }, status: 'loaded' });
       } else {
           const description = Object.entries(combatant.skills)
               .sort(([a], [b]) => a.localeCompare(b))
@@ -1303,7 +1314,7 @@ private buildCodexObject(entries: any[]): any {
       duration: this.customEffectUnit === 'permanent' ? 0 : this.customEffectDuration,
       unit: this.customEffectUnit,
       startRound: this.roundCounter(),
-      remainingRounds: this.customEffectUnit === 'permanent' ? 999 : this.customEffectDuration
+      remainingRounds: this.customEffectUnit === 'permanent' ? 999 : (this.customEffectDuration)
     };
     const combatant = this.combatants().find(c => c._id === combatantId);
     if (!combatant) return;

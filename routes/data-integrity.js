@@ -34,7 +34,8 @@ module.exports = function(db) {
 Provide a list of up to ${batchSize} official ${itemType} objects (including ALL required keys like name, description, stats, etc., as appropriate for the type) that are NOT in the provided JSON array of names. 
 The response MUST be a single, clean JSON array of FULL objects. If no more items are found, return an empty JSON array: [].
 
-Existing item names:\n${JSON.stringify(existingNames)}`;
+Existing item names:
+${JSON.stringify(existingNames)}`;
 
         const payload = { contents: [{ parts: [{ text: prompt }] }] };
 
@@ -67,7 +68,7 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
      * Core logic for iterative AI reconciliation of a collection (Items, Spells, Deities, Hazards).
      */
     async function reconcileCollection(collectionName, itemType, idPrefix, maxIterations, batchSize) {
-        if (!db) { throw new Error('Database not ready for reconciliation.'); }
+        if (!db) { throw new Error('Database not ready for reconciliation.'); } 
         
         const apiKey = await getActiveApiKey();
         const existingDocs = await db.collection(collectionName).find({}).project({ name: 1 }).toArray();
@@ -118,7 +119,12 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
 
     // Helper function to escape special characters for use in a regular expression
     function escapeRegExp(string) {
-        return string.replace(/[.*+?^${}()|[\\]/g, '\\$&'); // $& means the whole matched string
+        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& = whole match
+    }
+    function getAbilityModifierAsNumber(score) {
+        const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
+        if (isNaN(numScore)) return 0;
+        return Math.floor((numScore - 10) / 2);
     }
 
     // This function is still used by the /process-codex route
@@ -166,6 +172,48 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
 
         baseStats.hp = getStat('HP');
         baseStats.ac = getStat('AC');
+
+        const combat = { bab: null, cmb: null, cmd: null };
+
+        const babString = getStat('Base Atk');
+        const cmbString = getStat('CMB');
+        const cmdString = getStat('CMD');
+
+        if (babString) {
+            combat.bab = parseInt(babString.match(/[+-]?\d+/)?.[0] || '0', 10);
+        }
+        if (cmbString) {
+            combat.cmb = cmbString;
+        }
+        if (cmdString) {
+            combat.cmd = cmdString;
+        }
+
+        const strMod = getAbilityModifierAsNumber(baseStats.str);
+        const dexMod = getAbilityModifierAsNumber(baseStats.dex);
+
+        const crString = getStat('cr') || '1';
+        let level = 1;
+        if (crString.includes('/')) {
+            const parts = crString.split('/');
+            level = parseInt(parts[0], 10) / parseInt(parts[1], 10);
+        } else {
+            level = parseInt(crString, 10);
+        }
+        if (isNaN(level) || level < 1) level = 1;
+        const levelInt = Math.floor(level);
+
+        if (combat.bab === null) {
+            combat.bab = levelInt;
+        }
+        if (combat.cmb === null && combat.bab !== null) {
+            combat.cmb = combat.bab + strMod;
+        }
+        if (combat.cmd === null && combat.bab !== null) {
+            combat.cmd = 10 + combat.bab + strMod + dexMod;
+        }
+
+        baseStats.combat = combat;
         baseStats.saves = getStat('Saves');
 
         const rules = [];
@@ -194,6 +242,24 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
             }
         }
 
+        const skills = [];
+        const skillsTables = content.filter(b => b.type === 'table' && b.title && b.title.toLowerCase() === 'skills');
+        const skillNames = [];
+        skillsTables.forEach(table => {
+            (table.rows || []).forEach(row => {
+                if (row.Skill) { // Assuming the column is named 'Skill'
+                    const skillNameMatch = row.Skill.match(/^([a-zA-Z\s()]+)/);
+                    if (skillNameMatch && skillNameMatch[1]) {
+                        skillNames.push(skillNameMatch[1].trim());
+                    }
+                }
+            });
+        });
+        if (skillNames.length > 0) {
+            const skillDocs = await db.collection('skills_pf1e').find({ name: { $in: skillNames.map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
+            skills.push(...skillDocs.map(d => d._id.toString()));
+        }
+
         return {
             _id: statBlock.entityId,
             name,
@@ -201,6 +267,7 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
             baseStats,
             rules,
             equipment,
+            skills,
         };
     }
 
@@ -283,9 +350,9 @@ Existing item names:\n${JSON.stringify(existingNames)}`;
 You are an expert Pathfinder 1st Edition (PF1e) ruleset parser.
 Your task is to analyze a short English sentence describing a character's gear and extract only the official, core PF1e equipment names.
 Constraints:
-1.  **Ignore** descriptive adjectives like 'fine', 'masterwork', 'loaded', 'various', 'set of', 'hidden', etc., unless the adjective is part of an official magic item name (e.g., '+1 Longsword' is kept).
-2.  **Ignore** generic, non-game-rule items like 'keys', 'ledgers', 'pouch', 'spectacles', 'coins', 'trinkets', 'small constructs', 'fine clothes', 'uniform', 'robes', 'maps', or 'scrolls'.
-3.  **Return ONLY** a clean JSON array of extracted item names (no explanations, no markdown formatting).
+1.  **Ignore** descriptive adjectives like 'fine', 'masterwork', 'loaded', 'various', 'set of', 'hidden', etc., unless the adjective is part of an official magic item name (e.g., '+1 Longsword' is kept).
+2.  **Ignore** generic, non-game-rule items like 'keys', 'ledgers', 'pouch', 'spectacles', 'coins', 'trinkets', 'small constructs', 'fine clothes', 'uniform', 'robes', 'maps', or 'scrolls'.
+3.  **Return ONLY** a clean JSON array of extracted item names (no explanations, no markdown formatting).
 `;
                 const prompt = `${systemPrompt}\nInput: \"${text}\"`;
 
@@ -808,9 +875,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
     });
 
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // ROUTE 8: SMART SPELL LINKER
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     router.post('/smart-spell-link', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         console.log(`[SMART SPELL LINK] Job started.`);
@@ -870,9 +937,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // ROUTE 9: ITEM PREFIX NORMALIZATION
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     router.post('/prefix-normalization', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         console.log(`[PREFIX NORMALIZATION] Job started.`);
@@ -951,9 +1018,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // ROUTE 10: SCAN FOR DUPLICATES
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     router.post('/scan-for-duplicates', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         console.log(`[SCAN FOR DUPLICATES] Job started.`);
@@ -1024,9 +1091,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // ROUTE 11: RECONCILE ITEMS, SPELLS, DEITIES, HAZARDS (Generic)
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
 
     // The following routes now call the fixed reconcileCollection:
 
@@ -1082,9 +1149,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // ROUTE 12: RECONCILE RULES
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // Note: The logic for reconciling rules is different as it explicitly fetches a list of names first. 
     // We update the Gemini model and add robust parsing here too.
     router.post('/reconcile-rules', async (req, res) => {
@@ -1130,7 +1197,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 const newRules = [];
                 for (const name of names) {
                     // Step 2: Get details for each name
-                    const detailPrompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object representing the mechanical effects of the ${ruleType}: "${name}". The response must be a single, valid JSON object with the following keys: "name", "type" (which should be "${ruleType}"), "description", and "effects". The "effects" key must be an array of objects, where each object has "target" (e.g., "attackRoll"), "value" (a number or string), "type" (e.g., "penalty"), and an optional "condition" string.`;
+                    const detailPrompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object representing the mechanical effects of the ${ruleType}: \"${name}\". The response must be a single, valid JSON object with the following keys: \"name\", \"type\" (which should be \"${ruleType}\"), \"description\", and \"effects\". The \"effects\" key must be an array of objects, where each object has \"target\" (e.g., \"attackRoll\"), \"value\" (a number or string), \"type\" (e.g., \"penalty\"), and an optional \"condition\" string.`;
                     const detailJsonString = await fetchFromGemini(detailPrompt);
                     const ruleData = JSON.parse(detailJsonString);
                     
@@ -1165,9 +1232,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // ROUTE 16: SCAN AND FIX DATA
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     router.post('/scan-and-fix-data', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         console.log(`[SCAN AND FIX DATA] Job started.`);
@@ -1221,9 +1288,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // ROUTE 13: NORMALIZE STATBLOCKS
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     router.post('/normalize-statblocks', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         console.log(`[NORMALIZE STATBLOCKS] Job started.`);
@@ -1280,10 +1347,92 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
             const entitiesModifiedCount = entityUpdateResult.modifiedCount;
             console.log(`[NORMALIZE STATBLOCKS] Renamed 'stats' to 'baseStats' in ${entitiesModifiedCount} entities.`);
 
-            res.status(200).json({ 
+            // Part 3: Ensure all entities have a combat object with bab, cmb, and cmd
+            const allEntities = await db.collection('entities_pf1e').find({}).toArray();
+            const entityBulkOps = [];
+            let entitiesUpdatedCount = 0;
+            
+            function getHdFromHpString(hp) {
+                if (!hp || typeof hp !== 'string') return null;
+                const match = hp.match(/\((\d+)d\d+/);
+                if (match && match[1]) {
+                    return parseInt(match[1], 10);
+                }
+                return null;
+            }
+
+            for (const entity of allEntities) {
+                let needsUpdate = false;
+                if (!entity.baseStats) {
+                    entity.baseStats = {};
+                    needsUpdate = true;
+                }
+                if (!entity.baseStats.combat) {
+                    entity.baseStats.combat = { bab: '-', cmb: '-', cmd: '-' };
+                    needsUpdate = true;
+                }
+
+                const combat = entity.baseStats.combat;
+                const baseStats = entity.baseStats;
+
+                // Check if calculation is needed
+                if (combat.bab === '-' || combat.cmb === '-' || combat.cmd === '-' || combat.bab === null || combat.cmb === null || combat.cmd === null || typeof combat.bab === 'undefined' || typeof combat.cmb === 'undefined' || typeof combat.cmd === 'undefined') {
+                    const strMod = getAbilityModifierAsNumber(baseStats.str);
+                    const dexMod = getAbilityModifierAsNumber(baseStats.dex);
+
+                    let level = null;
+                    if (baseStats.hp) {
+                        level = getHdFromHpString(baseStats.hp);
+                    }
+
+                    if (!level && baseStats.level) level = parseInt(baseStats.level, 10);
+                    if (!level && baseStats.hd) level = parseInt(baseStats.hd, 10);
+                    if (!level || isNaN(level)) level = 1;
+
+                    let calculatedBab = 0;
+                    if (combat.bab === '-' || combat.bab === null || typeof combat.bab === 'undefined') {
+                        // Assume 3/4 BAB as a generic baseline.
+                        calculatedBab = Math.floor(level * 0.75); 
+                        combat.bab = calculatedBab;
+                        needsUpdate = true;
+                    } else {
+                        calculatedBab = parseInt(combat.bab, 10) || 0;
+                    }
+
+                    if (combat.cmb === '-' || combat.cmb === null || typeof combat.cmb === 'undefined') {
+                        // CMB = Base Attack Bonus + Strength Modifier
+                        combat.cmb = calculatedBab + strMod;
+                        needsUpdate = true;
+                    }
+
+                    if (combat.cmd === '-' || combat.cmd === null || typeof combat.cmd === 'undefined') {
+                        // CMD = 10 + Base Attack Bonus + Strength Modifier + Dexterity Modifier
+                        combat.cmd = 10 + calculatedBab + strMod + dexMod;
+                        needsUpdate = true;
+                    }
+                }
+
+
+                if (needsUpdate) {
+                    entitiesUpdatedCount++;
+                    entityBulkOps.push({
+                        updateOne: {
+                            filter: { _id: entity._id },
+                            update: { $set: { baseStats: entity.baseStats } }
+                        }
+                    });
+                }
+            }
+
+            if (entityBulkOps.length > 0) {
+                await db.collection('entities_pf1e').bulkWrite(entityBulkOps);
+            }
+            console.log(`[NORMALIZE STATBLOCKS] Ensured and calculated combat stats for ${entitiesUpdatedCount} entities.`);
+
+            res.status(200).json({
                 message: `Statblock normalization complete.`,
                 codexUpdates: `Scanned ${codexEntries.length} entries and updated ${codexModifiedCount}.`,
-                entityUpdates: `Renamed 'stats' to 'baseStats' in ${entitiesModifiedCount} entities.`
+                entityUpdates: `Renamed 'stats' to 'baseStats' in ${entitiesModifiedCount} entities and ensured/calculated combat stats on ${entitiesUpdatedCount} entities.`
             });
 
         } catch (e) {
@@ -1292,9 +1441,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // NEW ROUTE: MIGRATE DM TOOLKIT
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     router.post('/migrate-dm-toolkit', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         console.log(`[MIGRATE DM TOOLKIT] Job started.`);
@@ -1344,9 +1493,9 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     // ROUTE 17: MIGRATE CODEX TO HIERARCHICAL FORMAT
-    // ------------------------------------------------------------
+    // -------------------------------------------------------------
     router.post('/migrate-codex', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         const { force = false } = req.body;

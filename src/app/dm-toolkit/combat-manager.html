@@ -137,7 +137,8 @@
                                       <strong>Spd:</strong> {{ c.modifiedStats?.Speed || 'N/A' }}
                                   </div>
                                   <div class="col-span-1 text-center">
-                                      <button (click)="toggleDetails(c.id)" class="text-gray-400 hover:text-white">Details</button>
+                                      <a (mouseenter)="showSkillsTooltip($event, c)" (mouseleave)="hideTooltip()" class="text-gray-400 hover:text-white cursor-pointer">Skills</a>
+                                      <button (click)="toggleDetails(c.id)" class="text-gray-400 hover:text-white ml-2">Details</button>
                                   </div>
                                   <div class="col-span-1 text-right">
                                       <button type="button" (click)="handleRemoveCombatant(c.id)" class="text-red-500 hover:text-red-400 font-bold px-2 text-lg">X</button>

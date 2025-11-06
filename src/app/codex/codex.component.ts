@@ -12,6 +12,7 @@ interface CodexEntry {
 }
 interface Pf1eRule { name: string; description: string; }
 interface Pf1eEquipment { name: string; description: string; cost: string; weight: string; }
+interface Pf1eSpell { name: string; description: string; }
 interface TooltipContent { title: string; description: string; }
 
 @Component({
@@ -108,6 +109,7 @@ export class CodexComponent implements OnInit {
   modifiedEntities = signal<Set<string>>(new Set());
   rulesCache = signal<Map<string, Pf1eRule>>(new Map());
   equipmentCache = signal<Map<string, Pf1eEquipment>>(new Map());
+  spellsCache = signal<Map<string, Pf1eSpell>>(new Map());
   tooltipContent = signal<TooltipContent | null>(null);
   tooltipPosition = signal({ top: '0px', left: '0px' });
 
@@ -231,9 +233,10 @@ export class CodexComponent implements OnInit {
         if (entities.length > 0) {
             const ruleIds = entities.flatMap(e => e.rules || []);
             const equipmentIds = entities.flatMap(e => e.equipment || []);
+            const spellIds = entities.flatMap(e => e.spells || []);
             
-            if (ruleIds.length > 0 || equipmentIds.length > 0) {
-                await this.fetchLinkedDetails(ruleIds, equipmentIds);
+            if (ruleIds.length > 0 || equipmentIds.length > 0 || spellIds.length > 0) {
+                await this.fetchLinkedDetails(ruleIds, equipmentIds, spellIds);
             }
         }
     });
@@ -260,15 +263,17 @@ export class CodexComponent implements OnInit {
 
   async loadCaches() {
     try {
-        const [rules, equipment] = await Promise.all([
+        const [rules, equipment, spells] = await Promise.all([
             lastValueFrom(this.http.get<any[]>('api/admin/collections/rules_pf1e')),
-            lastValueFrom(this.http.get<any[]>('api/admin/collections/equipment_pf1e'))
+            lastValueFrom(this.http.get<any[]>('api/admin/collections/equipment_pf1e')),
+            lastValueFrom(this.http.get<any[]>('api/admin/collections/spells_pf1e'))
         ]);
         this.rulesCache.set(new Map(rules.map(item => [item._id, item])));
         this.equipmentCache.set(new Map(equipment.map(item => [item._id, item])));
+        this.spellsCache.set(new Map(spells.map(item => [item._id, item])));
     } catch (err: any) {
         console.error("Failed to load caches for tooltips", err);
-        this.error.set('Failed to load reference data (rules/equipment). Tooltips may not work correctly.');
+        this.error.set('Failed to load reference data (rules/equipment/spells). Tooltips may not work correctly.');
     }
   }
   
@@ -282,11 +287,14 @@ export class CodexComponent implements OnInit {
     }
   }
 
-  async fetchLinkedDetails(ruleIds: string[], equipmentIds: string[]) {
+  async fetchLinkedDetails(ruleIds: string[], equipmentIds: string[], spellIds: string[]) {
     try {
-        const details = await lastValueFrom(this.http.post<any>('api/codex/get-linked-details', { ruleIds, equipmentIds }));
+        const details = await lastValueFrom(this.http.post<any>('api/codex/get-linked-details', { ruleIds, equipmentIds, spellIds }));
         this.rulesCache.update(cache => new Map([...cache, ...details.rules.map((item: any) => [item._id, item])]));
         this.equipmentCache.update(cache => new Map([...cache, ...details.equipment.map((item: any) => [item._id, item])]));
+        if (details.spells) {
+            this.spellsCache.update(cache => new Map([...cache, ...details.spells.map((item: any) => [item._id, item])]));
+        }
     } catch (err) {
         console.error("Failed to fetch linked details", err);
     }
@@ -388,11 +396,52 @@ export class CodexComponent implements OnInit {
     this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
   }
 
-  addLinkedItem(entity: any, inputElement: HTMLInputElement, type: 'rules' | 'equipment') {
+  getSpellSlots(entity: any): { level: number, slots: number }[] {
+    const slots = [];
+    for (let i = 0; i <= 9; i++) {
+      slots.push({
+        level: i,
+        slots: entity.spell_slots?.[i] || 0
+      });
+    }
+    return slots;
+  }
+
+  handleSpellSlotUpdate(entity: any, level: string, event: any) {
+    if (!this.isEditMode()) return;
+    const newText = event.target.innerText;
+    const newValue = parseInt(newText, 10);
+
+    if (!entity.spell_slots) {
+      entity.spell_slots = {};
+    }
+    
+    if (!isNaN(newValue) && newValue > 0) {
+      entity.spell_slots[level] = newValue;
+    } else {
+      delete entity.spell_slots[level];
+    }
+
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
+  }
+
+  addLinkedItem(entity: any, inputElement: HTMLInputElement, type: 'rules' | 'equipment' | 'spells') {
     if (!this.isEditMode() || !inputElement.value) return;
 
     const newItemId = inputElement.value;
-    const cache = type === 'rules' ? this.rulesCache() : this.equipmentCache();
+    let cache: Map<string, any>;
+    switch (type) {
+      case 'rules':
+        cache = this.rulesCache();
+        break;
+      case 'equipment':
+        cache = this.equipmentCache();
+        break;
+      case 'spells':
+        cache = this.spellsCache();
+        break;
+    }
 
     if (cache.has(newItemId)) {
       if (!entity[type]) {
@@ -409,7 +458,7 @@ export class CodexComponent implements OnInit {
     }
   }
 
-  removeLinkedItem(entity: any, itemId: string, type: 'rules' | 'equipment') {
+  removeLinkedItem(entity: any, itemId: string, type: 'rules' | 'equipment' | 'spells') {
     if (!this.isEditMode()) return;
 
     const index = entity[type]?.indexOf(itemId);
@@ -519,7 +568,7 @@ export class CodexComponent implements OnInit {
     const objKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
     return objKey ? obj[objKey] : undefined;
   }
-  formatItemId = (id: string) => this.formatName(id.replace(/^(feat_|sa_|cond_|eq_)/, ''));
+  formatItemId = (id: string) => this.formatName(id.replace(/^(feat_|sa_|cond_|eq_|spell_)/, ''));
 
   async toggleCompletion(entry: CodexEntry) {
     const path = entry.path_components;
@@ -606,6 +655,10 @@ export class CodexComponent implements OnInit {
         const item = this.equipmentCache().get(cleanedItemId);
         title = item?.name || this.formatName(cleanedItemId.replace('eq_', ''));
         if(item) description = `${item.description}\nCost: ${item.cost} | Weight: ${item.weight}`;
+    } else if (cleanedItemId.startsWith('spell_')) {
+        const item = this.spellsCache().get(cleanedItemId);
+        title = item?.name || this.formatName(cleanedItemId.replace('spell_', ''));
+        if (item) description = item.description;
     } else {
         const item = this.rulesCache().get(cleanedItemId);
         title = item?.name || this.formatName(cleanedItemId.replace(/^(feat_|sa_|cond_)/, ''));

@@ -72,6 +72,14 @@ module.exports = function(db) {
                 return res.status(500).json({ error: 'Gemini API key is not configured in the database.' });
             }
 
+            // Fetch recent entries to provide as examples
+            const recentEntries = await db.collection('codex_entries').find().sort({ _id: -1 }).limit(5).project({ path_components: 1, _id: 0 }).toArray();
+            let existingStructurePrompt = '';
+            if (recentEntries.length > 0) {
+                const examplesString = JSON.stringify(recentEntries.map(e => e.path_components), null, 2);
+                existingStructurePrompt = `\r\n                --- EXISTING STRUCTURE EXAMPLE ---\r\n                Pay close attention to the existing path structures. Match capitalization and use of underscores precisely. When creating new entries, use the same conventions as these recent entries from the database:\r\n                ${examplesString}\r\n`;
+            }
+
             // Fetch the configured default model from general settings.
             const generalSettings = await db.collection('settings').findOne({ _id: 'general' });
             const defaultModel = generalSettings?.default_ai_model || 'models/gemini-pro'; // Fallback to a known stable model
@@ -85,10 +93,14 @@ module.exports = function(db) {
             const systemPrompt = `
                 You are a master architect for a MongoDB database used in a Pathfinder 1e campaign. Your task is to convert a natural language command into a sequence of MongoDB operations.
                 You MUST respond ONLY with a valid JSON array of operation objects. Do not include explanations or markdown formatting.
-
+${existingStructurePrompt}
                 The database has two main types of collections:
                 1.  A structural collection: 'codex_entries'. This collection defines the hierarchical tree structure the user sees. Each document is a node in the tree.
                 2.  Data collections: ['entities_pf1e', 'spells_pf1e', 'deities_pf1e', etc.]. These collections store the detailed information for the items listed in the codex.
+
+                --- CRITICAL RULES ---
+                1. The 'entities_pf1e' collection is ONLY for combat-ready entities. The correct 'type' for these are 'NPC', 'Monster', 'Creature', or 'Character'.
+                2. NEVER create an 'entities_pf1e' document for types like 'Quest', 'Location', 'Item', or 'Organization'. All data for these non-combatant types belongs in a single 'codex_entries' document. These entries MUST NOT have an 'entity_id'.
 
                 --- RESPONSE FORMAT ---
                 Your response must be a JSON array, where each object is a distinct database operation.
@@ -98,18 +110,129 @@ module.exports = function(db) {
                 ]
 
                 --- CORE LOGIC: LINKING CODEX AND DATA ---
-                Almost every piece of data (a person, place, quest) requires TWO documents:
-                1.  A 'codex_entries' document to place it in the navigation tree. Its key field is "path_components", an array of strings.
-                2.  A document in a data collection (e.g., 'entities_pf1e') containing the actual data.
+
+                **IMPORTANT DISTINCTION:**
+                - **Folder/Category Nodes**: Organizational containers (e.g., "Quests", "People"). These are ONLY a 'codex_entries' document with NO 'entity_id'.
+                - **Content Nodes**: These are the actual data items.
+                  - **Combatant Entity (NPC, Monster, etc.)**: Requires TWO documents: one in 'entities_pf1e' (with all stats and data), and one in 'codex_entries' to place it in the tree, linked via 'entity_id'.
+                  - **Non-Combatant Entity (Quest, Location, Item, etc.)**: Requires ONE document in 'codex_entries' ONLY. All data, including name, type, description, and content, is stored within this single document. It MUST NOT have an 'entity_id'.
+
+                --- STRUCTURED CONTENT ---
+                The 'content' field for all documents in 'codex_entries' and other data collections MUST be a JSON array of structured content blocks. Do NOT use a single markdown string for content.
+                When the user provides text with titles, paragraphs, and lists, you must parse it and convert it into this structured format.
+
+                Recognized content block types are:
+                - { "type": "heading", "text": "..." }
+                - { "type": "paragraph", "text": "..." }
+                - { "type": "list", "items": ["...", "..." ] }
+                - { "type": "table", "title": "...", "headers": ["...", "..."], "rows": [{ "Header1": "...", "Header2": "..." }] }
+
+                --- DATA FIELDS BY TYPE ---
+
+                **Quest (stored in codex_entries):**
+                {
+                  "path_components": ["...", "Quest Name"],
+                  "name": "Quest Name",
+                  "category": "Quest",
+                  "summary": "A one-sentence summary of the quest.",
+                  "content": [
+                      { "type": "heading", "text": "Objective" },
+                      { "type": "paragraph", "text": "[Describe what the players must accomplish]" },
+                      { "type": "heading", "text": "Stakes" },
+                      { "type": "paragraph", "text": "[What happens if they fail or succeed]" }
+                  ],
+                  "createdAt": "$NOW"
+                }
+
+                **NPC/Character (entity in entities_pf1e):**
+                {
+                  "_id": "$NEW_ID_...",
+                  "name": "Character Name",
+                  "type": "NPC",
+                  "alignment": "Lawful Good",
+                  "class": "Human Fighter 5",
+                  "baseStats": { "ac": "18", "hp": "45", "str": 16, "dex": 14, "con": 14, "int": 10, "wis": 12, "cha": 10, "combat": { "bab": "-", "cmb": "-", "cmd": "-" } },
+                  "skills": "Skill list",
+                  "feats": "Feat list",
+                  "gear": "Equipment list",
+                  "content": [
+                    { "type": "heading", "text": "Background" },
+                    { "type": "paragraph", "text": "Detailed description and background..." }
+                  ]
+                }
+
+                **Location (stored in codex_entries):**
+                {
+                  "path_components": ["...", "Location Name"],
+                  "name": "Location Name",
+                  "category": "Location",
+                  "summary": "A one-sentence summary of the location.",
+                  "content": [
+                    { "type": "heading", "text": "Description" },
+                    { "type": "paragraph", "text": "General description" }
+                  ],
+                  "createdAt": "$NOW"
+                }
+
+                **Item (stored in codex_entries):**
+                {
+                  "path_components": ["...", "Item Name"],
+                  "name": "Item Name",
+                  "category": "Item",
+                  "summary": "A one-sentence summary of the item.",
+                  "content": [
+                    { "type": "heading", "text": "Description" },
+                    { "type": "paragraph", "text": "Item description" }
+                  ],
+                  "createdAt": "$NOW"
+                }
+
+                **Generic (stored in codex_entries):**
+                {
+                  "path_components": ["...", "Entity Name"],
+                  "name": "Entity Name",
+                  "category": "Custom Type",
+                  "summary": "A one-sentence summary.",
+                  "content": [
+                    { "type": "heading", "text": "Details" },
+                    { "type": "paragraph", "text": "Full content with all details..." }
+                  ],
+                  "createdAt": "$NOW"
+                }
 
                 --- EXAMPLES OF COMMON OPERATIONS ---
 
-                **1. TO CREATE a new entity from scratch (e.g., "Create a new character named Jax at 'People > Solarran Freehold > Riftwatch'"):**
-                This always requires TWO 'insert' operations.
+                **1. TO CREATE a new quest (e.g., "Add a quest 'Cutting the Loose Tongues' to Codex > Quests > RiftWatch > Main Quests"):**
+                This requires ONE 'insert' operation into 'codex_entries'.
+                [
+                  {
+                    "collection": "codex_entries",
+                    "insert": {
+                      "path_components": ["Quests", "RiftWatch", "Main Quests", "Cutting the Loose Tongues"],
+                      "name": "Cutting the Loose Tongues",
+                      "category": "Quest",
+                      "summary": "The PCs are tasked with silencing a Trakonian informant to protect the Riftwatch resistance cell.",
+                      "content": [
+                        { "type": "heading", "text": "Objective" },
+                        { "type": "paragraph", "text": "Torgan has learned that a Trakonian informant has been feeding information to the garrison, threatening their operation. The informant is a disgruntled Solarran merchant named Loric. The PCs are ordered to \"silence\" him and retrieve his ledger of contacts." },
+                        { "type": "heading", "text": "Stakes" },
+                        { "type": "paragraph", "text": "Loric's information could lead the Trakonians directly to their hideout. Eliminating him is paramount. How the PCs handle this will determine their moral standing and Torgan's ultimate trust." }
+                      ],
+                      "createdAt": "$NOW"
+                    }
+                  }
+                ]
+                
+                **2. TO CREATE a new NPC (e.g., "Create a new character named Jax at 'People > Solarran Freehold > Riftwatch'"):**
                 [
                   {
                     "collection": "entities_pf1e",
-                    "insert": { "_id": "$NEW_ID_JAX", "name": "Jax", "type": "NPC", "content": "# Jax\\n\\nA mysterious figure." }
+                    "insert": { 
+                      "_id": "$NEW_ID_JAX", 
+                      "name": "Jax", 
+                      "type": "NPC", 
+                      "content": "# Jax\n\nA mysterious figure who operates in the shadows of Riftwatch." 
+                    }
                   },
                   {
                     "collection": "codex_entries",
@@ -120,9 +243,8 @@ module.exports = function(db) {
                     }
                   }
                 ]
-                - Use a placeholder like "$NEW_ID_<NAME>" for the new document's ID. The backend will replace this.
 
-                **2. TO CREATE an entity FOR an EXISTING codex entry (e.g., "Update Silas and create and link entity with these stats..."):**
+                **3. TO CREATE an entity FOR an EXISTING codex entry (e.g., "Update Silas and create and link entity with these stats..."):**
                 This is for when a codex entry exists but is not yet linked. It requires an 'insert' for the new entity data and an 'update' to link the existing codex entry.
                 [
                   {
@@ -136,7 +258,8 @@ module.exports = function(db) {
                       "baseStats": {
                           "ac": "16 (touch 12, flat-footed 14)", "hp": "14 (4d8-4)",
                           "saves": "Fort +3, Ref +3, Will +6", "attack": "Masterwork rapier +6 (1d6/18-20)",
-                          "str": 10, "dex": 14, "con": 8, "int": 16, "wis": 14, "cha": 15
+                          "str": 10, "dex": 14, "con": 8, "int": 16, "wis": 14, "cha": 15,
+                          "combat": { "bab": "+3", "cmb": "+3", "cmd": "15" }
                       },
                       "skills": "Sense Motive +10, Bluff +9, Intimidate +8, Diplomacy +8, Spellcraft +10, Disguise +9, Knowledge (Local) +7, Perception +6",
                       "feats": "Cunning Initiative, Persuasive, Combat Expertise",
@@ -150,7 +273,7 @@ module.exports = function(db) {
                   }
                 ]
 
-                **3. TO UPDATE an existing, linked entity's content (e.g., "Update the content for the 'Rift Hound' bestiary entry"):**
+                **4. TO UPDATE an existing, linked entity's content (e.g., "Update the content for the 'Rift Hound' bestiary entry'):**
                 This requires ONE 'update' on the data collection. The AI must infer the entity's ID to perform the update. If the ID cannot be determined from the user's query, it is correct to return an error.
                 [
                   {
@@ -162,7 +285,19 @@ module.exports = function(db) {
                 - If you cannot determine the entity ID, respond with: { "error": "Cannot determine the entity ID from the path alone. Please provide the ID for the update." }
 
 
-                **4. TO MOVE or RENAME a codex entry (e.g., "Move 'Jax' from Riftwatch to Riftwatch > Key Figures And Transients"):**
+                **5. TO CREATE a folder/category (e.g., "Create a folder 'Side Quests' under Quests > RiftWatch"):**
+                This only requires ONE 'insert' operation for codex_entries, with NO entity_id.
+                [
+                  {
+                    "collection": "codex_entries",
+                    "insert": {
+                      "path_components": ["Quests", "RiftWatch", "Side Quests"],
+                      "createdAt": "$NOW"
+                    }
+                  }
+                ]
+                
+                **6. TO MOVE or RENAME a codex entry (e.g., "Move 'Jax' from Riftwatch to Riftwatch > Key Figures And Transients'):**
                 This requires ONE 'update' operation on the 'codex_entries' collection to change the 'path_components'.
                 [
                   {
@@ -174,6 +309,10 @@ module.exports = function(db) {
 
                 --- AVAILABLE COLLECTIONS ---
                 ["codex_entries", "entities_pf1e", "equipment_pf1e", "rules_pf1e", "spells_pf1e", "deities_pf1e", "hazards_pf1e", "dm_toolkit_sessions", "dm_toolkit_fights", "dm_toolkit_combatants", "settings"]
+                
+                --- PARSING PATHS ---
+                When the user mentions a path like "Codex > Quests > RiftWatch > Main Quests", convert this to path_components: ["Quests", "RiftWatch", "Main Quests"]. 
+                The word "Codex" at the start is implied and should be omitted from path_components.
             `;
 
             const payload = {
@@ -251,6 +390,9 @@ module.exports = function(db) {
                 const targetCollection = db.collection(collection);
 
                 if (insert) {
+                    if (collection === 'codex_entries' && typeof insert.content === 'undefined') {
+                        insert.content = [];
+                    }
                     if (insert.createdAt === '$NOW') insert.createdAt = new Date();
 
                     const placeholderId = insert._id && typeof insert._id === 'string' && insert._id.startsWith('$NEW_ID') ? insert._id : null;
