@@ -13,7 +13,7 @@ interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
 interface CombatantWithModifiers extends Combatant { baseStats: any; modifiedStats: any; initiativeMod: number; attacks: ParsedAttack[]; allFeats: any[]; equipment: any[]; magicItems: any[]; spells: Spell[]; skills: { [key: string]: number }; }
 interface Session { _id: string; title: string; notes: string; createdAt: any; }
-interface Pf1eEntity { id: string; name: string; sourceCodexPath: string[]; baseStats: any; rules: string[]; equipment?: string[]; magicItems?: string[]; spells?: string[]; }
+interface Pf1eEntity { id: string; name: string; sourceCodexPath: string[]; baseStats: any; rules: string[]; equipment?: string[]; magicItems?: string[]; spells?: { [level: string]: string[] }; }
 interface FoundCreature { id: string; name: string; cr: string; stats: string; hp: string; }
 interface GeneratedNpc { name: string; race: string; description: string; stats: { [key: string]: number }; }
 interface CacheEntry { status: 'idle' | 'loading' | 'loaded' | 'error'; data: any; }
@@ -915,7 +915,11 @@ private buildCodexObject(entries: any[]): any {
         const allFeats = entity ? (entity.rules || []).map(id => ({ id, ...this.rulesCache().get(id) })).filter(f => f.name) : [];
         const equipment = entity ? (entity.equipment || []).map(id => ({ id, ...this.equipmentCache().get(id) })).filter(e => e.name) : [];
         const magicItems = entity ? (entity.magicItems || []).map(id => ({ id, ...this.magicItemsCache().get(id) })).filter(mi => mi.name) : [];
-        const spells = entity ? (entity.spells || []).map(id => ({ id, ...this.spellsCache().get(id) })).filter(s => s.name) : [];
+        let spellIds: string[] = [];
+        if (entity && entity.spells && typeof entity.spells === 'object') {
+          spellIds = Object.values(entity.spells).flat();
+        }
+        const spells = entity ? (spellIds).map(id => ({ id, ...this.spellsCache().get(id) })).filter(s => s.name) : [];
 
         const allMods: { [stat: string]: { [type: string]: (number | string)[] } } = {};
         const addMod = (stat: string, type: string, value: number | string) => {

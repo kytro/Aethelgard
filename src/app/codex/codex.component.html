@@ -219,24 +219,31 @@
                              <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
                              <div class="col-span-1 md:col-span-2">
                                <p class="font-semibold text-white">Spells:</p>
-                               <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-purple-400">
-                                 @for(spellId of entity.spells; track spellId) {
-                                   <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
-                                     <span class="cursor-pointer hover:text-purple-300" (mouseenter)="showTooltip($event, spellId)" (mouseleave)="hideTooltip()">
-                                       {{ spellsCache().get(spellId)?.name || formatItemId(spellId) }}
-                                     </span>
-                                     @if(isEditMode()) {
-                                       <button (click)="removeLinkedItem(entity, spellId, 'spells')" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
-                                     }
-                                   </span>
+                               <div class="space-y-2">
+                                 @for(level of getSpellLevels(entity); track level.level) {
+                                   <div>
+                                     <span class="font-semibold text-gray-400">{{ level.level }}</span>
+                                     <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-purple-400 pl-4">
+                                       @for(spellId of level.spellIds; track spellId) {
+                                         <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
+                                           <span class="cursor-pointer hover:text-purple-300" (mouseenter)="showTooltip($event, spellId, 'spell')" (mouseleave)="hideTooltip()">
+                                             {{ spellsCache().get(spellId)?.name || formatItemId(spellId) }}
+                                           </span>
+                                           @if(isEditMode()) {
+                                             <button (click)="removeLinkedItem(entity, spellId, 'spells')" class="text-red-500 hover:text-red-400 font-bold">&times;</button>
+                                           }
+                                         </span>
+                                       }
+                                     </div>
+                                   </div>
                                  }
-                                 @if(!entity.spells || entity.spells.length === 0) {
+                                 @if(getSpellLevels(entity).length === 0) {
                                    <span class="text-gray-500 italic">None</span>
                                  }
                                </div>
                                @if(isEditMode()) {
                                  <div class="mt-2 flex items-center gap-2">
-                                   <input #addSpellInput list="spells-datalist" placeholder="Add spell by ID..." class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full">
+                                   <input #addSpellInput list="spells-datalist" placeholder="Add spell (e.g., 0:sp_detect_magic)" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full">
                                    <datalist id="spells-datalist">
                                      @for(item of spellsCache().entries(); track item[0]) {
                                        <option value="{{item[0]}}">{{item[1].name}}</option>

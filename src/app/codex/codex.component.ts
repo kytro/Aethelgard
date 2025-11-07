@@ -13,6 +13,14 @@ interface CodexEntry {
 interface Pf1eRule { name: string; description: string; }
 interface Pf1eEquipment { name: string; description: string; cost: string; weight: string; }
 interface Pf1eSpell { name: string; description: string; }
+interface Pf1eEntity {
+  _id: string;
+  name: string;
+  rules: string[];
+  equipment: string[];
+  spells?: { [level: string]: string[] };
+  [key: string]: any;
+}
 interface TooltipContent { title: string; description: string; }
 
 @Component({
@@ -102,10 +110,10 @@ export class CodexComponent implements OnInit {
   private codexData = signal<CodexEntry[] | null>(null);
   currentPath = signal<string[]>([]);
   isLoading = signal<boolean>(true);
-  error = signal<string | null>(null);
+error = signal<string | null>(null);
   isEditMode = signal<boolean>(false);
   
-  linkedEntities = signal<any[]>([]);
+  linkedEntities = signal<Pf1eEntity[]>([]);
   modifiedEntities = signal<Set<string>>(new Set());
   rulesCache = signal<Map<string, Pf1eRule>>(new Map());
   equipmentCache = signal<Map<string, Pf1eEquipment>>(new Map());
@@ -233,7 +241,10 @@ export class CodexComponent implements OnInit {
         if (entities.length > 0) {
             const ruleIds = entities.flatMap(e => e.rules || []);
             const equipmentIds = entities.flatMap(e => e.equipment || []);
-            const spellIds = entities.flatMap(e => e.spells || []);
+            const spellIds = entities.flatMap(e => {
+              if (!e.spells || typeof e.spells !== 'object') return [];
+              return Object.values(e.spells).flat();
+            }).filter(id => id); // Get all spell IDs from all levels
             
             if (ruleIds.length > 0 || equipmentIds.length > 0 || spellIds.length > 0) {
                 await this.fetchLinkedDetails(ruleIds, equipmentIds, spellIds);
@@ -381,7 +392,7 @@ export class CodexComponent implements OnInit {
     }
   }
 
-  handleEntityUpdate(entity: any, field: string, event: any) {
+  handleEntityUpdate(entity: Pf1eEntity, field: string, event: any) {
     if (!this.isEditMode()) return;
     const newText = event.target.innerText;
 
@@ -396,7 +407,7 @@ export class CodexComponent implements OnInit {
     this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
   }
 
-  getSpellSlots(entity: any): { level: number, slots: number }[] {
+  getSpellSlots(entity: Pf1eEntity): { level: number, slots: number }[] {
     const slots = [];
     for (let i = 0; i <= 9; i++) {
       slots.push({
@@ -407,7 +418,19 @@ export class CodexComponent implements OnInit {
     return slots;
   }
 
-  handleSpellSlotUpdate(entity: any, level: string, event: any) {
+  getSpellLevels(entity: Pf1eEntity): { level: string, spellIds: string[] }[] {
+    if (!entity.spells || typeof entity.spells !== 'object') {
+      return [];
+    }
+    return Object.keys(entity.spells)
+      .sort((a, b) => parseInt(a) - parseInt(b)) // Sort by level
+      .map(level => ({
+        level: level === '0' ? 'Orisons' : `Level ${level}`,
+        spellIds: entity.spells[level]
+      }));
+  }
+
+  handleSpellSlotUpdate(entity: Pf1eEntity, level: string, event: any) {
     if (!this.isEditMode()) return;
     const newText = event.target.innerText;
     const newValue = parseInt(newText, 10);
@@ -426,7 +449,7 @@ export class CodexComponent implements OnInit {
     this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
   }
 
-  addLinkedItem(entity: any, inputElement: HTMLInputElement, type: 'rules' | 'equipment' | 'spells') {
+  addLinkedItem(entity: Pf1eEntity, inputElement: HTMLInputElement, type: 'rules' | 'equipment' | 'spells') {
     if (!this.isEditMode() || !inputElement.value) return;
 
     const newItemId = inputElement.value;
@@ -443,29 +466,70 @@ export class CodexComponent implements OnInit {
         break;
     }
 
-    if (cache.has(newItemId)) {
-      if (!entity[type]) {
-        entity[type] = [];
+    if (type === 'spells') {
+      const parts = newItemId.split(':'); // Expect "level:id" format, e.g., "0:sp_detect_magic"
+      if (parts.length !== 2) {
+        alert('Invalid format. Use "level:spellId" (e.g., "0:sp_detect_magic")');
+        return;
       }
-      if (!entity[type].includes(newItemId)) {
-        entity[type].push(newItemId);
+      const [level, spellId] = parts;
+      if (!cache.has(spellId)) {
+        alert(`Invalid Spell ID: ${spellId}`);
+        return;
+      }
+      if (!entity.spells) {
+        entity.spells = {};
+      }
+      if (!entity.spells[level]) {
+        entity.spells[level] = [];
+      }
+      if (!entity.spells[level].includes(spellId)) {
+        entity.spells[level].push(spellId);
         this.modifiedEntities.update(set => set.add(entity._id));
-        this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
+        this.linkedEntities.set([...this.linkedEntities()]);
         inputElement.value = '';
       }
     } else {
-      alert(`Invalid ID: ${newItemId}`);
+      if (cache.has(newItemId)) {
+        if (!entity[type]) {
+          entity[type] = [];
+        }
+        if (!entity[type].includes(newItemId)) {
+          entity[type].push(newItemId);
+          this.modifiedEntities.update(set => set.add(entity._id));
+          this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
+          inputElement.value = '';
+        }
+      } else {
+        alert(`Invalid ID: ${newItemId}`);
+      }
     }
   }
 
-  removeLinkedItem(entity: any, itemId: string, type: 'rules' | 'equipment' | 'spells') {
+  removeLinkedItem(entity: Pf1eEntity, itemId: string, type: 'rules' | 'equipment' | 'spells') {
     if (!this.isEditMode()) return;
 
-    const index = entity[type]?.indexOf(itemId);
-    if (index > -1) {
-      entity[type].splice(index, 1);
-      this.modifiedEntities.update(set => set.add(entity._id));
-      this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
+    if (type === 'spells') {
+      if (!entity.spells) return;
+      for (const level in entity.spells) {
+        const index = entity.spells[level].indexOf(itemId);
+        if (index > -1) {
+          entity.spells[level].splice(index, 1);
+          if (entity.spells[level].length === 0) {
+            delete entity.spells[level];
+          }
+          this.modifiedEntities.update(set => set.add(entity._id));
+          this.linkedEntities.set([...this.linkedEntities()]);
+          return;
+        }
+      }
+    } else {
+      const index = entity[type]?.indexOf(itemId);
+      if (index > -1) {
+        entity[type].splice(index, 1);
+        this.modifiedEntities.update(set => set.add(entity._id));
+        this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
+      }
     }
   }
 
@@ -652,22 +716,22 @@ export class CodexComponent implements OnInit {
   }
 
   // --- Tooltip Logic ---
-  showTooltip(event: MouseEvent, itemId: string) {
+  showTooltip(event: MouseEvent, itemId: string, type?: 'rule' | 'equipment' | 'spell') {
     let title = '';
     let description = 'Item not found in cache.';
-
-    // Aggressively clean the string to remove any non-word characters except underscore.
     const cleanedItemId = itemId.replace(/[^\w_]/g, '');
 
-    if (cleanedItemId.startsWith('eq_')) {
+    const itemType = type || (cleanedItemId.startsWith('eq_') ? 'equipment' : cleanedItemId.startsWith('sp_') ? 'spell' : 'rule');
+
+    if (itemType === 'equipment') {
         const item = this.equipmentCache().get(cleanedItemId);
         title = item?.name || this.formatName(cleanedItemId.replace('eq_', ''));
         if(item) description = `${item.description}\nCost: ${item.cost} | Weight: ${item.weight}`;
-    } else if (cleanedItemId.startsWith('sp_')) {
+    } else if (itemType === 'spell') {
         const item = this.spellsCache().get(cleanedItemId);
         title = item?.name || this.formatName(cleanedItemId.replace('sp_', ''));
         if (item) description = item.description;
-    } else {
+    } else { // rule
         const item = this.rulesCache().get(cleanedItemId);
         title = item?.name || this.formatName(cleanedItemId.replace(/^(feat_|sa_|cond_)/, ''));
         if (item) description = item.description;
