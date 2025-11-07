@@ -1225,9 +1225,12 @@ private buildCodexObject(entries: any[]): any {
 
   private parseAndRecalculateSkills(baseStats: any, modifiedStats: any, finalBonuses: { [key: string]: number }): { [key: string]: number } {
     const skills: { [key: string]: number } = {};
+    const skillsObject = this.getCaseInsensitiveProp(baseStats, 'skills');
+    if (skillsObject && typeof skillsObject === 'object' && Object.keys(skillsObject).length > 0) {
+        return skillsObject;
+    }
     const skillsString = this.getCaseInsensitiveProp(baseStats, 'Skills') || '';
     if (!skillsString) return {};
-
     const skillEntries = skillsString.split(',');
 
     const baseAbilityMods = {
