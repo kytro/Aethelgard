@@ -137,6 +137,22 @@
                                    </div>
                                  }
                              </div>
+
+                             <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                             <div class="col-span-1 md:col-span-2">
+                               <p class="font-semibold text-white">Skills:</p>
+                               <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1 text-cyan-400 text-sm">
+                                 @for(skill of getSkills(entity.baseStats?.skills); track skill.name) {
+                                   <div class="flex justify-between border-b border-gray-800 py-1">
+                                     <span class="text-gray-300">{{ skill.name }}</span>
+                                     <span class="font-mono text-cyan-300">{{ formatModifier(skill.value) }}</span>
+                                   </div>
+                                 }
+                                 @if(!entity.baseStats?.skills || getSkills(entity.baseStats?.skills).length === 0) {
+                                   <span class="text-gray-500 italic">None</span>
+                                 }
+                               </div>
+                             </div>
                              
                              <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
                              <div class="col-span-1 md:col-span-2">

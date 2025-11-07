@@ -554,6 +554,13 @@ async function parseStatBlockToEntity(statBlock, name, path, content) {
                             
                             // The fresh parse is for links; merge with existing stats.
                             freshEntity.baseStats = mergeBaseStats(freshEntity.baseStats, oldBaseStats);
+
+                            // Preserve existing equipment if it's already populated.
+                            const existingEquipment = oldEntity?.equipment || [];
+                            if (existingEquipment.length > 0) {
+                                freshEntity.equipment = existingEquipment;
+                            }
+
                             entities.push(freshEntity);
                         }
                     }

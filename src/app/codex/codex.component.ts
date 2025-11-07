@@ -568,6 +568,14 @@ export class CodexComponent implements OnInit {
     const objKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
     return objKey ? obj[objKey] : undefined;
   }
+
+  getSkills(skills: { [key: string]: number } | undefined): { name: string, value: number }[] {
+    if (!skills) {
+      return [];
+    }
+    return Object.entries(skills).map(([name, value]) => ({ name, value })).sort((a, b) => a.name.localeCompare(b.name));
+  }
+
   formatItemId = (id: string) => this.formatName(id.replace(/^(feat_|sa_|cond_|eq_|spell_)/, ''));
 
   async toggleCompletion(entry: CodexEntry) {
