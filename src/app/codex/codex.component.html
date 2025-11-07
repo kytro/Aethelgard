@@ -136,29 +136,72 @@
                                  @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
                                    <div class="text-center bg-gray-900/50 p-1 rounded">
                                        <span class="font-semibold">{{ability}}</span>
-                                       <p><span [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.' + ability, $event)">{{ getCaseInsensitiveProp(entity['baseStats'], ability) ?? 10 }}</span> ({{getAbilityModifier(getCaseInsensitiveProp(entity['baseStats'], ability))}})</p>
+                                       <p><span [attr.contenteditable]="isEditMode()" 
+                                                 (blur)="handleNumericEntityUpdate(entity, 'baseStats.' + ability, $event)"
+                                                 class="outline-none focus:text-yellow-400 focus:underline">{{ getCaseInsensitiveProp(entity['baseStats'], ability) ?? 10 }}</span> ({{getAbilityModifier(getCaseInsensitiveProp(entity['baseStats'], ability))}})</p>
                                    </div>
                                  }
                              </div>
 
                              <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
-                             <div class="col-span-1 md:col-span-2">
-                               <p class="font-semibold text-white">Skills:</p>
-                               <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1 text-cyan-400 text-sm">
-                                 @for(skill of getSkills(entity['baseStats']?.skills); track skill.name) {
-                                   <div class="flex justify-between border-b border-gray-800 py-1">
-                                     <span class="text-gray-300">{{ skill.name }}</span>
-                                     <span class="font-mono text-cyan-300">{{ formatModifier(skill.value) }}</span>
-                                   </div>
-                                 }
-                                 @if(!entity['baseStats']?.skills || getSkills(entity['baseStats']?.skills).length === 0) {
-                                   <span class="text-gray-500 italic">None</span>
-                                 }
-                               </div>
-                             </div>
+<div class="col-span-1 md:col-span-2 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+    <p>
+        <strong class="font-semibold text-gray-400">DR:</strong> 
+        <span [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.DR', $event)" class="ml-1 outline-none focus:text-yellow-400">{{ entity['baseStats']?.DR || '-' }}</span>
+    </p>
+    <p>
+        <strong class="font-semibold text-gray-400">SR:</strong> 
+        <span [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.SR', $event)" class="ml-1 outline-none focus:text-yellow-400">{{ entity['baseStats']?.SR || '-' }}</span>
+    </p>
+    <p>
+        <strong class="font-semibold text-gray-400">Resist:</strong> 
+        <span [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.Resist', $event)" class="ml-1 outline-none focus:text-yellow-400">{{ entity['baseStats']?.Resist || '-' }}</span>
+    </p>
+    <p>
+        <strong class="font-semibold text-gray-400">Immune:</strong> 
+        <span [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.Immune', $event)" class="ml-1 outline-none focus:text-yellow-400">{{ entity['baseStats']?.Immune || '-' }}</span>
+    </p>
+</div>
+
+<div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+<div class="col-span-1 md:col-span-2">
+  <p class="font-semibold text-white mb-2">Skills:</p>
+  
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-1 text-sm mb-3">
+    @for(skill of getSkills(entity['baseStats']?.skills); track skill.name) {
+      <div class="flex justify-between items-center border-b border-gray-800 py-1 group">
+        <span class="text-gray-300">{{ skill.name }}</span>
+        <div class="flex items-center gap-2">
+            <span class="font-mono text-cyan-300 outline-none focus:text-yellow-400" 
+                  [attr.contenteditable]="isEditMode()" 
+                  (blur)="handleNumericEntityUpdate(entity, 'baseStats.skills.' + skill.name, $event)">
+                  {{ formatModifier(skill.value) }}
+            </span>
+            @if(isEditMode()) {
+                <button (click)="removeEntitySkill(entity, skill.name)" class="text-red-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity px-1">&times;</button>
+            }
+        </div>
+      </div>
+    }
+  </div>
+
+  @if(isEditMode()) {
+    <div class="flex items-center gap-2 mt-2 bg-gray-800/50 p-2 rounded">
+        <input #skillName type="text" placeholder="Skill Name (e.g., Stealth)" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs flex-grow">
+        <input #skillVal type="number" placeholder="+0" class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white text-xs w-16">
+        <button (click)="addEntitySkill(entity, skillName, skillVal)" class="bg-green-600 hover:bg-green-700 text-white font-bold py-1 px-3 rounded text-xs">+</button>
+    </div>
+  }
+  
+  @if(!entity['baseStats']?.skills || getSkills(entity['baseStats']?.skills).length === 0) {
+    @if(!isEditMode()) { <span class="text-gray-500 italic">None</span> }
+  }
+</div>
                              
                              <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
                              <div class="col-span-1 md:col-span-2">
+                               <p class="font-semibold text-white">Equipment:</p>
+
                                <p class="font-semibold text-white">Equipment:</p>
                                <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-green-400">
                                  @for(equipId of entity.equipment; track equipId) {
@@ -263,9 +306,14 @@
                                <div class="grid grid-cols-5 gap-2 text-center">
                                  @for(slot of getSpellSlots(entity); track slot.level) {
                                    @if(isEditMode() || slot.slots > 0) {
-                                     <div class="bg-gray-900/50 p-1 rounded">
-                                       <span class="font-semibold text-gray-400">Level {{slot.level}}</span>
-                                       <p [attr.contenteditable]="isEditMode()" (blur)="handleSpellSlotUpdate(entity, slot.level.toString(), $event)">{{ slot.slots || '' }}</p>
+                                     <div class="bg-gray-900/50 p-1 rounded" [ngClass]="{'ring-1 ring-yellow-500/30': isEditMode()}">
+                                       <span class="font-semibold text-gray-400 text-xs">Lvl {{slot.level}}</span>
+                                       <p [attr.contenteditable]="isEditMode()" 
+                                          (blur)="handleSpellSlotUpdate(entity, slot.level.toString(), $event)"
+                                          class="outline-none focus:text-yellow-400 focus:font-bold"
+                                          [ngClass]="{'text-gray-500': slot.slots === 0 && isEditMode(), 'text-white': slot.slots > 0}">
+                                          {{ slot.slots }}
+                                       </p>
                                      </div>
                                    }
                                  }

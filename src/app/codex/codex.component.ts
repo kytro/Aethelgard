@@ -408,6 +408,62 @@ error = signal<string | null>(null);
     this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
   }
 
+  /**
+   * Handles updates for numeric fields specifically to ensure they are saved as numbers, not strings.
+   */
+  handleNumericEntityUpdate(entity: Pf1eEntity, field: string, event: any) {
+    if (!this.isEditMode()) return;
+    const newText = event.target.innerText.trim();
+    const numVal = parseInt(newText, 10);
+
+    // If it's not a valid number, don't update (or set to 0 if preferred)
+    if (isNaN(numVal) && newText !== '') return;
+
+    const valToSave = newText === '' ? null : numVal;
+
+    const keys = field.split('.');
+    let current = entity;
+    for (let i = 0; i < keys.length - 1; i++) {
+        if (!current[keys[i]]) current[keys[i]] = {}; // Ensure path exists
+        current = current[keys[i]];
+    }
+    current[keys[keys.length - 1]] = valToSave;
+
+    this.modifiedEntities.update(set => set.add(entity._id));
+    // Force refresh if needed, though standard change detection might catch it
+  }
+
+  addEntitySkill(entity: Pf1eEntity, nameInput: HTMLInputElement, valueInput: HTMLInputElement) {
+    if (!this.isEditMode()) return;
+    const name = nameInput.value.trim();
+    const val = parseInt(valueInput.value.trim(), 10);
+
+    if (!name || isNaN(val)) {
+        alert('Please enter a valid skill name and numeric value.');
+        return;
+    }
+
+    if (!entity['baseStats']) entity['baseStats'] = {};
+    if (!entity['baseStats']['skills']) entity['baseStats']['skills'] = {};
+
+    entity['baseStats']['skills'][name] = val;
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]); // Trigger view refresh
+
+    // Clear inputs
+    nameInput.value = '';
+    valueInput.value = '';
+  }
+
+  removeEntitySkill(entity: Pf1eEntity, skillName: string) {
+    if (!this.isEditMode() || !entity['baseStats']?.skills) return;
+    if (confirm(`Remove skill '${skillName}'?`)) {
+        delete entity['baseStats']['skills'][skillName];
+        this.modifiedEntities.update(set => set.add(entity._id));
+        this.linkedEntities.set([...this.linkedEntities()]);
+    }
+  }
+
   getSpellSlots(entity: Pf1eEntity): { level: number, slots: number }[] {
     const slots = [];
     for (let i = 0; i <= 9; i++) {
