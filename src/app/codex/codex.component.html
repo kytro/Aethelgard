@@ -124,16 +124,19 @@
                        <div class="bg-black/20 p-4 rounded-lg">
                          <h4 class="font-bold text-lg mb-3 text-white" [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'name', $event)">{{ entity.name }}</h4>
                          <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.ac', $event)"><strong class="font-semibold text-gray-400">AC:</strong> {{entity.baseStats?.ac ?? '10'}}</p>
-                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.hp', $event)"><strong class="font-semibold text-gray-400">HP:</strong> {{entity.baseStats?.hp ?? '1d8'}}</p>
-                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.saves', $event)"><strong class="font-semibold text-gray-400">Saves:</strong> {{entity.baseStats?.saves ?? 'Fort +0, Ref +0, Will +0'}}</p>
-                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.combat.bab', $event)"><strong class="font-semibold text-gray-400">BAB/CMB/CMD:</strong> {{ formatModifier(entity.baseStats?.combat?.bab) }} / {{entity.baseStats?.combat?.cmb ?? '-'}} / {{entity.baseStats?.combat?.cmd ?? '-'}}</p>
+                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.class', $event)"><strong class="font-semibold text-gray-400">Class:</strong> {{ getCaseInsensitiveProp(entity['baseStats'], 'class') ?? 'N/A' }}</p>
+                            <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.alignment', $event)"><strong class="font-semibold text-gray-400">Alignment:</strong> {{ getCaseInsensitiveProp(entity['baseStats'], 'alignment') ?? 'N/A' }}</p>
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.ac', $event)"><strong class="font-semibold text-gray-400">AC:</strong> {{entity['baseStats']?.ac ?? '10'}}</p>
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.hp', $event)"><strong class="font-semibold text-gray-400">HP:</strong> {{entity['baseStats']?.hp ?? '1d8'}}</p>
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.saves', $event)"><strong class="font-semibold text-gray-400">Saves:</strong> {{entity['baseStats']?.saves ?? 'Fort +0, Ref +0, Will +0'}}</p>
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.combat.bab', $event)"><strong class="font-semibold text-gray-400">BAB/CMB/CMD:</strong> {{ formatModifier(entity['baseStats']?.combat?.bab) }} / {{entity['baseStats']?.combat?.cmb ?? '-'}} / {{entity['baseStats']?.combat?.cmd ?? '-'}}</p>
+                             <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.spell_save_dc', $event)"><strong class="font-semibold text-gray-400">Spell Save DC:</strong> {{ getCaseInsensitiveProp(entity['baseStats'], 'spell_save_dc') ?? 'N/A' }}</p>
                              <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
                              <div class="grid grid-cols-3 gap-2 col-span-1 md:col-span-2">
                                  @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
                                    <div class="text-center bg-gray-900/50 p-1 rounded">
                                        <span class="font-semibold">{{ability}}</span>
-                                       <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.' + ability, $event)">{{ getCaseInsensitiveProp(entity.baseStats, ability) ?? 10 }} ({{getAbilityModifier(getCaseInsensitiveProp(entity.baseStats, ability))}})</p>
+                                       <p [attr.contenteditable]="isEditMode()" (blur)="handleEntityUpdate(entity, 'baseStats.' + ability, $event)">{{ getCaseInsensitiveProp(entity['baseStats'], ability) ?? 10 }} ({{getAbilityModifier(getCaseInsensitiveProp(entity['baseStats'], ability))}})</p>
                                    </div>
                                  }
                              </div>
@@ -142,13 +145,13 @@
                              <div class="col-span-1 md:col-span-2">
                                <p class="font-semibold text-white">Skills:</p>
                                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-1 text-cyan-400 text-sm">
-                                 @for(skill of getSkills(entity.baseStats?.skills); track skill.name) {
+                                 @for(skill of getSkills(entity['baseStats']?.skills); track skill.name) {
                                    <div class="flex justify-between border-b border-gray-800 py-1">
                                      <span class="text-gray-300">{{ skill.name }}</span>
                                      <span class="font-mono text-cyan-300">{{ formatModifier(skill.value) }}</span>
                                    </div>
                                  }
-                                 @if(!entity.baseStats?.skills || getSkills(entity.baseStats?.skills).length === 0) {
+                                 @if(!entity['baseStats']?.skills || getSkills(entity['baseStats']?.skills).length === 0) {
                                    <span class="text-gray-500 italic">None</span>
                                  }
                                </div>
@@ -237,7 +240,7 @@
                                      </div>
                                    </div>
                                  }
-                                 @if(getSpellLevels(entity).length === 0) {
+                                 @if(!entity.spells || getSpellLevels(entity).length === 0) {
                                    <span class="text-gray-500 italic">None</span>
                                  }
                                </div>

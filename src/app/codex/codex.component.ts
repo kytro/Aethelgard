@@ -19,6 +19,7 @@ interface Pf1eEntity {
   rules: string[];
   equipment: string[];
   spells?: { [level: string]: string[] };
+  deity?: string;
   [key: string]: any;
 }
 interface TooltipContent { title: string; description: string; }
@@ -412,21 +413,42 @@ error = signal<string | null>(null);
     for (let i = 0; i <= 9; i++) {
       slots.push({
         level: i,
-        slots: entity.spell_slots?.[i] || 0
+        slots: entity['spell_slots']?.[i] || 0
       });
     }
     return slots;
   }
 
+  private getLevelZeroSpellNomenclature(entity: Pf1eEntity): string {
+    const classString = (this.getCaseInsensitiveProp(entity, 'class') 
+                        || this.getCaseInsensitiveProp(entity['baseStats'], 'class') 
+                        || '').toLowerCase();
+
+    if (!classString) return 'Orisons';
+
+    const arcaneClasses = ['wizard', 'sorcerer', 'bard', 'magus', 'arcanist', 'witch', 'summoner', 'investigator', 'alchemist'];
+    const divineClasses = ['cleric', 'druid', 'inquisitor', 'paladin', 'oracle', 'shaman', 'warpriest', 'ranger'];
+
+    if (arcaneClasses.some(c => classString.includes(c))) {
+      return 'Cantrips';
+    }
+    if (divineClasses.some(c => classString.includes(c))) {
+      return 'Orisons';
+    }
+    
+    return 'Orisons'; // Default
+  }
+
   getSpellLevels(entity: Pf1eEntity): { level: string, spellIds: string[] }[] {
-    if (!entity.spells || typeof entity.spells !== 'object') {
+    const spells = entity.spells;
+    if (!spells || typeof spells !== 'object') {
       return [];
     }
-    return Object.keys(entity.spells)
+    return Object.keys(spells)
       .sort((a, b) => parseInt(a) - parseInt(b)) // Sort by level
       .map(level => ({
-        level: level === '0' ? 'Orisons' : `Level ${level}`,
-        spellIds: entity.spells[level]
+        level: level === '0' ? this.getLevelZeroSpellNomenclature(entity) : `Level ${level}`,
+        spellIds: spells[level] || []
       }));
   }
 
@@ -435,14 +457,14 @@ error = signal<string | null>(null);
     const newText = event.target.innerText;
     const newValue = parseInt(newText, 10);
 
-    if (!entity.spell_slots) {
-      entity.spell_slots = {};
+    if (!entity['spell_slots']) {
+      entity['spell_slots'] = {};
     }
     
     if (!isNaN(newValue) && newValue > 0) {
-      entity.spell_slots[level] = newValue;
+      entity['spell_slots'][level] = newValue;
     } else {
-      delete entity.spell_slots[level];
+      delete entity['spell_slots'][level];
     }
 
     this.modifiedEntities.update(set => set.add(entity._id));
