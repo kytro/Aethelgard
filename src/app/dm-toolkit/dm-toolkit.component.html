@@ -454,7 +454,7 @@
                                 </div>
                                 <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2 text-xs">
                                   @for (spell of c.spells; track spell.id) {
-                                    <span (mouseenter)="showTooltip($event, spell.id, 'spell')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 cursor-pointer">{{spell.name}}</span>
+                                    <button (click)="handleCastSpell(c, spell)" (mouseenter)="showTooltip($event, spell.id, 'spell')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 cursor-pointer hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" [title]="isSelfCast(spell) ? 'Cast ' + spell.name : 'Cannot self-cast (Range: ' + spell.range + ')'" [disabled]="!isSelfCast(spell)">{{spell.name}}</button>
                                   }
                                 </div>
                                 @if(c.spellSlots) {

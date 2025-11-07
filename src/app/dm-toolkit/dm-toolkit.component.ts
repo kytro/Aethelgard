@@ -913,8 +913,24 @@ private buildCodexObject(entries: any[]): any {
         baseStats.SavesObject = this.parseSaves(this.getCaseInsensitiveProp(baseStats, 'Saves'), baseStats);
         
         const allFeats = entity ? (entity.rules || []).map(id => ({ id, ...this.rulesCache().get(id) })).filter(f => f.name) : [];
-        const equipment = entity ? (entity.equipment || []).map(id => ({ id, ...this.equipmentCache().get(id) })).filter(e => e.name) : [];
-        const magicItems = entity ? (entity.magicItems || []).map(id => ({ id, ...this.magicItemsCache().get(id) })).filter(mi => mi.name) : [];
+        
+        const mappedEquipment = entity ? (entity.equipment || []).map(id => ({ id, ...this.equipmentCache().get(id), isMagic: false })).filter(e => e.name) : [];
+        const mappedMagicItems = entity ? (entity.magicItems || []).map(id => ({ id, ...this.magicItemsCache().get(id), isMagic: true })).filter(mi => mi.name) : [];
+
+        const combinedItemsMap = new Map<string, any>();
+        [...mappedEquipment, ...mappedMagicItems].forEach(item => {
+            if (item.id) { // Ensure item has an ID
+                // Prioritize magic item version if an item with the same ID exists
+                if (combinedItemsMap.has(item.id) && !item.isMagic) {
+                    return; 
+                }
+                combinedItemsMap.set(item.id, item);
+            }
+        });
+        const uniqueItems = Array.from(combinedItemsMap.values());
+
+        const equipment = uniqueItems.filter(item => !item.isMagic);
+        const magicItems = uniqueItems.filter(item => item.isMagic);
         let spellIds: string[] = [];
         if (entity && entity.spells && typeof entity.spells === 'object') {
           spellIds = Object.values(entity.spells).flat();
@@ -1366,18 +1382,14 @@ private buildCodexObject(entries: any[]): any {
   async handleUpdateCombatantStat(combatantId: string, statName: string, value: any) {
     const combatant = this.combatants().find(c => c._id === combatantId);
     if (!combatant) return;
-  
-    const newStats = { ...combatant.stats, [statName]: value };
+
+    const newStats = { ...combatant.stats, [statName]: Number(value) };
     await this.handleUpdateCombatant(combatantId, 'stats', newStats);
-    
-    // Optimistically update the editing combatant's stats to refresh the modal view
-    this.editingCombatantStats.update(c => {
-      if (c && c._id === combatantId) {
-        const updatedCombatant = { ...c, stats: newStats };
-        return updatedCombatant;
-      }
-      return c;
-    });
+
+    const updatedCombatantInModal = this.modifiedCombatants().find(c => c._id === combatantId);
+    if (updatedCombatantInModal) {
+        this.editingCombatantStats.set(updatedCombatantInModal);
+    }
   }
 
 
@@ -1420,6 +1432,86 @@ private buildCodexObject(entries: any[]): any {
   async handleUpdateSpellSlots(combatantId: string, spellSlots: any) {
       await this.handleUpdateCombatant(combatantId, 'spellSlots', spellSlots);
       this.closeSpellSlotsModal();
+  }
+
+  isSelfCast(spell: Spell): boolean {
+    if (!spell || !spell.range) return false;
+    const range = spell.range.toLowerCase();
+    return range === 'personal' || range.includes('self');
+  }
+
+  parseSpellDuration(durationStr: string): { value: number, unit: 'rounds' | 'minutes' | 'hours' | 'days' | 'permanent' } {
+      if (!durationStr) return { value: 1, unit: 'minutes' };
+      const d = durationStr.toLowerCase();
+
+      if (d.includes('permanent')) return { value: 999, unit: 'permanent' };
+      if (d.includes('instantaneous')) return { value: 1, unit: 'rounds' };
+
+      const timeRegex = /(\d+)\s*(round|minute|hour|day)/;
+      const match = d.match(timeRegex);
+
+      if (match) {
+          const value = parseInt(match[1], 10);
+          const unitStr = match[2];
+          let unit: 'rounds' | 'minutes' | 'hours' | 'days' = 'rounds';
+          if (unitStr === 'minute') unit = 'minutes';
+          else if (unitStr === 'hour') unit = 'hours';
+          else if (unitStr === 'day') unit = 'days';
+          
+          return { value, unit };
+      }
+      
+      return { value: 1, unit: 'minutes' };
+  }
+
+  async deductSpellSlot(combatantId: string, spellLevel: number) {
+    const combatant = this.combatants().find(c => c._id === combatantId);
+    if (!combatant || !combatant.spellSlots || combatant.spellSlots[spellLevel] === undefined) {
+      return;
+    }
+
+    const currentSlots = combatant.spellSlots[spellLevel];
+    if (currentSlots > 0) {
+      const newSlots = { ...combatant.spellSlots, [spellLevel]: currentSlots - 1 };
+      await this.handleUpdateCombatant(combatantId, 'spellSlots', newSlots);
+      this.logAction(`Used a level ${spellLevel} spell slot for ${combatant.name}.`);
+    } else {
+      this.logAction(`Attempted to use a level ${spellLevel} spell slot for ${combatant.name}, but none were available.`);
+    }
+  }
+
+  async handleCastSpell(combatant: CombatantWithModifiers, spell: Spell) {
+    const effectName = spell.name;
+    let effectData = this.effectsCache().get(effectName)?.data;
+
+    if (!effectData) {
+      await this.lookupTerm(effectName, 'effect');
+      effectData = this.effectsCache().get(effectName)?.data;
+    }
+
+    if (!effectData || !effectData.modifiers) {
+      alert(`The spell "${spell.name}" was cast, but no corresponding effect with modifiers was found. Please create an effect named "${spell.name}".`);
+      this.logAction(`Cast spell '${spell.name}' on ${combatant.name}, but no matching effect was found.`);
+      return;
+    }
+
+    const duration = this.parseSpellDuration(spell.duration);
+
+    const newEffect: CombatantEffect = {
+      name: effectName,
+      duration: duration.value,
+      unit: duration.unit,
+      startRound: this.roundCounter(),
+      remainingRounds: duration.unit === 'permanent' ? 999 : duration.value
+    };
+
+    const updatedEffects = [...(combatant.effects || []), newEffect];
+    this.logAction(`Cast spell '${spell.name}' on ${combatant.name}, applying effect.`);
+    await this.handleUpdateCombatant(combatant._id, 'effects', updatedEffects);
+
+    if (spell.level !== undefined) {
+      this.deductSpellSlot(combatant._id, spell.level);
+    }
   }
 
 
