@@ -1480,37 +1480,48 @@ private buildCodexObject(entries: any[]): any {
     }
   }
 
-  async handleCastSpell(combatant: CombatantWithModifiers, spell: Spell) {
+  async handleCastSpell(caster: CombatantWithModifiers, spell: Spell, targetId: string) {
+    // 1. Determine Target
+    const target = this.combatants().find(c => c._id === targetId) || caster;
+
+    // 2. Find Effect Data
     const effectName = spell.name;
     let effectData = this.effectsCache().get(effectName)?.data;
 
     if (!effectData) {
+      // Try to auto-lookup if missing
       await this.lookupTerm(effectName, 'effect');
       effectData = this.effectsCache().get(effectName)?.data;
     }
 
     if (!effectData || !effectData.modifiers) {
-      alert(`The spell "${spell.name}" was cast, but no corresponding effect with modifiers was found. Please create an effect named "${spell.name}".`);
-      this.logAction(`Cast spell '${spell.name}' on ${combatant.name}, but no matching effect was found.`);
+      alert(`Spell cast, but no mechanical effect found for "${spell.name}". Please create this effect in the Toolkit first.`);
+      this.logAction(`${caster.name} cast '${spell.name}' on ${target.name}, but no effect applied.`);
       return;
     }
 
-    const duration = this.parseSpellDuration(spell.duration);
+    // 3. Calculate Duration
+    // Use caster's level if available, otherwise default to 1
+    const casterLevel = this.getCaseInsensitiveProp(caster.baseStats, 'Level') || this.getCaseInsensitiveProp(caster.baseStats, 'CR') || 1;
+    // You might want to improve parseSpellDuration to accept casterLevel for accurate rounds/level calculation
+    const duration = this.parseSpellDuration(spell.duration); 
 
     const newEffect: CombatantEffect = {
       name: effectName,
-      duration: duration.value,
+      duration: duration.value, // NOTE: To make this accurate per-level, you'd need to enhance parseSpellDuration
       unit: duration.unit,
       startRound: this.roundCounter(),
       remainingRounds: duration.unit === 'permanent' ? 999 : duration.value
     };
 
-    const updatedEffects = [...(combatant.effects || []), newEffect];
-    this.logAction(`Cast spell '${spell.name}' on ${combatant.name}, applying effect.`);
-    await this.handleUpdateCombatant(combatant._id, 'effects', updatedEffects);
+    // 4. Apply to Target
+    const updatedEffects = [...(target.effects || []), newEffect];
+    this.logAction(`${caster.name} cast '${spell.name}' on ${target.name}.`);
+    await this.handleUpdateCombatant(target._id, 'effects', updatedEffects);
 
+    // 5. Deduct Slot from Caster
     if (spell.level !== undefined) {
-      this.deductSpellSlot(combatant._id, spell.level);
+      this.deductSpellSlot(caster._id, spell.level);
     }
   }
 

@@ -413,24 +413,37 @@ error = signal<string | null>(null);
    */
   handleNumericEntityUpdate(entity: Pf1eEntity, field: string, event: any) {
     if (!this.isEditMode()) return;
-    const newText = event.target.innerText.trim();
+    
+    // 1. Clean input (remove '+' sign if present, trim whitespace)
+    let newText = event.target.innerText.trim().replace(/^\+/, ''); 
+    
+    // 2. Parse to number
     const numVal = parseInt(newText, 10);
 
-    // If it's not a valid number, don't update (or set to 0 if preferred)
-    if (isNaN(numVal) && newText !== '') return;
+    // 3. Validate. If invalid, revert UI to old value (optional, or just don't save)
+    if (isNaN(numVal)) {
+        // If user cleared it, maybe set to null or 0? Depends on preference.
+        // For now, let's just ignore invalid inputs to prevent breaking data.
+        event.target.innerText = this.getDeepValue(entity, field) ?? ''; 
+        return;
+    }
 
-    const valToSave = newText === '' ? null : numVal;
-
+    // 4. Update deeply nested property
     const keys = field.split('.');
-    let current = entity;
+    let current = entity as any;
     for (let i = 0; i < keys.length - 1; i++) {
-        if (!current[keys[i]]) current[keys[i]] = {}; // Ensure path exists
+        if (!current[keys[i]]) current[keys[i]] = {}; // Create path if missing
         current = current[keys[i]];
     }
-    current[keys[keys.length - 1]] = valToSave;
+    current[keys[keys.length - 1]] = numVal;
 
+    // 5. Mark as modified to ensure it gets sent to backend on 'Save Changes'
     this.modifiedEntities.update(set => set.add(entity._id));
-    // Force refresh if needed, though standard change detection might catch it
+  }
+
+  // Helper to get deep value for reverting invalid inputs
+  private getDeepValue(obj: any, path: string): any {
+      return path.split('.').reduce((acc, part) => acc && acc[part], obj);
   }
 
   addEntitySkill(entity: Pf1eEntity, nameInput: HTMLInputElement, valueInput: HTMLInputElement) {

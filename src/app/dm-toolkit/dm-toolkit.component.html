@@ -454,7 +454,23 @@
                                 </div>
                                 <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2 text-xs">
                                   @for (spell of c.spells; track spell.id) {
-                                    <button (click)="handleCastSpell(c, spell)" (mouseenter)="showTooltip($event, spell.id, 'spell')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 cursor-pointer hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed" [title]="isSelfCast(spell) ? 'Cast ' + spell.name : 'Cannot self-cast (Range: ' + spell.range + ')'" [disabled]="!isSelfCast(spell)">{{spell.name}}</button>
+                                    <div class="flex items-center gap-1 bg-gray-700 rounded pr-1">
+                                      <button (click)="handleCastSpell(c, spell, targetSelect.value)" 
+                                              (mouseenter)="showTooltip($event, spell.id, 'spell')" 
+                                              (mouseleave)="hideTooltip()" 
+                                              class="px-2 py-0.5 text-gray-300 hover:text-white hover:bg-gray-600 rounded-l"
+                                              title="Cast {{spell.name}}">
+                                        {{spell.name}}
+                                      </button>
+                                      <select #targetSelect class="bg-gray-900 text-xs text-gray-400 border-0 rounded-r focus:ring-0 cursor-pointer" style="max-width: 60px;" (click)="$event.stopPropagation()">
+                                        <option [value]="c._id">Self</option>
+                                        @for(target of combatants(); track target._id) {
+                                          @if(target._id !== c._id) {
+                                            <option [value]="target._id">{{ target.name.substring(0, 5) }}..</option>
+                                          }
+                                        }
+                                      </select>
+                                    </div>
                                   }
                                 </div>
                                 @if(c.spellSlots) {
