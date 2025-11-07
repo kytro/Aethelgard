@@ -84,9 +84,10 @@ module.exports = function(db) {
     }
   });
   
-  // NEW: This endpoint fetches full documents for rules and equipment by their IDs. (No change)
+  // NEW: This endpoint fetches full documents for rules, equipment, AND SPELLS by their IDs.
   router.post('/get-linked-details', async (req, res) => {
-    const { ruleIds, equipmentIds } = req.body;
+    // Add spellIds to the destructuring
+    const { ruleIds, equipmentIds, spellIds } = req.body;
     if (!db) return res.status(503).json({ error: 'Database not ready' });
 
     try {
@@ -98,7 +99,13 @@ module.exports = function(db) {
         ? await db.collection('equipment_pf1e').find({ _id: { $in: equipmentIds } }).toArray()
         : [];
 
-      res.json({ rules, equipment });
+      // Add the query for spells
+      const spells = spellIds && spellIds.length > 0
+        ? await db.collection('spells_pf1e').find({ _id: { $in: spellIds } }).toArray()
+        : [];
+
+      // Return all three arrays
+      res.json({ rules, equipment, spells });
     } catch (error) {
       console.error('Failed to fetch linked details:', error);
       res.status(500).json({ error: error.message });

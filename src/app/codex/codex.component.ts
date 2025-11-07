@@ -663,9 +663,9 @@ export class CodexComponent implements OnInit {
         const item = this.equipmentCache().get(cleanedItemId);
         title = item?.name || this.formatName(cleanedItemId.replace('eq_', ''));
         if(item) description = `${item.description}\nCost: ${item.cost} | Weight: ${item.weight}`;
-    } else if (cleanedItemId.startsWith('spell_')) {
+    } else if (cleanedItemId.startsWith('sp_')) {
         const item = this.spellsCache().get(cleanedItemId);
-        title = item?.name || this.formatName(cleanedItemId.replace('spell_', ''));
+        title = item?.name || this.formatName(cleanedItemId.replace('sp_', ''));
         if (item) description = item.description;
     } else {
         const item = this.rulesCache().get(cleanedItemId);
