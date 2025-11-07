@@ -821,7 +821,7 @@ export class DmToolkitComponent {
       if (!node || typeof node !== 'object' || Array.isArray(node.content)) { break; }
       const options = Object.keys(node).filter(key => {
         const child = node[key];
-        return typeof child === 'object' && child !== null && !['summary', 'content', 'category', 'isCombatManagerSource', 'enableCompletionTracking', 'isCompleted'].includes(key);
+        return typeof child === 'object' && child !== null && !['summary', 'content', 'category', 'isCombatManagerSource', 'enableCompletionTracking', 'isCompleted', 'path_components'].includes(key);
       });
       if (options.length === 0) break;
       dropdowns.push({ level: pathIdx, options: options.sort() });
