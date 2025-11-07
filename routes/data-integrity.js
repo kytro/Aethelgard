@@ -446,7 +446,25 @@ async function parseStatBlockToEntity(statBlock, name, path, content) {
         featNames.push(...actualFeats);
     }
     
-    // (Add Feats from tables if needed from admin.txt sources 334-339)
+    // --- Feats from Tables ---
+    const featTables = (content || []).filter((b) => {
+        if (b.type !== 'table') return false;
+        const lowerCaseHeaders = (b.headers || []).map((h) => (h || '').toLowerCase());
+        return lowerCaseHeaders.includes('feat');
+    });
+
+    featTables.forEach((table) => {
+        const featHeader = table.headers.find((h) => (h || '').toLowerCase() === 'feat');
+        if (featHeader) {
+            const featKey = cleanHeader(featHeader);
+            (table.rows || []).forEach((row) => {
+                const featName = row[featKey];
+                if (featName) {
+                    featNames.push(featName.trim());
+                }
+            });
+        }
+    });
 
     // --- Equipment ---
     const equipmentString = getStat('Equipment') || getStat('Gear');

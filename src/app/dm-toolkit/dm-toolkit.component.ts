@@ -1300,7 +1300,27 @@ private buildCodexObject(entries: any[]): any {
   hideTooltip = () => this.tooltipContent.set(null);
   
   objectKeys = (obj: any) => obj ? Object.keys(obj) : [];
-  formatTime = (t: any) => new Date(t).toLocaleString();
+  formatTime = (t: any) => {
+    if (!t) return '';
+    
+    let date;
+    // Check if 't' is a Firebase Timestamp object
+    if (t && typeof t.toDate === 'function') {
+      date = t.toDate();
+    } else {
+      date = new Date(t);
+    }
+
+    if (isNaN(date.getTime())) {
+      return ''; // Handle invalid date
+    }
+
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0'); // getMonth() is 0-indexed
+    const day = date.getDate().toString().padStart(2, '0');
+    
+    return `${year}-${month}-${day}`;
+  };
   formatName(name: string): string { return name ? name.replace(/_/g, ' ').replace(/-/g, ' ') : ''; } 
   
   formatModelName(name: string): string {
