@@ -76,7 +76,7 @@ export class DmToolkitComponent {
   // NPC Gen
   npcGenQuery = '';
   npcGenContext = '';
-  npcGenGroupName = '';
+  npcGenGroupName = 'People/';
   isGeneratingNpcs = signal(false);
   isSavingNpcs = signal(false);
   lastGeneratedNpcs = signal<GeneratedNpc[]>([]);
@@ -271,10 +271,29 @@ export class DmToolkitComponent {
     this.isSavingNpcs.set(true);
     this.npcSaveSuccessMessage.set('');
     const pathString = this.lastGeneratedGroupName();
+    const npcCount = this.lastGeneratedNpcs().length;
 
     try {
-        const basePath = pathString.split('/').map(p => p.trim().replace(/ /g, '_'));
-        const codexEntries = [];
+        const basePath = pathString.split('/').filter(p => p.trim() !== '').map(p => p.trim().replace(/ /g, '_'));
+        const codexEntries: any[] = [];
+
+        // Ensure parent folders exist
+        let cumulativePath: string[] = [];
+        for (let i = 0; i < basePath.length; i++) {
+            cumulativePath.push(basePath[i]);
+            const node = this.getNodeFromCodex(cumulativePath);
+            if (!node || Object.keys(node).length === 0) {
+                const folderEntry = {
+                    path_components: [...cumulativePath],
+                    name: basePath[i],
+                    summary: `Category folder`,
+                    content: []
+                };
+                if (!codexEntries.some(e => JSON.stringify(e.path_components) === JSON.stringify(folderEntry.path_components))) {
+                    codexEntries.push(folderEntry);
+                }
+            }
+        }
 
         for (const npc of this.lastGeneratedNpcs()) {
             // Calculate the full baseStats object from the simple AI-generated stats
@@ -305,14 +324,16 @@ export class DmToolkitComponent {
             codexEntries.push(codexEntry);
         }
 
-        await lastValueFrom(this.http.put('/codex/api/codex/data', codexEntries));
+        if (codexEntries.length > 0) {
+            await lastValueFrom(this.http.put('/codex/api/codex/data', codexEntries));
+        }
 
         // Refresh data
         await this.loadInitialData();
 
         this.lastGeneratedNpcs.set([]);
         this.lastGeneratedGroupName.set('');
-        this.npcSaveSuccessMessage.set(`${codexEntries.length} NPCs saved to codex under "${pathString}"!`);
+        this.npcSaveSuccessMessage.set(`${npcCount} NPCs saved to codex under "${pathString}"!`);
 
     } catch (error) {
         console.error('Error saving NPCs to codex:', error);
