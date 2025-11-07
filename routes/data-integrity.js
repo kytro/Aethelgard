@@ -876,10 +876,15 @@ Constraints:
             const codexEntries = await db.collection('codex_entries').find({}).toArray();
             const validEntityIds = new Set();
             codexEntries.forEach(entry => {
+                // FIX: Check for the entityId at the root of the codex entry first.
+                if (entry.entityId) {
+                    validEntityIds.add(entry.entityId.toString());
+                }
+                // Also check the old statblock location for backwards compatibility.
                 if (entry.content && Array.isArray(entry.content)) {
                     entry.content.forEach(block => {
                         if (block.type === 'statblock' && block.entityId) {
-                            validEntityIds.add(block.entityId);
+                            validEntityIds.add(block.entityId.toString());
                         }
                     });
                 }
@@ -1122,25 +1127,34 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
             const codexEntries = await db.collection('codex_entries').find({}).toArray();
             if (!codexEntries || codexEntries.length === 0) return res.status(404).json({ error: 'Codex entries not found.' });
 
-            // 1. Get unlinked statblocks
+            const allEntityIdsFromDb = new Set((await db.collection('entities_pf1e').find({}, { projection: { _id: 1 } }).toArray()).map(e => e._id.toString()));
+            
+            // Get all valid entity IDs from the codex
+            const validEntityIds = new Set();
             const statblocksInCodex = [];
             codexEntries.forEach(entry => {
+                if (entry.entityId) {
+                    validEntityIds.add(entry.entityId.toString());
+                }
                 if (entry.content && Array.isArray(entry.content)) {
                     entry.content.forEach(block => {
                         if (block.type === 'statblock' && block.entityId) {
-                            statblocksInCodex.push({ entityId: block.entityId, path: entry.path_components });
+                            const entityIdStr = block.entityId.toString();
+                            validEntityIds.add(entityIdStr);
+                            statblocksInCodex.push({ entityId: entityIdStr, path: entry.path_components });
                         }
                     });
                 }
             });
-            const allEntityIds = new Set((await db.collection('entities_pf1e').find({}, { projection: { _id: 1 } }).toArray()).map(e => e._id.toString()));
-            const unlinkedStatblocks = statblocksInCodex.filter(sb => !allEntityIds.has(sb.entityId));
 
-            // 2. Get orphaned entities and broken links
-            const validEntityIds = new Set(statblocksInCodex.map(sb => sb.entityId));
+            // 1. Get unlinked statblocks (statblocks in codex that don't point to a real entity)
+            const unlinkedStatblocks = statblocksInCodex.filter(sb => !allEntityIdsFromDb.has(sb.entityId));
+
+            // 2. Get orphaned entities (entities that are not referenced in any codex entry)
             const allDbEntities = await db.collection('entities_pf1e').find({}, { projection: { _id: 1, name: 1 } }).toArray();
             const orphanedEntities = allDbEntities.filter(ent => !validEntityIds.has(ent._id.toString()));
 
+            // 3. Get broken links in non-orphaned entities
             const entitiesToKeepIds = allDbEntities.filter(ent => validEntityIds.has(ent._id.toString())).map(e => e._id);
             const entitiesToCheck = await db.collection('entities_pf1e').find({ _id: { $in: entitiesToKeepIds } }).toArray();
 
