@@ -27,6 +27,13 @@ interface GeneratedNpc {
   magicItems?: string[];
   spells?: { [level: string]: string[] };
   backstory?: string;
+  gender?: string;
+  alignment?: string;
+  deity?: string;
+  hitDice?: string;
+  baseAttackBonus?: number;
+  feats?: string[];
+  specialAbilities?: string[];
 }
 interface CacheEntry { status: 'idle' | 'loading' | 'loaded' | 'error'; data: any; }
 interface CascadingDropdown { level: number; options: string[]; }
@@ -55,6 +62,20 @@ const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 
 })
 export class DmToolkitComponent {
   http = inject(HttpClient);
+
+  private mapToIds(names: string[], cache: Map<string, any>, idPrefix: string): string[] {
+    if (!names || !Array.isArray(names)) return [];
+    return names.map(name => {
+        // Simple case-insensitive lookup.
+        // For more robustness, you could use a fuzzy matcher or regex similar to the backend data-integrity jobs.
+        for (const [id, item] of cache.entries()) {
+            if (item.name.toLowerCase() === name.toLowerCase()) {
+                return id;
+            }
+        }
+        return ''; // Or keep the original name if you want to try linking later, though Codex expects IDs in these specific fields.
+    }).filter(id => id !== '');
+  }
 
   // --- STATE SIGNALS ---
   activeTool = signal<'assistant' | 'npc-generator' | 'session' | 'combat-manager' | 'story-planner'>('assistant');
@@ -144,7 +165,6 @@ export class DmToolkitComponent {
   customEffectUnit: 'rounds' | 'minutes' | 'hours' | 'days' | 'permanent' = 'rounds';
 
   constructor() {
-    this.loadInitialData();
     effect(() => {
       const fight = this.currentFight();
       if (fight) {
@@ -311,15 +331,32 @@ export class DmToolkitComponent {
             // Calculate the full baseStats object from the simple AI-generated stats
             const completeBaseStats = this.calculateCompleteBaseStats(npc.stats);
 
+            // NEW: Link data immediately using caches
+            const linkedEquipment = this.mapToIds(npc.equipment || [], this.equipmentCache(), 'eq_');
+            const linkedMagicItems = this.mapToIds(npc.magicItems || [], this.magicItemsCache(), 'mi_');
+            
+            // Combine feats and special abilities for rules lookup
+            const rulesToLink = [...(npc.feats || []), ...(npc.specialAbilities || [])];
+            const linkedRules = this.mapToIds(rulesToLink, this.rulesCache(), 'feat_');
+
+            // NEW: Link Spells
+            const linkedSpells: { [level: string]: string[] } = {};
+            if (npc.spells) {
+                for (const level of Object.keys(npc.spells)) {
+                    linkedSpells[level] = this.mapToIds(npc.spells[level], this.spellsCache(), 'sp_');
+                }
+            }
+
             const entity = {
                 name: npc.name,
                 baseStats: completeBaseStats,
                 description: npc.description,
                 sourceCodexPath: [...basePath, npc.name.replace(/ /g, '_')],
-                rules: [], // Rules will be derived from class/level if needed, or added directly
-                equipment: npc.equipment || [],
-                magicItems: npc.magicItems || [],
-                spells: npc.spells || {},
+                rules: linkedRules,
+                equipment: linkedEquipment,
+                magicItems: linkedMagicItems,
+                spells: linkedSpells,
+                deity: npc.deity || '',
             };
 
             // Add class and level to baseStats if they exist
@@ -332,6 +369,18 @@ export class DmToolkitComponent {
             if (npc.skills) {
                 entity.baseStats.skills = npc.skills;
             }
+            if (npc.gender) {
+                entity.baseStats.Gender = npc.gender;
+            }
+            if (npc.alignment) {
+                entity.baseStats.Alignment = npc.alignment;
+            }
+            if (npc.hitDice) {
+                entity.baseStats.HitDice = npc.hitDice;
+            }
+            if (npc.baseAttackBonus !== undefined) {
+                entity.baseStats.BaseAttackBonus = npc.baseAttackBonus;
+            }
             
             const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
 
@@ -340,6 +389,16 @@ export class DmToolkitComponent {
                 { type: 'heading', text: 'Description' },
                 { type: 'paragraph', text: npc.description }
             ];
+
+            if (npc.gender) {
+                codexContent.splice(2, 0, { type: 'paragraph', text: `**Gender:** ${npc.gender}` });
+            }
+            if (npc.alignment) {
+                codexContent.splice(2, 0, { type: 'paragraph', text: `**Alignment:** ${npc.alignment}` });
+            }
+            if (npc.deity) {
+                codexContent.splice(2, 0, { type: 'paragraph', text: `**Deity:** ${npc.deity}` });
+            }
 
             if (npc.backstory) {
                 codexContent.push({ type: 'heading', text: 'Backstory' });
@@ -1189,11 +1248,16 @@ private buildCodexObject(entries: any[]): any {
     }
 
     if (!this.getCaseInsensitiveProp(newStats, 'Speed')) newStats['Speed'] = '30 ft.';
-    newStats['BAB'] = parseInt(String(this.getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || this.getCaseInsensitiveProp(newStats, 'BAB') || 0).match(/-?\d+/)?.[0] || '0', 10);
+    
+    // Use provided BAB if available, otherwise calculate
+    newStats['BAB'] = stats.baseAttackBonus !== undefined ? stats.baseAttackBonus : (parseInt(String(this.getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || this.getCaseInsensitiveProp(newStats, 'BAB') || 0).match(/-?\d+/)?.[0] || '0', 10));
+    
     if (typeof this.getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + strMod;
     if (typeof this.getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + newStats['BAB'] + strMod + dexMod;
     
-    const hpValue = this.getCaseInsensitiveProp(newStats, 'hp') || this.getCaseInsensitiveProp(newStats, 'HP') || '1d8';
+    // Use provided Hit Dice if available, otherwise default to 1d8
+    const hdString = stats.hitDice || '1d8';
+    const hpValue = this.getCaseInsensitiveProp(newStats, 'hp') || this.getCaseInsensitiveProp(newStats, 'HP') || hdString;
     const avgHpMatch = String(hpValue).match(/^(\d+)/);
     const diceInParenMatch = String(hpValue).match(/\(\s*(\d+d\d+[+-]?\s*\d*\s*)\)/);
     if (avgHpMatch) newStats['maxHp'] = parseInt(avgHpMatch[1], 10);

@@ -36,16 +36,19 @@ For example: {"description": "The creature is blinded...", "modifiers": {"AC": {
                     const nameList = options.existingEntityNames.join(', ');
                     nameConstraint = `The generated NPCs must have unique first names. Do not use a first name that is part of any of the following existing names: ${nameList}.`;
                 }
-                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Based on the following context, generate NPCs for the user's request. ${nameConstraint} Respond ONLY with a valid JSON array of objects. Each object must have "name", "race", "description", "backstory", "class", "level", "skills", "equipment", "magicItems", and "spells" keys.
-- "name", "race", "description", and "backstory" should be strings.
-- "class" should be a string representing the NPC's class (e.g., "Fighter", "Wizard").
-- "level" should be a number representing the NPC's level.
-- "skills" should be an object where keys are skill names (e.g., "Acrobatics", "Perception") and values are their total ranks/bonuses (numbers).
-- "equipment" should be an array of strings, each representing a piece of mundane equipment (e.g., "Longsword", "Leather Armor").
-- "magicItems" should be an array of strings, each representing a magic item (e.g., "+1 Longsword", "Ring of Protection").
-- "spells" should be an object where keys are spell levels (0-9) and values are arrays of spell names (strings).
-- Additionally, include a "baseStats" object with Str, Dex, Con, Int, Wis, Cha, with values from 3-18.
-Ensure all fields are present, even if empty (e.g., empty array for equipment, empty object for spells).
+                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Based on the following context, generate NPCs for the user's request. ${nameConstraint} Respond ONLY with a valid JSON array of objects.
+Each object must have:
+- "name", "race", "gender", "alignment" (e.g., "Chaotic Neutral"), "deity" (optional), "description", "backstory", "class" (e.g., "Fighter"), "level" (number).
+- "hitDice" (e.g., "d10" - appropriate for their class).
+- "baseAttackBonus" (number - appropriate for their class/level).
+- "baseStats": object with Str, Dex, Con, Int, Wis, Cha (values 3-18).
+- "skills": object where keys are skill names and values are total bonuses (number).
+- "feats": array of strings (standard PF1e feat names).
+- "specialAbilities": array of strings (class features or racial traits).
+- "equipment": array of strings (mundane gear).
+- "magicItems": array of strings (magic gear).
+- "spells": object where keys are spell levels ("0", "1", etc.) and values are arrays of spell names.
+Ensure all fields are present, even if empty.
 \n\nUser Request: "${query}"\n\nContext:\n${JSON.stringify(options.codex)}`;
                 break;
             case 'creature':
