@@ -387,6 +387,30 @@
                               </div>
                             }
                           </div>
+
+                          <div class="flex items-center justify-between">
+                            <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Defenses</h4>
+                            <button (click)="openResistancesModal(c)" class="text-sm text-blue-400 hover:text-blue-300">Edit</button>
+                          </div>
+                          <div class="text-sm grid grid-cols-2 gap-x-4 gap-y-1">
+                              <p><span class="font-semibold">DR:</span> {{ getCaseInsensitiveProp(c.modifiedStats, 'DR') || '-' }}</p>
+                              <p><span class="font-semibold">SR:</span> {{ getCaseInsensitiveProp(c.modifiedStats, 'SR') || '-' }}</p>
+                              <p class="col-span-2"><span class="font-semibold">Resist:</span> {{ getCaseInsensitiveProp(c.modifiedStats, 'Resist') || '-' }}</p>
+                              <p class="col-span-2"><span class="font-semibold">Immune:</span> {{ getCaseInsensitiveProp(c.modifiedStats, 'Immune') || '-' }}</p>
+                          </div>
+
+                          <div class="flex items-center justify-between">
+                            <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Skills</h4>
+                            <div>
+                              <button (click)="openStatEditModal(c)" class="text-sm text-blue-400 hover:text-blue-300 mr-2">Edit Stats</button>
+                              <button (click)="openSkillsModal(c)" class="text-sm text-blue-400 hover:text-blue-300">Edit</button>
+                            </div>
+                          </div>
+                          <div class="text-sm grid grid-cols-2 gap-x-4 gap-y-1">
+                              @for(skill of objectKeys(c.skills); track skill) {
+                                  <p><span class="font-semibold">{{skill}}:</span> {{c.skills[skill] >= 0 ? '+' : ''}}{{c.skills[skill]}}</p>
+                              }
+                          </div>
                         </div>
                         <div>
                           <h4 class="font-semibold text-yellow-400 mb-2">Actions & Gear</h4>
@@ -403,7 +427,7 @@
                                 </div>
                               </div>
                             }
-                            @if (c.allFeats.length > 0) {
+                                                        @if (c.allFeats.length > 0) {
                               <div class="mt-2">
                                 <h5 class="text-sm font-bold text-gray-300">Feats</h5>
                                 <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2">
@@ -420,6 +444,29 @@
                                     </button>
                                   }
                                 </div>
+                              </div>
+                            }
+                            @if (c.spells.length > 0) {
+                              <div class="mt-2">
+                                <div class="flex items-center justify-between">
+                                    <h5 class="text-sm font-bold text-gray-300">Spells</h5>
+                                    <button (click)="openSpellSlotsModal(c)" class="text-xs text-blue-400 hover:text-blue-300">Edit Slots</button>
+                                </div>
+                                <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2 text-xs">
+                                  @for (spell of c.spells; track spell.id) {
+                                    <span (mouseenter)="showTooltip($event, spell.id, 'spell')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 cursor-pointer">{{spell.name}}</span>
+                                  }
+                                </div>
+                                @if(c.spellSlots) {
+                                <div class="mt-2 text-xs">
+                                    <h5 class="text-sm font-bold text-gray-300">Spell Slots</h5>
+                                    <div class="flex flex-wrap gap-x-4 gap-y-1">
+                                        @for(level of objectKeys(c.spellSlots); track level) {
+                                            <span>Lvl {{level}}: {{c.spellSlots[level]}}</span>
+                                        }
+                                    </div>
+                                </div>
+                                }
                               </div>
                             }
                             @if (c.equipment.length > 0 || c.magicItems.length > 0) {
@@ -533,6 +580,104 @@
     <app-story-planner></app-story-planner>
   }
 </div>
+
+<!-- Modals -->
+@if (editingCombatantResistances(); as c) {
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeResistancesModal()">
+    <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700" (click)="$event.stopPropagation()">
+      <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Defenses for {{ c.name }}</h3>
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-400">DR</label>
+          <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'DR')" #drInput class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-400">SR</label>
+          <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'SR')" #srInput class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-400">Resist</label>
+          <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'Resist')" #resistInput class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-400">Immune</label>
+          <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'Immune')" #immuneInput class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+        </div>
+      </div>
+      <div class="mt-6 flex justify-end gap-4">
+        <button (click)="closeResistancesModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+        <button (click)="handleUpdateResistances(c, { DR: drInput.value, SR: srInput.value, Resist: resistInput.value, Immune: immuneInput.value })" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Save</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (editingCombatantSkills(); as c) {
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeSkillsModal()">
+    <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700" (click)="$event.stopPropagation()">
+      <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Skills for {{ c.name }}</h3>
+      <div class="space-y-2 max-h-60 overflow-y-auto">
+        @for(skillName of objectKeys(getCaseInsensitiveProp(c.stats, 'skills') || {}); track skillName) {
+          <div class="flex items-center gap-2">
+            <input type="text" [value]="skillName" class="flex-grow bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white" readonly>
+            <input type="number" [ngModel]="getCaseInsensitiveProp(c.stats, 'skills')[skillName]" (ngModelChange)="handleUpdateSkill(c, skillName, $event)" class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+            <button (click)="handleRemoveSkill(c, skillName)" class="text-red-500 hover:text-red-400">X</button>
+          </div>
+        }
+      </div>
+      <div class="mt-4 pt-4 border-t border-gray-700">
+        <h4 class="text-lg font-semibold mb-2">Add New Skill</h4>
+        <div class="flex items-center gap-2">
+          <input type="text" [ngModel]="newSkill().name" (ngModelChange)="newSkill.set({name: $event, rank: newSkill().rank})" placeholder="Skill Name" class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+          <input type="number" [ngModel]="newSkill().rank" (ngModelChange)="newSkill.set({name: newSkill().name, rank: $event})" class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+          <button (click)="handleUpdateSkill(c, newSkill().name, newSkill().rank); newSkill.set({name: '', rank: 0})" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Add</button>
+        </div>
+      </div>
+      <div class="mt-6 flex justify-end">
+        <button (click)="closeSkillsModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Done</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (editingCombatantSpellSlots(); as c) {
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeSpellSlotsModal()">
+    <div class="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700" (click)="$event.stopPropagation()">
+      <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Spell Slots for {{ c.name }}</h3>
+      <div class="space-y-2">
+        @for(level of [0,1,2,3,4,5,6,7,8,9]; track level) {
+          <div class="flex items-center gap-2">
+            <label class="w-24">Level {{level}}:</label>
+            <input type="number" [ngModel]="c.spellSlots ? c.spellSlots[level] : 0" (ngModelChange)="(c.spellSlots = c.spellSlots || {})[level] = +$event" class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+          </div>
+        }
+      </div>
+      <div class="mt-6 flex justify-end gap-4">
+        <button (click)="closeSpellSlotsModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+        <button (click)="handleUpdateSpellSlots(c._id, c.spellSlots)" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Save</button>
+      </div>
+    </div>
+  </div>
+}
+
+@if (editingCombatantStats(); as c) {
+  <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeStatEditModal()">
+    <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700" (click)="$event.stopPropagation()">
+      <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Stats for {{ c.name }}</h3>
+      <div class="grid grid-cols-2 gap-4">
+        @for(stat of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track stat) {
+          <div class="flex items-center gap-2">
+            <label class="w-12">{{stat}}</label>
+            <input type="number" [ngModel]="getCaseInsensitiveProp(c.stats, stat)" (ngModelChange)="handleUpdateCombatantStat(c._id, stat, $event)" class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+          </div>
+        }
+      </div>
+      <div class="mt-6 flex justify-end">
+        <button (click)="closeStatEditModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Done</button>
+      </div>
+    </div>
+  </div>
+}
 
 <!-- Global Tooltip -->
 @if(tooltipContent(); as content) {

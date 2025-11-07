@@ -7,7 +7,7 @@ import { StoryPlannerComponent } from './story-planner/story-planner.component';
 
 // --- TYPE INTERFACES ---
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
-interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; stats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; }
+interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; stats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; }
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
@@ -1360,7 +1360,70 @@ private buildCodexObject(entries: any[]): any {
 
   trackFight(index: number, fight: Fight) { return fight._id; }
 
-  addCustomEffect(combatantId: string) {1
+  editingCombatantStats = signal<CombatantWithModifiers | null>(null);
+  openStatEditModal(combatant: CombatantWithModifiers) { this.editingCombatantStats.set(combatant); }
+  closeStatEditModal() { this.editingCombatantStats.set(null); }
+  async handleUpdateCombatantStat(combatantId: string, statName: string, value: any) {
+    const combatant = this.combatants().find(c => c._id === combatantId);
+    if (!combatant) return;
+  
+    const newStats = { ...combatant.stats, [statName]: value };
+    await this.handleUpdateCombatant(combatantId, 'stats', newStats);
+    
+    // Optimistically update the editing combatant's stats to refresh the modal view
+    this.editingCombatantStats.update(c => {
+      if (c && c._id === combatantId) {
+        const updatedCombatant = { ...c, stats: newStats };
+        return updatedCombatant;
+      }
+      return c;
+    });
+  }
+
+
+  editingCombatantResistances = signal<CombatantWithModifiers | null>(null);
+  editingCombatantSkills = signal<CombatantWithModifiers | null>(null);
+  editingCombatantSpellSlots = signal<CombatantWithModifiers | null>(null);
+  newSkill = signal<{name: string, rank: number}>({name: '', rank: 0});
+  
+  openResistancesModal(combatant: CombatantWithModifiers) { this.editingCombatantResistances.set(combatant); }
+  closeResistancesModal() { this.editingCombatantResistances.set(null); }
+  async handleUpdateResistances(combatant: CombatantWithModifiers, resistances: any) {
+      const newStats = { ...combatant.stats, ...resistances };
+      await this.handleUpdateCombatant(combatant._id, 'stats', newStats);
+      this.closeResistancesModal();
+  }
+  
+  openSkillsModal(combatant: CombatantWithModifiers) { this.editingCombatantSkills.set(combatant); }
+  closeSkillsModal() { this.editingCombatantSkills.set(null); this.newSkill.set({name: '', rank: 0}); }
+  async handleUpdateSkill(combatant: CombatantWithModifiers, skillName: string, rank: number) {
+      if (!skillName) return;
+      const skills = this.getCaseInsensitiveProp(combatant.stats, 'skills') || {};
+      const newSkills = { ...skills, [skillName]: rank };
+      const newStats = { ...combatant.stats, skills: newSkills };
+      await this.handleUpdateCombatant(combatant._id, 'stats', newStats);
+      combatant.stats = newStats; // Refresh the modal view
+      this.editingCombatantSkills.set({...combatant});
+  }
+  async handleRemoveSkill(combatant: CombatantWithModifiers, skillName: string) {
+      const skills = this.getCaseInsensitiveProp(combatant.stats, 'skills') || {};
+      const newSkills = { ...skills };
+      delete newSkills[skillName];
+      const newStats = { ...combatant.stats, skills: newSkills };
+      await this.handleUpdateCombatant(combatant._id, 'stats', newStats);
+      combatant.stats = newStats; // Refresh the modal view
+      this.editingCombatantSkills.set({...combatant});
+  }
+
+  openSpellSlotsModal(combatant: CombatantWithModifiers) { this.editingCombatantSpellSlots.set(combatant); }
+  closeSpellSlotsModal() { this.editingCombatantSpellSlots.set(null); }
+  async handleUpdateSpellSlots(combatantId: string, spellSlots: any) {
+      await this.handleUpdateCombatant(combatantId, 'spellSlots', spellSlots);
+      this.closeSpellSlotsModal();
+  }
+
+
+  addCustomEffect(combatantId: string) {
     if (!this.customEffectName.trim()) return;
     const effect: CombatantEffect = {
       name: this.customEffectName.trim(),
