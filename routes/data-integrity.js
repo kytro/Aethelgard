@@ -561,6 +561,13 @@ async function parseStatBlockToEntity(statBlock, name, path, content) {
                                 freshEntity.equipment = existingEquipment;
                             }
 
+                            // --- SUGGESTED ALTERATION: Merge Rules ---
+                            // Combine newly parsed rules with existing rules, ensuring no duplicates.
+                            const oldRules = oldEntity?.rules || [];
+                            const newRules = freshEntity.rules || []; // 'rules' comes from parseStatBlockToEntity
+                            freshEntity.rules = [...new Set([...oldRules, ...newRules])];
+                            // --- END OF ALTERATION ---
+
                             entities.push(freshEntity);
                         }
                     }
