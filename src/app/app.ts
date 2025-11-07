@@ -45,6 +45,8 @@ export class AppComponent implements AfterViewInit {
   // State for the Admin Panel's sidebar
   activeAdminView = signal<'dashboard' | 'data' | 'backup-restore' | 'data-integrity' | 'ai-assistant' | 'settings'>('dashboard');
 
+  currentTime = signal<string>('');
+
   constructor() {
     // Check for an existing session on startup
     const token = localStorage.getItem('app_token');
@@ -59,6 +61,24 @@ export class AppComponent implements AfterViewInit {
     if (!this.isAuthenticated()) {
       this.waitForGoogleLibrary();
     }
+
+    // --- Update time every second ---
+    setInterval(() => {
+      this.ngZone.run(() => {
+        const now = new Date();
+        const options: Intl.DateTimeFormatOptions = {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: 'numeric',
+          second: 'numeric',
+          timeZoneName: 'short'
+        };
+        this.currentTime.set(now.toLocaleString('en-AU', options));
+      });
+    }, 1000);
   }
 
   private waitForGoogleLibrary(): void {

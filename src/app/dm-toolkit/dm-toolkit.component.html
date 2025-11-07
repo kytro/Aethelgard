@@ -94,7 +94,62 @@
               @for (npc of lastGeneratedNpcs(); track npc.name) {
                 <div class="bg-gray-900/50 p-4 rounded-md">
                   <h4 class="font-bold text-lg text-white">{{ npc.name }} <span class="text-sm font-normal text-gray-400">({{ npc.race }})</span></h4>
+                  @if (npc.class && npc.level) {
+                    <p class="text-gray-400 text-sm mt-1">{{ npc.class }} (Level {{ npc.level }})</p>
+                  } @else if (npc.class) {
+                    <p class="text-gray-400 text-sm mt-1">{{ npc.class }}</p>
+                  } @else if (npc.level) {
+                    <p class="text-gray-400 text-sm mt-1">Level {{ npc.level }}</p>
+                  }
                   <p class="text-gray-300 mt-1">{{ npc.description }}</p>
+
+                  @if (npc.backstory) {
+                    <p class="text-gray-300 mt-2"><strong>Backstory:</strong> {{ npc.backstory }}</p>
+                  }
+
+                  @if (npc.skills && objectKeys(npc.skills).length > 0) {
+                    <div class="mt-2">
+                      <h5 class="font-semibold text-sm text-yellow-400">Skills:</h5>
+                      <ul class="list-disc list-inside text-gray-300 text-sm ml-2">
+                        @for (skill of objectKeys(npc.skills); track skill) {
+                          <li>{{ skill }}: {{ npc.skills[skill] >= 0 ? '+' : '' }}{{ npc.skills[skill] }}</li>
+                        }
+                      </ul>
+                    </div>
+                  }
+
+                  @if (npc.equipment && npc.equipment.length > 0) {
+                    <div class="mt-2">
+                      <h5 class="font-semibold text-sm text-yellow-400">Equipment:</h5>
+                      <ul class="list-disc list-inside text-gray-300 text-sm ml-2">
+                        @for (item of npc.equipment; track item) {
+                          <li>{{ item }}</li>
+                        }
+                      </ul>
+                    </div>
+                  }
+
+                  @if (npc.magicItems && npc.magicItems.length > 0) {
+                    <div class="mt-2">
+                      <h5 class="font-semibold text-sm text-yellow-400">Magic Items:</h5>
+                      <ul class="list-disc list-inside text-gray-300 text-sm ml-2">
+                        @for (item of npc.magicItems; track item) {
+                          <li>{{ item }}</li>
+                        }
+                      </ul>
+                    </div>
+                  }
+
+                  @if (npc.spells && objectKeys(npc.spells).length > 0) {
+                    <div class="mt-2">
+                      <h5 class="font-semibold text-sm text-yellow-400">Spells:</h5>
+                      <ul class="list-disc list-inside text-gray-300 text-sm ml-2">
+                        @for (level of objectKeys(npc.spells); track level) {
+                          <li>Level {{ level }}: {{ npc.spells[level].join(', ') }}</li>
+                        }
+                      </ul>
+                    </div>
+                  }
                 </div>
               }
             </div>

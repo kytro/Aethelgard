@@ -36,7 +36,17 @@ For example: {"description": "The creature is blinded...", "modifiers": {"AC": {
                     const nameList = options.existingEntityNames.join(', ');
                     nameConstraint = `The generated NPCs must have unique first names. Do not use a first name that is part of any of the following existing names: ${nameList}.`;
                 }
-                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Based on the following context, generate NPCs for the user's request. ${nameConstraint} Respond ONLY with a valid JSON array of objects. Each object must have "name", "race", "description", and "baseStats" keys. The "baseStats" must be an object with Str, Dex, Con, Int, Wis, Cha, with values from 3-18.\n\nUser Request: "${query}"\n\nContext:\n${JSON.stringify(options.codex)}`;
+                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Based on the following context, generate NPCs for the user's request. ${nameConstraint} Respond ONLY with a valid JSON array of objects. Each object must have "name", "race", "description", "backstory", "class", "level", "skills", "equipment", "magicItems", and "spells" keys.
+- "name", "race", "description", and "backstory" should be strings.
+- "class" should be a string representing the NPC's class (e.g., "Fighter", "Wizard").
+- "level" should be a number representing the NPC's level.
+- "skills" should be an object where keys are skill names (e.g., "Acrobatics", "Perception") and values are their total ranks/bonuses (numbers).
+- "equipment" should be an array of strings, each representing a piece of mundane equipment (e.g., "Longsword", "Leather Armor").
+- "magicItems" should be an array of strings, each representing a magic item (e.g., "+1 Longsword", "Ring of Protection").
+- "spells" should be an object where keys are spell levels (0-9) and values are arrays of spell names (strings).
+- Additionally, include a "baseStats" object with Str, Dex, Con, Int, Wis, Cha, with values from 3-18.
+Ensure all fields are present, even if empty (e.g., empty array for equipment, empty object for spells).
+\n\nUser Request: "${query}"\n\nContext:\n${JSON.stringify(options.codex)}`;
                 break;
             case 'creature':
                 prompt = `Find up to 5 Pathfinder 1st Edition creatures matching "${query}". They should be suitable for a party of ${options.pcCount} characters of level ${options.pcLevel}. Respond ONLY with a valid JSON array of objects. Each object must have "name", "cr", "hp", and "baseStats" (as a string like "Str 12, Dex 14...").`;

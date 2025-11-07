@@ -1,4 +1,5 @@
 // server.js
+process.env.TZ = 'Australia/Brisbane';
 const express = require('express');
 const path = require('path');
 const { MongoClient } = require('mongodb');

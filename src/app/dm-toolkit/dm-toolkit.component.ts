@@ -15,7 +15,19 @@ interface CombatantWithModifiers extends Combatant { baseStats: any; modifiedSta
 interface Session { _id: string; title: string; notes: string; createdAt: any; }
 interface Pf1eEntity { id: string; name: string; sourceCodexPath: string[]; baseStats: any; rules: string[]; equipment?: string[]; magicItems?: string[]; spells?: { [level: string]: string[] }; }
 interface FoundCreature { id: string; name: string; cr: string; stats: string; hp: string; }
-interface GeneratedNpc { name: string; race: string; description: string; stats: { [key: string]: number }; }
+interface GeneratedNpc { 
+  name: string; 
+  race: string; 
+  description: string; 
+  stats?: { [key: string]: number }; 
+  class?: string;
+  level?: number;
+  skills?: { [key: string]: number };
+  equipment?: string[];
+  magicItems?: string[];
+  spells?: { [level: string]: string[] };
+  backstory?: string;
+}
 interface CacheEntry { status: 'idle' | 'loading' | 'loaded' | 'error'; data: any; }
 interface CascadingDropdown { level: number; options: string[]; }
 
@@ -301,24 +313,43 @@ export class DmToolkitComponent {
 
             const entity = {
                 name: npc.name,
-                baseStats: completeBaseStats, // <-- This is the fix
+                baseStats: completeBaseStats,
                 description: npc.description,
                 sourceCodexPath: [...basePath, npc.name.replace(/ /g, '_')],
-                rules: [],
-                equipment: [],
-                magicItems: [],
-                spells: []
+                rules: [], // Rules will be derived from class/level if needed, or added directly
+                equipment: npc.equipment || [],
+                magicItems: npc.magicItems || [],
+                spells: npc.spells || {},
             };
+
+            // Add class and level to baseStats if they exist
+            if (npc.class) {
+                entity.baseStats.Class = npc.class;
+            }
+            if (npc.level) {
+                entity.baseStats.Level = npc.level;
+            }
+            if (npc.skills) {
+                entity.baseStats.skills = npc.skills;
+            }
+            
             const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
+
+            const codexContent = [
+                { type: 'statblock', entityId: newEntity.insertedId },
+                { type: 'heading', text: 'Description' },
+                { type: 'paragraph', text: npc.description }
+            ];
+
+            if (npc.backstory) {
+                codexContent.push({ type: 'heading', text: 'Backstory' });
+                codexContent.push({ type: 'paragraph', text: npc.backstory });
+            }
 
             const codexEntry = {
                 path_components: [...basePath, npc.name.replace(/ /g, '_')],
                 name: npc.name.replace(/ /g, '_'),
-                content: [
-                    { type: 'statblock', entityId: newEntity.insertedId },
-                    { type: 'heading', text: 'Description' },
-                    { type: 'paragraph', text: npc.description }
-                ],
+                content: codexContent,
                 summary: `Auto-generated entry for NPC: ${npc.name}`
             };
             codexEntries.push(codexEntry);

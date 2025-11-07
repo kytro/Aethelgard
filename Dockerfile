@@ -6,7 +6,8 @@ WORKDIR /app
 COPY package*.json ./
 
 # Install all dependencies (including devDependencies for the build)
-RUN npm install
+# Added --legacy-peer-deps to fix ERESOLVE conflicts
+RUN npm install --legacy-peer-deps
 
 # Copy the rest of the application source code
 COPY . .
@@ -25,7 +26,8 @@ ENV NODE_ENV=production
 COPY package*.json ./
 
 # Install ONLY production dependencies
-RUN npm install
+# Added --legacy-peer-deps to fix ERESOLVE conflicts
+RUN npm install --legacy-peer-deps
 
 # Copy the built Angular app from the 'build' stage
 COPY --from=build /app/dist/codex-admin/browser ./public
