@@ -122,7 +122,8 @@ module.exports = function(db) {
         const { id } = req.params;
         const { id: bodyId, ...updateData } = req.body;
         await db.collection('dm_toolkit_combatants').updateOne(getIdQuery(id), { $set: updateData });
-        res.sendStatus(200);
+        const updatedCombatant = await db.collection('dm_toolkit_combatants').findOne(getIdQuery(id));
+        res.status(200).json(updatedCombatant);
     });
     
     router.delete('/combatants/:id', async (req, res) => {

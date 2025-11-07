@@ -398,11 +398,18 @@ error = signal<string | null>(null);
     const newText = event.target.innerText;
 
     const keys = field.split('.');
-    let current = entity;
+    let current = entity as any;
     for (let i = 0; i < keys.length - 1; i++) {
-      current = current[keys[i]];
+      // FIX: Case-insensitive traversal to find the right nested object
+      let nextKey = Object.keys(current).find(k => k.toLowerCase() === keys[i].toLowerCase()) || keys[i];
+      if (!current[nextKey]) current[nextKey] = {}; 
+      current = current[nextKey];
     }
-    current[keys[keys.length - 1]] = newText;
+    
+    // FIX: Case-insensitive lookup for the final property to overwrite existing keys regardless of case
+    const finalKeyReq = keys[keys.length - 1];
+    const actualKey = Object.keys(current).find(k => k.toLowerCase() === finalKeyReq.toLowerCase()) || finalKeyReq;
+    current[actualKey] = newText;
 
     this.modifiedEntities.update(set => set.add(entity._id));
     this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
@@ -414,31 +421,44 @@ error = signal<string | null>(null);
   handleNumericEntityUpdate(entity: Pf1eEntity, field: string, event: any) {
     if (!this.isEditMode()) return;
     
-    // 1. Clean input (remove '+' sign if present, trim whitespace)
-    let newText = event.target.innerText.trim().replace(/^\+/, ''); 
+    // 1. Clean input: aggressive regex to find the first valid integer, ignoring extra text like "(-1)"
+    const text = event.target.innerText;
+    const match = text.match(/-?\d+/);
     
-    // 2. Parse to number
-    const numVal = parseInt(newText, 10);
-
-    // 3. Validate. If invalid, revert UI to old value (optional, or just don't save)
-    if (isNaN(numVal)) {
-        // If user cleared it, maybe set to null or 0? Depends on preference.
-        // For now, let's just ignore invalid inputs to prevent breaking data.
+    if (!match) {
+        // If invalid, revert UI to old value
         event.target.innerText = this.getDeepValue(entity, field) ?? ''; 
         return;
     }
 
-    // 4. Update deeply nested property
+    // 2. Parse to number
+    const numVal = parseInt(match[0], 10);
+
+    // 3. Update deeply nested property with case-sensitivity handling
     const keys = field.split('.');
     let current = entity as any;
     for (let i = 0; i < keys.length - 1; i++) {
-        if (!current[keys[i]]) current[keys[i]] = {}; // Create path if missing
-        current = current[keys[i]];
+        // FIX: Case-insensitive traversal
+        let nextKey = Object.keys(current).find(k => k.toLowerCase() === keys[i].toLowerCase()) || keys[i];
+        if (!current[nextKey]) current[nextKey] = {}; 
+        current = current[nextKey];
     }
-    current[keys[keys.length - 1]] = numVal;
+
+    // FIX: Case-insensitive setting of the final key
+    const finalKeyReq = keys[keys.length - 1];
+    const actualKey = Object.keys(current).find(k => k.toLowerCase() === finalKeyReq.toLowerCase()) || finalKeyReq;
+    
+    current[actualKey] = numVal;
+
+    // 4. Update UI to show strictly the number (removes any pasted junk like modifiers)
+    if (event.target.innerText !== String(numVal)) {
+        event.target.innerText = String(numVal);
+    }
 
     // 5. Mark as modified to ensure it gets sent to backend on 'Save Changes'
     this.modifiedEntities.update(set => set.add(entity._id));
+    // Force trigger view update to recalculate modifiers immediately
+    this.linkedEntities.set([...this.linkedEntities()]); 
   }
 
   // Helper to get deep value for reverting invalid inputs

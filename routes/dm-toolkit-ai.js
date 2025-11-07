@@ -14,7 +14,19 @@ module.exports = function(db) {
 
         let prompt = '';
         
+        // FIX: Added 'lookup' case to handle dynamic term lookups (like effects)
         switch(type) {
+            case 'lookup':
+                // We expect options.lookupType to be something like 'effect'
+                if (options.lookupType === 'effect') {
+                     prompt = `Provide the official description and a JSON object of game rule modifiers for the Pathfinder 1st Edition condition or status effect: "${query}".
+The modifiers object should use keys for stats (e.g., "AC", "Attack", "Str") and a value that is another object containing 'value' (a number, or string for special cases like speed) and 'type' (a string like 'penalty', 'circumstance', etc.).
+Return the entire response as a single, clean JSON object with keys "description" and "modifiers".
+For example: {"description": "The creature is blinded...", "modifiers": {"AC": {"value": -2, "type": "penalty"}, "Attack": {"value": -2, "type": "penalty"}, "Speed": {"value": "half", "type": "untyped"}}}`;
+                } else {
+                    throw new Error(`Unknown lookup type: ${options.lookupType}`);
+                }
+                break;
             case 'assistant':
                 prompt = `You are a helpful assistant for a Game Master. Answer the following question based ONLY on the provided JSON data context. Do not use any outside knowledge. Question: "${query}"\n\nContext:\n${JSON.stringify(options.codex)}`;
                 break;
@@ -107,7 +119,7 @@ module.exports = function(db) {
 
     router.post('/:type', async (req, res) => {
         const { type } = req.params;
-        const { query, model, options } = req.body;
+        const { query, model, options, type: bodyType } = req.body;
 
         try {
             const apiKeysDoc = await db.collection('settings').findOne({ _id: 'api_keys' });
@@ -117,8 +129,10 @@ module.exports = function(db) {
             if (!apiKey) {
                 return res.status(500).json({ error: 'Gemini API key not found in database.' });
             }
+
+            const finalOptions = { ...options, lookupType: bodyType };
             
-            const response = await fetchFromGemini(apiKey, model, query, type, options);
+            const response = await fetchFromGemini(apiKey, model, query, type, finalOptions);
             
             res.json(response);
 

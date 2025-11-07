@@ -1484,44 +1484,43 @@ private buildCodexObject(entries: any[]): any {
     // 1. Determine Target
     const target = this.combatants().find(c => c._id === targetId) || caster;
 
-    // 2. Find Effect Data
-    const effectName = spell.name;
-    let effectData = this.effectsCache().get(effectName)?.data;
-
-    if (!effectData) {
-      // Try to auto-lookup if missing
-      await this.lookupTerm(effectName, 'effect');
-      effectData = this.effectsCache().get(effectName)?.data;
-    }
-
-    if (!effectData || !effectData.modifiers) {
-      alert(`Spell cast, but no mechanical effect found for "${spell.name}". Please create this effect in the Toolkit first.`);
-      this.logAction(`${caster.name} cast '${spell.name}' on ${target.name}, but no effect applied.`);
-      return;
-    }
-
-    // 3. Calculate Duration
-    // Use caster's level if available, otherwise default to 1
+    // 2. Calculate Duration & Check for Instantaneous
+    // Use caster's level if available, otherwise default to 1 for basic calculation
     const casterLevel = this.getCaseInsensitiveProp(caster.baseStats, 'Level') || this.getCaseInsensitiveProp(caster.baseStats, 'CR') || 1;
-    // You might want to improve parseSpellDuration to accept casterLevel for accurate rounds/level calculation
-    const duration = this.parseSpellDuration(spell.duration); 
+    const duration = this.parseSpellDuration(spell.duration);
 
+    // If it's instantaneous, just log it and deduct the slot. Don't add an effect tracker.
+    if (spell.duration && spell.duration.toLowerCase().includes('instantaneous')) {
+         this.logAction(`${caster.name} cast '${spell.name}' on ${target.name} (Instantaneous).`);
+         if (spell.level !== undefined) {
+             await this.deductSpellSlot(caster._id, Number(spell.level));
+         }
+         return;
+    }
+
+    // 3. Find or Lookup Mechanical Effect Data (non-blocking for UX)
+    const effectName = spell.name;
+    if (!this.effectsCache().has(effectName)) {
+      // Try to auto-lookup in the background. If it finds modifiers later, they will automatically apply because of the computed signal.
+      this.lookupTerm(effectName, 'effect').catch(err => console.warn('Auto-lookup for spell effect failed:', err));
+    }
+
+    // 4. Apply Effect Tracker to Target
     const newEffect: CombatantEffect = {
       name: effectName,
-      duration: duration.value, // NOTE: To make this accurate per-level, you'd need to enhance parseSpellDuration
+      duration: duration.value,
       unit: duration.unit,
       startRound: this.roundCounter(),
       remainingRounds: duration.unit === 'permanent' ? 999 : duration.value
     };
 
-    // 4. Apply to Target
     const updatedEffects = [...(target.effects || []), newEffect];
-    this.logAction(`${caster.name} cast '${spell.name}' on ${target.name}.`);
     await this.handleUpdateCombatant(target._id, 'effects', updatedEffects);
+    this.logAction(`${caster.name} cast '${spell.name}' on ${target.name}. Applied '${effectName}' for ${duration.value} ${duration.unit}.`);
 
     // 5. Deduct Slot from Caster
     if (spell.level !== undefined) {
-      this.deductSpellSlot(caster._id, spell.level);
+      await this.deductSpellSlot(caster._id, Number(spell.level));
     }
   }
 
