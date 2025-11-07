@@ -277,9 +277,12 @@ export class DmToolkitComponent {
         const codexEntries = [];
 
         for (const npc of this.lastGeneratedNpcs()) {
+            // Calculate the full baseStats object from the simple AI-generated stats
+            const completeBaseStats = this.calculateCompleteBaseStats(npc.stats);
+
             const entity = {
                 name: npc.name,
-                baseStats: npc.stats,
+                baseStats: completeBaseStats, // <-- This is the fix
                 description: npc.description,
                 sourceCodexPath: [...basePath, npc.name.replace(/ /g, '_')],
                 rules: [],
@@ -1318,8 +1321,10 @@ private buildCodexObject(entries: any[]): any {
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, '0'); // getMonth() is 0-indexed
     const day = date.getDate().toString().padStart(2, '0');
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
     
-    return `${year}-${month}-${day}`;
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
   };
   formatName(name: string): string { return name ? name.replace(/_/g, ' ').replace(/-/g, ' ') : ''; } 
   
@@ -1330,7 +1335,7 @@ private buildCodexObject(entries: any[]): any {
 
   trackFight(index: number, fight: Fight) { return fight._id; }
 
-  addCustomEffect(combatantId: string) {
+  addCustomEffect(combatantId: string) {1
     if (!this.customEffectName.trim()) return;
     const effect: CombatantEffect = {
       name: this.customEffectName.trim(),
