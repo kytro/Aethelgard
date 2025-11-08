@@ -1,4 +1,4 @@
-import { Component, signal, inject, computed, effect, WritableSignal, HostListener } from '@angular/core';
+import { Component, signal, inject, computed, effect, WritableSignal, HostListener, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
@@ -60,7 +60,7 @@ const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 
   templateUrl: './dm-toolkit.component.html',
   styleUrls: ['./dm-toolkit.component.css']
 })
-export class DmToolkitComponent {
+export class DmToolkitComponent implements OnInit {
   http = inject(HttpClient);
 
   private mapToIds(names: string[], cache: Map<string, any>, idPrefix: string): string[] {
@@ -192,6 +192,10 @@ export class DmToolkitComponent {
         this.selectedTemplate.set('');
       }
     });
+  }
+
+  ngOnInit(): void {
+    this.loadInitialData();
   }
 
   async loadInitialData() {
