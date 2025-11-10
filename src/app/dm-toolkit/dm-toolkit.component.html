@@ -103,6 +103,17 @@
                   }
                   <p class="text-gray-300 mt-1">{{ npc.description }}</p>
 
+                  @if (npc.baseStats) {
+                    <div class="grid grid-cols-6 gap-2 mt-3 mb-3">
+                      @for(stat of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track stat) {
+                        <div class="text-center bg-black/30 p-1 rounded">
+                           <span class="block font-semibold text-xs text-gray-500 uppercase">{{stat}}</span>
+                           <span class="block font-bold text-white">{{npc.baseStats[stat] || 10}}</span>
+                        </div>
+                      }
+                    </div>
+                  }
+
                   @if (npc.backstory) {
                     <p class="text-gray-300 mt-2"><strong>Backstory:</strong> {{ npc.backstory }}</p>
                   }

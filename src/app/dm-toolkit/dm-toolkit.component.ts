@@ -19,7 +19,7 @@ interface GeneratedNpc {
   name: string; 
   race: string; 
   description: string; 
-  stats?: { [key: string]: number }; 
+  baseStats?: { [key: string]: number }; 
   class?: string;
   level?: number;
   skills?: { [key: string]: number };
@@ -34,6 +34,13 @@ interface GeneratedNpc {
   baseAttackBonus?: number;
   feats?: string[];
   specialAbilities?: string[];
+  spellSlots?: { [level: string]: number };
+  cmb?: number;
+  cmd?: number;
+  dr?: string;
+  sr?: number;
+  resist?: string;
+  immune?: string;
 }
 interface CacheEntry { status: 'idle' | 'loading' | 'loaded' | 'error'; data: any; }
 interface CascadingDropdown { level: number; options: string[]; }
@@ -333,7 +340,7 @@ export class DmToolkitComponent implements OnInit {
 
         for (const npc of this.lastGeneratedNpcs()) {
             // Calculate the full baseStats object from the simple AI-generated stats
-            const completeBaseStats = this.calculateCompleteBaseStats(npc.stats);
+            const completeBaseStats = this.calculateCompleteBaseStats(npc.baseStats);
 
             // NEW: Link data immediately using caches
             const linkedEquipment = this.mapToIds(npc.equipment || [], this.equipmentCache(), 'eq_');
@@ -351,7 +358,7 @@ export class DmToolkitComponent implements OnInit {
                 }
             }
 
-            const entity = {
+            const entity: any = {
                 name: npc.name,
                 baseStats: completeBaseStats,
                 description: npc.description,
@@ -384,6 +391,27 @@ export class DmToolkitComponent implements OnInit {
             }
             if (npc.baseAttackBonus !== undefined) {
                 entity.baseStats.BaseAttackBonus = npc.baseAttackBonus;
+            }
+            if (npc.spellSlots) {
+                entity.spellSlots = npc.spellSlots;
+            }
+            if (npc.cmb !== undefined) {
+                entity.baseStats.CMB = npc.cmb;
+            }
+            if (npc.cmd !== undefined) {
+                entity.baseStats.CMD = npc.cmd;
+            }
+            if (npc.dr) {
+                entity.baseStats.DR = npc.dr;
+            }
+            if (npc.sr) {
+                entity.baseStats.SR = npc.sr;
+            }
+            if (npc.resist) {
+                entity.baseStats.Resist = npc.resist;
+            }
+            if (npc.immune) {
+                entity.baseStats.Immune = npc.immune;
             }
             
             const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));

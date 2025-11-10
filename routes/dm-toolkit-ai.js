@@ -41,13 +41,20 @@ Each object must have:
 - "name", "race", "gender", "alignment" (e.g., "Chaotic Neutral"), "deity" (optional), "description", "backstory", "class" (e.g., "Fighter"), "level" (number).
 - "hitDice" (e.g., "d10" - appropriate for their class).
 - "baseAttackBonus" (number - appropriate for their class/level).
-- "baseStats": object with Str, Dex, Con, Int, Wis, Cha (values 3-18).
+- "baseStats": object with EXACT keys: "Str", "Dex", "Con", "Int", "Wis", "Cha" (values 3-20).
 - "skills": object where keys are skill names and values are total bonuses (number).
 - "feats": array of strings (standard PF1e feat names).
 - "specialAbilities": array of strings (class features or racial traits).
 - "equipment": array of strings (mundane gear).
 - "magicItems": array of strings (magic gear).
 - "spells": object where keys are spell levels ("0", "1", etc.) and values are arrays of spell names.
+- "spellSlots": object where keys are spell levels and values are the number of slots (optional).
+- "cmb": number (optional).
+- "cmd": number (optional).
+- "dr": string, e.g., "5/magic" (optional).
+- "sr": number (optional).
+- "resist": string, e.g., "fire 10, cold 5" (optional).
+- "immune": string, e.g., "poison, disease" (optional).
 Ensure all fields are present, even if empty.
 \n\nUser Request: "${query}"\n\nContext:\n${JSON.stringify(options.codex)}`;
                 break;
