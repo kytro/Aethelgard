@@ -702,6 +702,7 @@ error = signal<string | null>(null);
               // Trigger change detection by creating a new object reference
               this.codexData.set(JSON.parse(JSON.stringify(data)));
           }
+          this.saveChanges();
       } catch (e) {
           console.error('Map upload failed', e);
           alert('Failed to upload map image.');

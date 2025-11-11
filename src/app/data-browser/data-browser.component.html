@@ -8,7 +8,7 @@
   }
 
   <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-    <div class="md:col-span-1 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+    <div class="md:col-span-1 bg-gray-800/50 rounded-lg p-4">
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-xl font-semibold text-yellow-500">Collections</h3>
         <button (click)="loadCollections()" [disabled]="isLoading()" class="p-1 rounded-full hover:bg-gray-700 disabled:opacity-50">
@@ -31,7 +31,7 @@
       </ul>
     </div>
 
-    <div class="md:col-span-2 bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+    <div class="md:col-span-2 bg-gray-800/50 rounded-lg p-4">
       @if (selectedCollection()) {
         <div>
            @if (!selectedDocument()) {
