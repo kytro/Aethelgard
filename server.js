@@ -15,6 +15,7 @@ const dmToolkitAiRoutes = require('./routes/dm-toolkit-ai');
 const aiAssistantRoutes = require('./routes/ai-assistant');
 const spellRoutes = require('./routes/spells');
 const storyPlannerRoutes = require('./routes/story-planner');
+const mediaRoutes = require('./routes/media');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -48,6 +49,7 @@ MongoClient.connect(DATABASE_URL)
     app.use(`${apiBase}/ai-assistant`, aiAssistantRoutes(db));
     app.use(`${apiBase}/spells`, spellRoutes(db));
     app.use(`${apiBase}/dm-toolkit/story-planner`, storyPlannerRoutes(db));
+    app.use(`${apiBase}/media`, mediaRoutes(db));
 
     /* ---------- Static Files (SPA) ---------- */
     app.use('/codex', express.static(path.join(__dirname, 'public')));
@@ -72,7 +74,8 @@ MongoClient.connect(DATABASE_URL)
         ${apiBase}/dm-toolkit-ai/*
         ${apiBase}/ai-assistant/*
         ${apiBase}/spells/*
-        ${apiBase}/dm-toolkit/story-planner/*`);
+        ${apiBase}/dm-toolkit/story-planner/*
+        ${apiBase}/media/*`);
     });
   })
   .catch((err) => {

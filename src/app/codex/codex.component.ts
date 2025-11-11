@@ -1,7 +1,8 @@
-import { Component, signal, inject, computed, effect, OnInit } from '@angular/core';
+import { Component, signal, inject, computed, effect, OnInit, ViewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
+import { MapViewerComponent } from './map-viewer/map-viewer';
 
 // --- TYPE INTERFACES ---
 interface CodexEntry {
@@ -27,7 +28,7 @@ interface TooltipContent { title: string; description: string; }
 @Component({
   selector: 'app-codex',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, MapViewerComponent],
   templateUrl: './codex.component.html',
   styleUrls: ['./codex.component.css']
 })
@@ -113,6 +114,7 @@ export class CodexComponent implements OnInit {
   isLoading = signal<boolean>(true);
 error = signal<string | null>(null);
   isEditMode = signal<boolean>(false);
+  @ViewChild('mapUpload') mapUploadInput!: ElementRef<HTMLInputElement>;
   
   linkedEntities = signal<Pf1eEntity[]>([]);
   modifiedEntities = signal<Set<string>>(new Set());
@@ -667,6 +669,47 @@ error = signal<string | null>(null);
       node.content.push(newBlock);
       this.codexData.set(JSON.parse(JSON.stringify(data)));
     }
+  }
+
+  addMapBlock() {
+    // Trigger the hidden file input
+    this.mapUploadInput.nativeElement.click();
+  }
+
+  async handleMapUpload(event: any) {
+      const file = event.target.files[0];
+      if (!file) return;
+  
+      const formData = new FormData();
+      formData.append('mapFile', file);
+  
+      this.isLoading.set(true);
+      try {
+          // Upload the file
+          const res = await lastValueFrom(this.http.post<any>('/codex/api/media/upload', formData));
+  
+          // Add the new map block with the returned URL
+          const data = this.codexData();
+          const path = this.currentPath();
+          const node = this.getNode(path);
+          if (node) {
+              if (!node.content) node.content = [];
+              node.content.push({
+                  type: 'map',
+                  imageUrl: res.url,
+                  caption: file.name.replace(/\.[^/.]+$/, "") // Default caption is filename without extension
+              });
+              // Trigger change detection by creating a new object reference
+              this.codexData.set(JSON.parse(JSON.stringify(data)));
+          }
+      } catch (e) {
+          console.error('Map upload failed', e);
+          alert('Failed to upload map image.');
+      } finally {
+          this.isLoading.set(false);
+          // Clear input so same file can be selected again if needed
+          event.target.value = '';
+      }
   }
 
   removeBlock(block: any) {
