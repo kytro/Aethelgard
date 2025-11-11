@@ -29,7 +29,7 @@
     "@angular/localize": "^20.3.0",
     "@angular/platform-browser": "^20.3.0",
     "@angular/router": "^20.3.0",
-    "@panzoom/panzoom": "^9.4.3",
+    "panzoom": "^9.4.3",
     "@simplewebauthn/browser": "^13.2.0",
     "@simplewebauthn/server": "^13.2.1",
     "base64url": "^3.0.1",

@@ -2,7 +2,7 @@ import { Component, signal, inject, computed, effect, OnInit, ViewChild, Element
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
-import { MapViewerComponent } from './map-viewer/map-viewer';
+import { MapViewerComponent } from './map-viewer/map-viewer.component';
 
 // --- TYPE INTERFACES ---
 interface CodexEntry {
