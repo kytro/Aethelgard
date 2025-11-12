@@ -336,7 +336,7 @@ error = signal<string | null>(null);
         this.modifiedEntities.set(new Set());
       }
 
-      this.isEditMode.set(false);
+      // this.isEditMode.set(false); // Do not exit edit mode on a simple save
     } catch (err) {
       console.error("Failed to save data", err);
       this.error.set('Failed to save changes.');
@@ -702,7 +702,7 @@ error = signal<string | null>(null);
               // Trigger change detection by creating a new object reference
               this.codexData.set(JSON.parse(JSON.stringify(data)));
           }
-          this.saveChanges();
+          await this.saveChanges();
       } catch (e) {
           console.error('Map upload failed', e);
           alert('Failed to upload map image.');
