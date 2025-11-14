@@ -46,7 +46,7 @@
     </ul>
   </nav>
 
-  <main class="flex-1 overflow-hidden p-8 bg-gray-900">
+  <main class="flex-1 overflow-y-auto p-8 bg-gray-900">
     @switch (activeAdminView()) {
       @case ('dashboard') { <app-dashboard></app-dashboard> }
       @case ('data') { <app-data-browser></app-data-browser> }
