@@ -17,6 +17,7 @@ const aiAssistantRoutes = require('./routes/ai-assistant');
 const spellRoutes = require('./routes/spells');
 const storyPlannerRoutes = require('./routes/story-planner');
 const mediaRoutes = require('./routes/media');
+const collectionsRoutes = require('./routes/collections')
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -43,6 +44,7 @@ MongoClient.connect(DATABASE_URL)
     app.use(`${apiBase}/auth`, authRoutes(db, JWT_SECRET, GOOGLE_CLIENT_ID));
     app.use(`${apiBase}/admin`, adminRoutes(db));
     app.use(`${apiBase}/admin`, settingsRoutes(db));
+    app.use(`${apiBase}/admin`, collectionsRoutes(db));
     app.use(`${apiBase}/data-integrity`, dataIntegrityRoutes(db));
     app.use(`${apiBase}/codex`, codexRoutes(db));
     app.use(`${apiBase}/dm-toolkit`, combatRoutes(db));
