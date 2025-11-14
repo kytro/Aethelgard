@@ -1,6 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-
-import { MapViewerComponent } from './map-viewer';
+import { MapViewerComponent } from './map-viewer.component';
+import { CommonModule } from '@angular/common';
 
 describe('MapViewerComponent', () => {
   let component: MapViewerComponent;
@@ -8,9 +8,8 @@ describe('MapViewerComponent', () => {
 
   beforeEach(async () => {
     await TestBed.configureTestingModule({
-      imports: [MapViewerComponent]
-    })
-    .compileComponents();
+      imports: [CommonModule, MapViewerComponent] // standalone component
+    }).compileComponents();
 
     fixture = TestBed.createComponent(MapViewerComponent);
     component = fixture.componentInstance;
@@ -19,5 +18,13 @@ describe('MapViewerComponent', () => {
 
   it('should create', () => {
     expect(component).toBeTruthy();
+  });
+
+  it('should render image and caption', () => {
+    const compiled = fixture.nativeElement as HTMLElement;
+    const img = compiled.querySelector('img');
+    const caption = compiled.querySelector('figcaption');
+    expect(img).toBeTruthy();
+    expect(caption).toBeTruthy();
   });
 });
