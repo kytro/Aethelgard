@@ -19,7 +19,14 @@ import { SettingsComponent } from '../settings/settings.component';
     AiAssistantComponent, 
     SettingsComponent
   ],
-  templateUrl: './admin.component.html',
+   templateUrl: './admin.component.html',
+   styles: [`
+        :host {
+        display: block;
+        height: 100%;
+        width: 100%;
+        }
+    `]
 })
 export class AdminComponent {
   // State for the Admin Panel's sidebar
