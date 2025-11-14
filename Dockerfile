@@ -35,6 +35,7 @@ COPY --from=build /app/dist/codex-admin/browser ./public
 # Copy the server code AND the routes directory
 COPY server.js .
 COPY routes ./routes
+COPY services ./services
 
 # Expose the port the server will run on
 EXPOSE 8080

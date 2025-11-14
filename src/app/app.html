@@ -1,5 +1,4 @@
 @if (!isAuthenticated()) {
-  <!-- Login Screen -->
   <div class="flex items-center justify-center h-screen bg-gray-900 text-gray-200">
     <div class="w-full max-w-sm p-8 space-y-6 bg-gray-800 rounded-lg shadow-lg border border-gray-700">
       <div class="text-center">
@@ -15,75 +14,56 @@
     </div>
   </div>
 } @else {
-  <!-- Main Application Layout -->
   <div class="flex flex-col h-screen bg-gray-900 text-gray-200 font-sans">
-    <!-- Top Navigation Bar -->
-    <header class="flex-shrink-0 bg-gray-800 border-b border-gray-700 px-4">
+    <header class="flex-shrink-0 bg-gray-800 border-b border-gray-700 px-2 sm:px-4">
       <div class="flex items-center h-16">
-        <div class="flex items-center mr-6">
+        <div class="flex items-center sm:mr-6">
            <svg class="w-8 h-8 text-yellow-500 mr-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
           </svg>
-          <h1 class="text-xl font-bold text-white">Codex</h1>
+          <h1 class="text-xl font-bold text-white hidden sm:flex">Codex</h1>
         </div>
-        <!-- Top Tabs -->
-        <div class="flex items-center space-x-2">
-          <button (click)="activeAppSection.set('admin')" class="px-3 py-2 rounded-md text-sm font-medium" [ngClass]="{'bg-yellow-500 text-gray-900': activeAppSection() === 'admin', 'text-gray-300 hover:bg-gray-700': activeAppSection() !== 'admin'}">
-            Admin Panel
-          </button>
-          <button (click)="activeAppSection.set('codex')" class="px-3 py-2 rounded-md text-sm font-medium" [ngClass]="{'bg-yellow-500 text-gray-900': activeAppSection() === 'codex', 'text-gray-300 hover:bg-gray-700': activeAppSection() !== 'codex'}">
-            Codex
-          </button>
-          <button (click)="activeAppSection.set('dm-toolkit')" class="px-3 py-2 rounded-md text-sm font-medium" [ngClass]="{'bg-yellow-500 text-gray-900': activeAppSection() === 'dm-toolkit', 'text-gray-300 hover:bg-gray-700': activeAppSection() !== 'dm-toolkit'}">
-            DM Toolkit
-          </button>
+        
+        <div class="flex items-center space-x-1 sm:space-x-2">
+          <a routerLink="/admin" routerLinkActive="bg-yellow-500 !text-gray-900" 
+             class="flex items-center justify-center h-10 w-10 sm:w-auto sm:px-3 sm:py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-all"
+             title="Admin Panel">
+            <svg class="h-6 w-6 sm:hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 1 1-3 0m3 0a1.5 1.5 0 1 0-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m-9.75 0h3.75" />
+            </svg>
+            <span class="hidden sm:inline">Admin Panel</span>
+          </a>
+          <a routerLink="/codex" routerLinkActive="bg-yellow-500 !text-gray-900" 
+             class="flex items-center justify-center h-10 w-10 sm:w-auto sm:px-3 sm:py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-all"
+             title="Codex">
+            <svg class="h-6 w-6 sm:hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+            </svg>
+            <span class="hidden sm:inline">Codex</span>
+          </a>
+          <a routerLink="/dm-toolkit" routerLinkActive="bg-yellow-500 !text-gray-900" 
+             class="flex items-center justify-center h-10 w-10 sm:w-auto sm:px-3 sm:py-2 rounded-md text-sm font-medium text-gray-300 hover:bg-gray-700 hover:text-white transition-all"
+             title="DM Toolkit">
+            <svg class="h-6 w-6 sm:hidden" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M21 13.255A23.931 23.931 0 0 1 12 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2m4 6h.01M5 20h14a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2Z" />
+            </svg>
+            <span class="hidden sm:inline">DM Toolkit</span>
+          </a>
         </div>
+
         <div class="ml-auto flex items-center">
-           <img [src]="user()?.picture" alt="User Avatar" class="w-8 h-8 rounded-full mr-3 border-2 border-gray-600">
-           <span class="text-sm font-medium text-gray-300">{{ user()?.name }}</span>
-           <button (click)="handleLogout()" class="p-2 ml-2 rounded-full hover:bg-gray-700 text-red-400" title="Logout">
+           <span class="text-sm text-gray-400 mr-4 hidden lg:inline">{{ currentTime() }}</span>
+           <img [src]="user()?.picture" alt="User Avatar" class="w-8 h-8 rounded-full mr-2 sm:mr-3 border-2 border-gray-600">
+           <span class="text-sm font-medium text-gray-300 mr-1 sm:mr-2 hidden sm:inline">{{ user()?.name }}</span>
+           <button (click)="handleLogout()" class="p-2 ml-1 sm:ml-2 rounded-full hover:bg-gray-700 text-red-400" title="Logout">
               <svg class="w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" /></svg>
            </button>
         </div>
       </div>
     </header>
 
-    <!-- Main Body -->
-    <div class="flex flex-1 overflow-hidden">
-      @if (activeAppSection() === 'admin') {
-        <nav class="w-64 flex-shrink-0 bg-gray-800 p-4 flex flex-col">
-          <ul class="space-y-2">
-            <li><a (click)="activeAdminView.set('dashboard')" href="javascript:void(0)" class="flex items-center px-4 py-2 rounded-lg" [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'dashboard', 'hover:bg-gray-700': activeAdminView() !== 'dashboard'}">Dashboard</a></li>
-            <li><a (click)="activeAdminView.set('data')" href="javascript:void(0)" class="flex items-center px-4 py-2 rounded-lg" [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'data', 'hover:bg-gray-700': activeAdminView() !== 'data'}">Data Browser</a></li>
-            <li><a (click)="activeAdminView.set('backup-restore')" href="javascript:void(0)" class="flex items-center px-4 py-2 rounded-lg" [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'backup-restore', 'hover:bg-gray-700': activeAdminView() !== 'backup-restore'}">Backup & Restore</a></li>
-            <li><a (click)="activeAdminView.set('data-integrity')" href="javascript:void(0)" class="flex items-center px-4 py-2 rounded-lg" [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'data-integrity', 'hover:bg-gray-700': activeAdminView() !== 'data-integrity'}">Data Integrity</a></li>
-            <li><a (click)="activeAdminView.set('ai-assistant')" href="javascript:void(0)" class="flex items-center px-4 py-2 rounded-lg" [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'ai-assistant', 'hover:bg-gray-700': activeAdminView() !== 'ai-assistant'}">AI Assistant</a></li>
-             <li><a (click)="activeAdminView.set('settings')" href="javascript:void(0)" class="flex items-center px-4 py-2 rounded-lg" [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'settings', 'hover:bg-gray-700': activeAdminView() !== 'settings'}">Settings</a></li>
-          </ul>
-        </nav>
-        <main class="flex-1 overflow-y-auto p-8">
-          @if (activeAdminView() === 'dashboard') { <app-dashboard></app-dashboard> }
-          @if (activeAdminView() === 'data') { <app-data-browser></app-data-browser> }
-          @if (activeAdminView() === 'backup-restore') { <app-backup-restore></app-backup-restore> }
-          @if (activeAdminView() === 'data-integrity') { <app-data-integrity></app-data-integrity> }
-          @if (activeAdminView() === 'ai-assistant') { <app-ai-assistant></app-ai-assistant> }
-          @if (activeAdminView() === 'settings') { <app-settings></app-settings> }
-        </main>
-      }
-
-      @if (activeAppSection() === 'codex') {
-        <div class="flex-1 overflow-y-auto p-8">
-            <app-codex></app-codex>
-        </div>
-      }
-
-      @if (activeAppSection() === 'dm-toolkit') {
-        <!-- The placeholder has been replaced with the actual component -->
-        <main class="flex-1 overflow-y-auto p-8">
-            <app-dm-toolkit></app-dm-toolkit>
-        </main>
-      }
+    <div class="flex flex-1 overflow-hidden relative">
+        <router-outlet></router-outlet>
     </div>
   </div>
 }
-

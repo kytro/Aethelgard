@@ -1,4 +1,4 @@
-<div class="codex-browser relative">
+<div class="codex-browser h-full flex flex-col text-gray-200 bg-gray-900 p-8">
   @if (isLoading()) {
     <p class="text-gray-500">Loading Codex...</p>
   } @else if (error()) {
@@ -6,7 +6,7 @@
       <p>{{ error() }}</p>
     </div>
   } @else {
-    <div class="flex justify-between items-center mb-6">
+    <div class="flex justify-between items-center mb-6 flex-shrink-0">
       <nav class="flex items-center text-sm text-gray-400 flex-wrap">
         <a (click)="goHome()" class="hover:text-yellow-400 cursor-pointer">Codex</a>
         @for (segment of currentPath(); track segment; let i = $index) {
@@ -28,13 +28,14 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
-      <div class="lg:col-span-2">
+    <div class="flex flex-1 overflow-hidden gap-8">
+      
+      <nav class="w-64 flex-shrink-0 bg-gray-800 p-4 flex flex-col rounded-lg">
         <h3 class="text-2xl font-bold text-white mb-4">Entries</h3>
         @if (isEditMode() && isCategoryNode()) {
           <div class="mb-4 p-3 bg-gray-700/50 rounded-lg space-y-3">
             <label class="flex items-center justify-between cursor-pointer">
-              <span class="text-sm font-medium text-gray-300">Enable Completion Tracking</span>
+              <span class="text-sm font-medium text-gray-300">Completion Tracking</span>
               <input type="checkbox" [checked]="isCompletionTrackingActive()" (change)="toggleCompletionTracking()" class="h-4 w-4 rounded border-gray-300 text-yellow-600 focus:ring-yellow-500">
             </label>
             <label class="flex items-center justify-between cursor-pointer">
@@ -43,14 +44,14 @@
             </label>
           </div>
         }
-        <ul class="space-y-2">
+        <ul class="space-y-2 flex-1 overflow-y-auto pr-2">
           @for (entry of currentView().entries; track entry.name) {
             <li class="flex items-center">
               @if (isCompletionTrackingActive() && isLeaf(entry)) {
                 <input type="checkbox" [checked]="safeIsCompleted(entry)" (change)="toggleCompletion(entry)" class="h-4 w-4 rounded border-gray-300 text-yellow-600 focus:ring-yellow-500 mr-3">
               }
               <a (click)="navigateTo(entry)" 
-                  class="flex-grow p-3 rounded-lg bg-gray-800/50 hover:bg-gray-700 transition-colors cursor-pointer"
+                  class="flex-grow px-4 py-2 rounded-lg bg-gray-800/50 hover:bg-gray-700 transition-colors cursor-pointer"
                   [ngClass]="{'bg-yellow-500/20 border border-yellow-700': currentView().activeEntry === entry}">
                 {{ formatName(entry.name) }}
               </a>
@@ -59,9 +60,9 @@
             <p class="text-gray-500">No further entries.</p>
           }
         </ul>
-      </div>
+      </nav>
 
-      <div class="lg:col-span-10">
+      <main class="flex-1 overflow-y-auto">
         @if (currentView().content; as content) {
           <div class="space-y-4">
             @for (block of content; track $index) {
@@ -339,7 +340,8 @@
         } @else {
           <div class="text-gray-500">Select an entry to view its content.</div>
         }
-      </div>
+      </main>
+
     </div>
   }
   

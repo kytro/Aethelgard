@@ -1,0 +1,264 @@
+import { Component, signal, inject, input } from '@angular/core';
+import { CommonModule } from '@angular/common';
+import { HttpClient } from '@angular/common/http';
+import { FormsModule } from '@angular/forms';
+import { lastValueFrom } from 'rxjs';
+import { calculateCompleteBaseStats } from '../dm-toolkit.utils';
+
+interface GeneratedNpc { 
+  name: string; 
+  race: string; 
+  description: string; 
+  baseStats?: { [key: string]: number }; 
+  class?: string;
+  level?: number;
+  skills?: { [key: string]: number };
+  equipment?: string[];
+  magicItems?: string[];
+  spells?: { [level: string]: string[] };
+  backstory?: string;
+  gender?: string;
+  alignment?: string;
+  deity?: string;
+  hitDice?: string;
+  baseAttackBonus?: number;
+  feats?: string[];
+  specialAbilities?: string[];
+  spellSlots?: { [level: string]: number };
+  cmb?: number;
+  cmd?: number;
+  dr?: string;
+  sr?: number;
+  resist?: string;
+  immune?: string;
+}
+
+@Component({
+  selector: 'app-npc-generator',
+  standalone: true,
+  imports: [CommonModule, FormsModule],
+  template: `
+    <div id="npc-generator">
+      <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">NPC Generator</h2>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div>
+          <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+            <div class="mb-4">
+              <label class="block text-sm font-medium text-gray-400 mb-1">Codex Path</label>
+              <input type="text" [(ngModel)]="npcGenGroupName" placeholder="e.g., People/MyCity/Tavern" class="w-full bg-gray-900 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500">
+            </div>
+            <div class="mb-4">
+              <label class="block text-sm font-medium text-gray-400 mb-1">Generation Prompt</label>
+              <textarea [(ngModel)]="npcGenQuery" placeholder="e.g., Three human bandits, one is the leader" class="w-full h-24 bg-gray-900 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"></textarea>
+            </div>
+            <div class="mb-4">
+              <label class="block text-sm font-medium text-gray-400 mb-1">Context</label>
+              <textarea [(ngModel)]="npcGenContext" placeholder="e.g., They are operating in the Whisperwood Forest, known for their ruthless ambushes." class="w-full h-32 bg-gray-900 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"></textarea>
+            </div>
+            <button (click)="handleGenerateNpcs()" [disabled]="isGeneratingNpcs()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+              {{ isGeneratingNpcs() ? 'Generating...' : 'Generate NPCs' }}
+            </button>
+
+            @if (npcSaveSuccessMessage()) {
+              <div class="mt-4 bg-green-800/50 border border-green-700 text-green-300 p-4 rounded-md">
+                  {{ npcSaveSuccessMessage() }}
+              </div>
+            }
+          </div>
+        </div>
+        <div>
+          @if (lastGeneratedNpcs().length > 0) {
+            <div class="bg-gray-800/50 p-6 rounded-lg border border-gray-700">
+              <div class="flex justify-between items-center mb-3">
+                <h3 class="font-semibold text-xl text-yellow-400">Generated NPCs for "{{ lastGeneratedGroupName() }}"</h3>
+                <button (click)="handleSaveNpcsToCodex()" [disabled]="isSavingNpcs()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+                  {{ isSavingNpcs() ? 'Saving...' : 'Save to Codex' }}
+                </button>
+              </div>
+              <div class="space-y-4">
+                @for (npc of lastGeneratedNpcs(); track npc.name) {
+                  <div class="bg-gray-900/50 p-4 rounded-md">
+                    <h4 class="font-bold text-lg text-white">{{ npc.name }} <span class="text-sm font-normal text-gray-400">({{ npc.race }})</span></h4>
+                    <p class="text-gray-300 mt-1">{{ npc.description }}</p>
+                    
+                    @if (npc.baseStats) {
+                      <div class="grid grid-cols-6 gap-2 mt-3 mb-3">
+                        @for(stat of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track stat) {
+                          <div class="text-center bg-black/30 p-1 rounded">
+                             <span class="block font-semibold text-xs text-gray-500 uppercase">{{stat}}</span>
+                             <span class="block font-bold text-white">{{npc.baseStats[stat] || 10}}</span>
+                          </div>
+                        }
+                      </div>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  `
+})
+export class NpcGeneratorComponent {
+  codex = input<any>();
+  existingEntityNames = input<string[]>([]);
+  rulesCache = input<Map<string, any>>(new Map());
+  equipmentCache = input<Map<string, any>>(new Map());
+  magicItemsCache = input<Map<string, any>>(new Map());
+  spellsCache = input<Map<string, any>>(new Map());
+
+  http = inject(HttpClient);
+
+  npcGenQuery = '';
+  npcGenContext = '';
+  npcGenGroupName = '';
+  isGeneratingNpcs = signal(false);
+  isSavingNpcs = signal(false);
+  lastGeneratedNpcs = signal<GeneratedNpc[]>([]);
+  lastGeneratedGroupName = signal('');
+  npcSaveSuccessMessage = signal('');
+
+  private mapToIds(names: string[], cache: Map<string, any>, idPrefix: string): string[] {
+    if (!names || !Array.isArray(names)) return [];
+    return names.map(name => {
+        for (const [id, item] of cache.entries()) {
+            if (item.name.toLowerCase() === name.toLowerCase()) {
+                return id;
+            }
+        }
+        return ''; 
+    }).filter(id => id !== '');
+  }
+
+  async handleGenerateNpcs() {
+    if (!this.npcGenQuery.trim() || !this.npcGenContext.trim() || !this.npcGenGroupName.trim()) return;
+    
+    if (this.codex()?.['Generated Characters']?.[this.npcGenGroupName]) {
+        console.error("Group name already exists"); 
+        this.npcSaveSuccessMessage.set('Error: Group name already exists in Codex.');
+        return;
+    }
+
+    this.isGeneratingNpcs.set(true);
+    this.lastGeneratedNpcs.set([]);
+    this.npcSaveSuccessMessage.set('');
+    
+    try {
+        const codexData = this.codex();
+        const places = codexData ? codexData['Places'] : null;
+
+        const npcs = await lastValueFrom(this.http.post<GeneratedNpc[]>('/codex/api/dm-toolkit-ai/generate-npcs', {
+            query: this.npcGenQuery,
+            options: {
+                codex: {
+                    userContext: this.npcGenContext,
+                    worldPlaces: places
+                },
+                existingEntityNames: this.existingEntityNames()
+            }
+        }));
+        
+        this.lastGeneratedNpcs.set(npcs);
+        this.lastGeneratedGroupName.set(this.npcGenGroupName);
+    } catch (e: any) { 
+        console.error("Error generating NPCs:", e); 
+        this.npcSaveSuccessMessage.set(`Error: ${e.error?.error || e.message}`);
+    } finally { 
+        this.isGeneratingNpcs.set(false); 
+    }
+  }
+
+  async handleSaveNpcsToCodex() {
+    if (this.lastGeneratedNpcs().length === 0 || !this.lastGeneratedGroupName()) return;
+
+    this.isSavingNpcs.set(true);
+    this.npcSaveSuccessMessage.set('');
+    const pathString = this.lastGeneratedGroupName();
+    const npcCount = this.lastGeneratedNpcs().length;
+
+    try {
+        const basePath = pathString.split('/').filter(p => p.trim() !== '').map(p => p.trim().replace(/ /g, '_'));
+        const codexEntries: any[] = [];
+
+        for (const npc of this.lastGeneratedNpcs()) {
+            const completeBaseStats = calculateCompleteBaseStats(npc.baseStats);
+
+            const linkedEquipment = this.mapToIds(npc.equipment || [], this.equipmentCache(), 'eq_');
+            const linkedMagicItems = this.mapToIds(npc.magicItems || [], this.magicItemsCache(), 'mi_');
+            const rulesToLink = [...(npc.feats || []), ...(npc.specialAbilities || [])];
+            const linkedRules = this.mapToIds(rulesToLink, this.rulesCache(), 'feat_');
+
+            const linkedSpells: { [level: string]: string[] } = {};
+            if (npc.spells) {
+                for (const level of Object.keys(npc.spells)) {
+                    linkedSpells[level] = this.mapToIds(npc.spells[level], this.spellsCache(), 'sp_');
+                }
+            }
+
+            const entity: any = {
+                name: npc.name,
+                baseStats: completeBaseStats,
+                description: npc.description,
+                sourceCodexPath: [...basePath, npc.name.replace(/ /g, '_')],
+                rules: linkedRules,
+                equipment: linkedEquipment,
+                magicItems: linkedMagicItems,
+                spells: linkedSpells,
+                deity: npc.deity || '',
+            };
+
+            if(npc.class) entity.baseStats.Class = npc.class;
+            if(npc.level) entity.baseStats.Level = npc.level;
+            if(npc.gender) entity.baseStats.Gender = npc.gender;
+            if(npc.alignment) entity.baseStats.Alignment = npc.alignment;
+            if(npc.hitDice) entity.baseStats.HitDice = npc.hitDice;
+            if(npc.baseAttackBonus !== undefined) entity.baseStats.BaseAttackBonus = npc.baseAttackBonus;
+            if(npc.spellSlots) entity.spellSlots = npc.spellSlots;
+            if(npc.cmb !== undefined) entity.baseStats.CMB = npc.cmb;
+            if(npc.cmd !== undefined) entity.baseStats.CMD = npc.cmd;
+            if(npc.dr) entity.baseStats.DR = npc.dr;
+            if(npc.sr) entity.baseStats.SR = npc.sr;
+            if(npc.resist) entity.baseStats.Resist = npc.resist;
+            if(npc.immune) entity.baseStats.Immune = npc.immune;
+            if(npc.skills) entity.baseStats.skills = npc.skills;
+
+            const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
+
+            const codexContent = [
+                { type: 'statblock', entityId: newEntity.insertedId },
+                { type: 'heading', text: 'Description' },
+                { type: 'paragraph', text: npc.description }
+            ];
+            
+            if(npc.backstory) {
+                 codexContent.push({ type: 'heading', text: 'Backstory' });
+                 codexContent.push({ type: 'paragraph', text: npc.backstory });
+            }
+
+            const codexEntry = {
+                path_components: [...basePath, npc.name.replace(/ /g, '_')],
+                name: npc.name.replace(/ /g, '_'),
+                content: codexContent,
+                summary: `Auto-generated entry for NPC: ${npc.name}`
+            };
+            codexEntries.push(codexEntry);
+        }
+
+        if (codexEntries.length > 0) {
+            await lastValueFrom(this.http.put('/codex/api/codex/data', codexEntries));
+        }
+
+        this.lastGeneratedNpcs.set([]);
+        this.lastGeneratedGroupName.set('');
+        this.npcSaveSuccessMessage.set(`${npcCount} NPCs saved to codex under "${pathString}"!`);
+
+    } catch (error: any) {
+        console.error('Error saving NPCs:', error);
+        this.npcSaveSuccessMessage.set(`Failed to save: ${error.message}`);
+    } finally {
+        this.isSavingNpcs.set(false);
+    }
+  }
+}

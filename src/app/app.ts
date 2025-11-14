@@ -1,16 +1,8 @@
 import { ChangeDetectionStrategy, Component, signal, inject, AfterViewInit, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { HttpClient, HttpClientModule } from '@angular/common/http';
+import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
-import { DataBrowserComponent } from './data-browser/data-browser.component';
-import { BackupRestoreComponent } from './backup-restore/backup-restore.component';
-import { DashboardComponent } from './dashboard/dashboard.component';
-import { DataIntegrityComponent } from './data-integrity/data-integrity.component';
-import { AiAssistantComponent } from './ai-assistant/ai-assistant.component';
-import { SettingsComponent } from './settings/settings.component';
-import { CodexComponent } from './codex/codex.component';
-import { DmToolkitComponent } from './dm-toolkit/dm-toolkit.component';
 
 // Declare the 'google' variable provided by the GSI script
 declare const google: any;
@@ -24,7 +16,7 @@ interface User {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, HttpClientModule, DataBrowserComponent, BackupRestoreComponent, DashboardComponent, DataIntegrityComponent, AiAssistantComponent, SettingsComponent, CodexComponent, DmToolkitComponent],
+  imports: [CommonModule, RouterLink, RouterLinkActive, RouterOutlet],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './app.html',
   styleUrls: ['./app.css']
@@ -38,13 +30,6 @@ export class AppComponent implements AfterViewInit {
   user = signal<User | null>(null);
   authMessage = signal<string>('');
   isAuthError = signal<boolean>(false);
-
-  // --- Top-level navigation state ---
-  activeAppSection = signal<'admin' | 'codex' | 'dm-toolkit'>('admin');
-  
-  // State for the Admin Panel's sidebar
-  activeAdminView = signal<'dashboard' | 'data' | 'backup-restore' | 'data-integrity' | 'ai-assistant' | 'settings'>('dashboard');
-
   currentTime = signal<string>('');
 
   constructor() {

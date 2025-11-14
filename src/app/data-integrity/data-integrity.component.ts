@@ -15,7 +15,13 @@ interface LogEntry {
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './data-integrity.component.html',
-  styleUrls: ['./data-integrity.component.css']
+  styleUrls: ['./data-integrity.component.css'],
+  styles: [`
+    :host {
+      display: block;
+      height: 100%;
+    }
+  `]
 })
 export class DataIntegrityComponent {
   private http = inject(HttpClient);

@@ -1,10 +1,10 @@
-<div class="p-4 md:p-6 bg-gray-900 text-gray-200 min-h-screen font-mono">
-  <div class="max-w-4xl mx-auto">
-
+<div class="bg-gray-900 text-gray-200 h-full font-mono flex flex-col">
+  <div class="flex-shrink-0 w-full">
     <h1 class="text-3xl font-bold mb-2 text-purple-400">Data Integrity Center</h1>
     <p class="mb-6 text-gray-400">Run jobs to ensure consistency and correctness of your data.</p>
+  </div>
 
-    <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-6">
+  <div class="bg-gray-800 p-4 rounded-lg shadow-lg mb-6 w-full flex-shrink-0">
       <h2 class="text-xl font-semibold mb-4 text-gray-300">AI Reconciliation Settings</h2>
       <div class="grid grid-cols-2 gap-4 mb-6 p-4 border border-gray-700 rounded-md">
         <div>
@@ -107,7 +107,7 @@
     </div>
     
     <h2 class="text-xl font-semibold mb-4 text-gray-300">Database Migration</h2>
-    <div class="grid grid-cols-1 gap-4 mb-6 border-t border-red-500/30 pt-4 mt-4">
+    <div class="grid grid-cols-1 gap-4 mb-6 border-t border-red-500/30 pt-4 mt-4 w-full flex-shrink-0">
         <div class="col-span-full flex items-center gap-4">
             <button (click)="migrateCodex()" [disabled]="isLoading()" 
                     class="bg-red-800 hover:bg-red-900 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
@@ -134,8 +134,8 @@
         </p>
     </div>
 
-    <h2 class="text-xl font-semibold mb-4 text-gray-300">Status Check</h2>
-    <div class="grid grid-cols-2 gap-4">
+    <h2 class="text-xl font-semibold mb-4 text-gray-300 w-full flex-shrink-0">Status Check</h2>
+    <div class="grid grid-cols-2 gap-4 w-full flex-shrink-0">
         <button (click)="getDataIntegrityStatus()" [disabled]="isLoading()" 
                 class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition duration-300 ease-in-out disabled:opacity-50 disabled:cursor-not-allowed">
           Get Current Status
@@ -145,25 +145,22 @@
           Find Unlinked Statblocks
         </button>
     </div>
-</div>
+  </div>
 
-
-    <div class="bg-gray-800 p-4 rounded-lg shadow-lg">
-      <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-semibold text-gray-300">Logs</h2>
-        <button (click)="clearLogs()" class="text-sm text-purple-400 hover:text-purple-300">Clear</button>
-      </div>
-      <div class="h-96 bg-gray-900 rounded p-3 overflow-y-auto text-sm">
-        @for (log of logs(); track log) {
-          <div class="log-entry" [class.error]="log.isError">
-            <span class="time">[{{ log.time }}]</span>
-            <span class="message">{{ log.message }}</span>
-          </div>
-        } @empty {
-          <div class="text-gray-500">Logs will appear here...</div>
-        }
-      </div>
+  <div class="bg-gray-800 p-4 rounded-lg shadow-lg w-full flex-1 flex flex-col overflow-hidden mt-6">
+    <div class="flex justify-between items-center mb-4 flex-shrink-0">
+      <h2 class="text-xl font-semibold text-gray-300">Logs</h2>
+      <button (click)="clearLogs()" class="text-sm text-purple-400 hover:text-purple-300">Clear</button>
     </div>
-
+    <div class="flex-1 bg-gray-900 rounded p-3 overflow-y-auto text-sm">
+      @for (log of logs(); track log) {
+        <div class="log-entry" [class.error]="log.isError">
+          <span class="time">[{{ log.time }}]</span>
+          <span class="message">{{ log.message }}</span>
+        </div>
+      } @empty {
+        <div class="text-gray-500">Logs will appear here...</div>
+      }
+    </div>
   </div>
 </div>

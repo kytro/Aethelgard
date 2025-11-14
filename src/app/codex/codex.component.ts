@@ -30,7 +30,14 @@ interface TooltipContent { title: string; description: string; }
   standalone: true,
   imports: [CommonModule, MapViewerComponent],
   templateUrl: './codex.component.html',
-  styleUrls: ['./codex.component.css']
+  styleUrls: ['./codex.component.css'],
+  styles: [`
+    :host {
+      display: block;
+      height: 100%;
+      width: 100%;
+    }
+  `]
 })
 export class CodexComponent implements OnInit {
   /**
@@ -336,7 +343,7 @@ error = signal<string | null>(null);
         this.modifiedEntities.set(new Set());
       }
 
-      // this.isEditMode.set(false); // Do not exit edit mode on a simple save
+      this.isEditMode.set(false);
     } catch (err) {
       console.error("Failed to save data", err);
       this.error.set('Failed to save changes.');
@@ -702,7 +709,7 @@ error = signal<string | null>(null);
               // Trigger change detection by creating a new object reference
               this.codexData.set(JSON.parse(JSON.stringify(data)));
           }
-          await this.saveChanges();
+          this.saveChanges();
       } catch (e) {
           console.error('Map upload failed', e);
           alert('Failed to upload map image.');

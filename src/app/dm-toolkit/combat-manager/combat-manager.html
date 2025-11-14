@@ -1,0 +1,554 @@
+<div id="combat-manager">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+       <div class="lg:col-span-1 bg-gray-800/50 p-4 rounded-lg border border-gray-700">
+           <h3 class="font-semibold text-xl mb-3">Encounters</h3>
+           <div class="flex space-x-2 mb-4">
+               <input type="text" [(ngModel)]="newFightName" placeholder="New fight name..." class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500" />
+               <button (click)="handleAddFight()" [disabled]="isSavingFight()" class="bg-green-600 hover:bg-green-500 text-white font-bold p-2 rounded-md transition-colors disabled:bg-gray-500">
+                   {{ isSavingFight() ? '...' : 'Add' }}
+               </button>
+           </div>
+           <div class="space-y-2">
+               @for(fight of fights(); track fight._id) {
+                   <div
+                    class="flex justify-between items-center p-2 rounded-md"
+                    [ngClass]="{'bg-yellow-600 text-black': currentFight()?._id === fight._id, 'bg-gray-700/50': currentFight()?._id !== fight._id}">
+                       <button (click)="setCurrentFight(fight)" class="flex-grow text-left">{{fight.name}}</button>
+                       <button (click)="handleDeleteFight(fight._id)" class="text-red-400 hover:text-red-300 font-bold">X</button>
+                   </div>
+               }
+           </div>
+       </div>
+       <div class="lg:col-span-2">
+           @if(currentFight(); as fight) {
+               <div>
+                   <div class="flex justify-between items-center mb-4">
+                       <h3 class="font-semibold text-2xl text-yellow-400">{{fight.name}}</h3>
+                       @if(isCombatActive()) {
+                         <button (click)="handleEndCombat()" [disabled]="isTogglingCombatState()" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-500 w-36">
+                            {{ isTogglingCombatState() ? '...' : 'End Combat' }}
+                         </button>
+                       } @else {
+                         <button (click)="handleStartCombat()" [disabled]="isTogglingCombatState()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-500 w-36">
+                            {{ isTogglingCombatState() ? '...' : 'Start Combat' }}
+                         </button>
+                       }
+                   </div>
+
+                   @if(isCombatActive()){
+                     <div class="flex justify-between items-center bg-gray-800/50 p-2 rounded-lg border border-gray-700 mb-4">
+                       <div>
+                         <span class="font-bold text-xl">Round: {{roundCounter()}}</span>
+                         <span class="text-gray-400 text-sm ml-4">Started: {{formatTime(fight.combatStartTime)}}</span>
+                       </div>
+                       <div class="flex items-center gap-2">
+                         <button (click)="handlePreviousTurn()" [disabled]="isAdvancingTurn()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-md disabled:opacity-50">Previous Turn</button>
+                         <button (click)="handleNextTurn()" [disabled]="isAdvancingTurn()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md disabled:opacity-50">Next Turn</button>
+                       </div>
+                     </div>
+                   }
+
+                   <form (submit)="handleAddCombatant($event)" class="bg-gray-800/50 p-4 rounded-lg border border-gray-700 mb-4 flex flex-wrap gap-4 items-end">
+                       <div class="flex-auto min-w-[120px]">
+                           <label class="block text-sm font-medium text-gray-400">Source</label>
+                           <select [ngModel]="addFormSource()" (ngModelChange)="handleSourceChange($event)" name="source" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                               <option>Custom</option><option>PC</option><option>NPC</option><option>Bestiary</option><option>Find</option><option>Found</option>
+                           </select>
+                       </div>
+                       @if(addFormSource() === 'Bestiary') {
+                           <div class="flex-none min-w-[150px]">
+                               <label class="block text-sm font-medium text-gray-400">Monster HP</label>
+                               <select [(ngModel)]="monsterHpOption" name="monsterHpOption" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                   <option value="average">Average</option>
+                                   <option value="rolled">Rolled</option>
+                                   <option value="max">Max</option>
+                               </select>
+                           </div>
+                       }
+
+                       @if(addFormSource() === 'Custom') {
+                           <div class="flex-auto min-w-[150px]"><label class="block text-sm font-medium text-gray-400">Name</label><input type="text" [ngModel]="customCombatant().name" (ngModelChange)="updateCustomCombatant('name', $event)" name="customName" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                           <div class="flex-none"><label class="block text-sm font-medium text-gray-400">HP</label><input type="number" [ngModel]="customCombatant().hp" (ngModelChange)="updateCustomCombatant('hp', $event)" name="customHp" class="w-20 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                           <div class="flex-none"><label class="block text-sm font-medium text-gray-400">Init</label><input type="number" [ngModel]="customCombatant().initiative" (ngModelChange)="updateCustomCombatant('initiative', $event)" name="customInit" class="w-20 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                       } @else if (addFormSource() === 'Find') {
+                           <div class="flex-auto min-w-[150px]"><label class="block text-sm font-medium text-gray-400">Find Creature</label><input type="text" [(ngModel)]="findCreatureTerm" name="findTerm" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                           <div class="flex-none"><label class="block text-sm font-medium text-gray-400"># PCs</label><input type="number" [(ngModel)]="pcCount" name="pcCount" class="w-16 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                           <div class="flex-none"><label class="block text-sm font-medium text-gray-400">Avg Lvl</label><input type="number" [(ngModel)]="pcLevel" name="pcLevel" class="w-16 mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" /></div>
+                           <button type="button" (click)="handleFindCreature()" [disabled]="isFindingCreature()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md">
+                               {{ isFindingCreature() ? '...' : 'Find' }}
+                           </button>
+                       } @else if (addFormSource() === 'Found') {
+                           <div class="flex-auto min-w-[200px] relative">
+                               <label class="block text-sm font-medium text-gray-400">Filter Found Creatures</label>
+                               <input type="text"
+                                      [ngModel]="foundCreatureFilter()"
+                                      (ngModelChange)="foundCreatureFilter.set($event)"
+                                      (focus)="showFoundCreaturesList.set(true)"
+                                      (blur)="hideFoundCreaturesListWithDelay()"
+                                      placeholder="Type to filter..."
+                                      name="foundFilter"
+                                      class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                     @if(showFoundCreaturesList() && filteredFoundCreatures().length > 0) {
+                                         <div class="absolute top-full left-0 right-0 bg-gray-800 border border-gray-700 rounded-b-md max-h-48 overflow-y-auto z-10">
+                                             @for(creature of filteredFoundCreatures(); track creature.id) {
+                                                 <button type="button"
+                                                         (click)="selectFoundCreature(creature)"
+                                                         class="w-full text-left px-3 py-2 hover:bg-yellow-600">
+                                                   {{ creature.name }}
+                                                 </button>
+                                             }
+                                         </div>
+                                     }
+                           </div>
+                           <div class="flex-auto min-w-[200px]">
+                               <label class="block text-sm font-medium text-gray-400">Selected</label>
+                               <input type="text" [value]="selectedTemplate()" name="selectedFound" disabled class="w-full mt-1 bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-gray-400" />
+                           </div>
+                       } @else {
+                            @for (dropdown of cascadingDropdowns(); track dropdown.level; let i = $index) {
+                             <div class="flex-auto min-w-[200px]">
+                               <label class="block text-sm font-medium text-gray-400">{{ formatName(selectedCodexPath()[i-1] || addFormSource()) }} Category</label>
+                               <select [ngModel]="selectedCodexPath()[i]" (ngModelChange)="handlePathChange(i, $event)" [name]="'path-level-' + i" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                 <option value="">Select...</option>
+                                 @for (option of dropdown.options; track option) {
+                                   <option [value]="option">{{ formatName(option) }}</option>
+                                 }
+                               </select>
+                             </div>
+                           }
+                           <div class="flex-auto min-w-[200px]">
+                               <label class="block text-sm font-medium text-gray-400">Template</label>
+                               <select [(ngModel)]="selectedTemplate" name="template" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                   <option value="">Select...</option>
+                                   @if(selectedTemplate()) {
+                                       <option [value]="selectedTemplate()">{{selectedTemplate()}}</option>
+                                   }
+                               </select>
+                           </div>
+                       }
+
+                       <button type="submit" [disabled]="isSavingCombatant()" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
+                            {{ isSavingCombatant() ? '...' : 'Add to Fight' }}
+                       </button>
+                   </form>
+                   <div class="space-y-2 relative z-10">
+                       @for(c of modifiedCombatants(); track c._id; let i = $index) {
+                           <div
+                             class="p-2 rounded-md border"
+                             [ngClass]="{'bg-yellow-800/50 border-yellow-600': isCombatActive() && currentTurnIndex() === i, 'bg-gray-800/50 border-gray-700': !isCombatActive() || currentTurnIndex() !== i }"
+                             (mouseenter)="showSkillsTooltip($event, c)"
+                             (mouseleave)="hideTooltip()">
+                             <div class="grid grid-cols-12 gap-2 items-center">
+                                 <div class="col-span-1 flex flex-col items-center justify-center">
+                                     <button (click)="moveCombatant(c._id, 'up')" class="text-gray-400 hover:text-white text-xs" [disabled]="i === 0">&#9650;</button>
+                                     <button (click)="moveCombatant(c._id, 'down')" class="text-gray-400 hover:text-white text-xs" [disabled]="i === modifiedCombatants().length - 1">&#9660;</button>
+                                 </div>
+                                 <div class="col-span-1 text-center font-bold text-xl flex items-center justify-center gap-1">
+                                     <input type="number" [ngModel]="c.initiative" (ngModelChange)="handleUpdateCombatant(c._id, 'initiative', $event)" class="w-12 bg-gray-900 border border-gray-600 rounded-md p-1 text-center"/>
+                                     <span class="text-sm text-gray-400 font-normal">({{ c.initiativeMod >= 0 ? '+' : '' }}{{ c.initiativeMod }})</span>
+                                 </div>
+                                 <div class="col-span-4 font-semibold flex items-center">
+                                     <span class="truncate" title="{{c.name}}">{{c.name}}</span>
+                                     <span class="text-xs text-gray-400 font-normal ml-2 whitespace-nowrap">({{ (c.type === 'PC' || c.type === 'NPC') ? 'Lvl' : 'CR' }} {{ getCaseInsensitiveProp(c.baseStats, 'Level') || getCaseInsensitiveProp(c.baseStats, 'CR') || '?' }})</span>
+                                 </div>
+                                 <div class="col-span-3 flex items-center">
+                                     <input type="number" [ngModel]="c.hp" (ngModelChange)="handleUpdateCombatant(c._id, 'hp', $event)" class="w-16 bg-gray-900 border border-gray-600 rounded-md px-2 py-1 text-white" />
+                                     <span class="ml-2 text-gray-400">/ {{c.modifiedStats.maxHp}}</span>
+                                 </div>
+                                 <div class="col-span-1 text-sm text-gray-300">
+                                     <strong>Spd:</strong> {{ c.modifiedStats?.Speed || 'N/A' }}
+                                 </div>
+                                 <div class="col-span-1 text-center">
+                                     <a (mouseenter)="showSkillsTooltip($event, c)" (mouseleave)="hideTooltip()" class="text-gray-400 hover:text-white cursor-pointer">Skills</a>
+                                     <button (click)="toggleDetails(c._id)" class="text-gray-400 hover:text-white ml-2">Details</button>
+                                 </div>
+                                 <div class="col-span-1 text-right">
+                                     <button type="button" (click)="handleRemoveCombatant(c._id)" class="text-red-500 hover:text-red-400 font-bold px-2 text-lg">X</button>
+                                 </div>
+                             </div>
+
+                             <div class="mt-2 text-xs flex justify-between items-start">
+                               <div class="flex flex-wrap gap-2 items-center">
+                                   @for(effect of c.effects; track $index; let effIndex = $index) {
+                                       <span (mouseenter)="showTooltip($event, effect.name, 'effect')" (mouseleave)="hideTooltip()" class="relative group bg-red-900/50 text-red-300 border border-red-700 px-2 py-0.5 rounded-full flex items-center gap-2"
+                                           [ngClass]="{'ring-2 ring-yellow-400': effect.remainingRounds === 1 && effect.unit !== 'permanent'}">
+                                           {{effect.name}}
+                                           @if(effect.unit !== 'permanent') {
+                                                   <span>({{effect.remainingRounds}} rounds left)</span>
+                                           }
+                                           <button (click)="$event.stopPropagation(); handleRemoveEffect(c._id, effIndex)" class="text-red-400 hover:text-red-200 -mr-1">x</button>
+                                       </span>
+                                   }
+                               </div>
+                             </div>
+
+                             @if(expandedCombatant() === c._id) {
+                               <div class="mt-2 p-3 bg-gray-900/50 rounded-lg">
+                                   <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                       <div>
+                                           <h4 class="font-bold mb-2">Combat Stats</h4>
+                                           <div class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                                               <p class="col-span-2">
+                                                   <span class="font-semibold">AC:</span> {{ c.modifiedStats.AC }} @if(c.modifiedStats.AC !== c.baseStats.AC) { <span class="text-gray-400">({{c.baseStats.AC}})</span> }
+                                                   (T: {{ c.modifiedStats.Touch }} @if(c.modifiedStats.Touch !== c.baseStats.Touch) { <span class="text-gray-400">({{c.baseStats.Touch}})</span> },
+                                                   FF: {{ c.modifiedStats['Flat-Footed'] }} @if(c.modifiedStats['Flat-Footed'] !== c.baseStats['Flat-Footed']) { <span class="text-gray-400">({{c.baseStats['Flat-Footed']}})</span> })
+                                               </p>
+                                               <p><span class="font-semibold">Fort:</span> {{ c.modifiedStats.SavesObject.Fort >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Fort }} @if(c.modifiedStats.SavesObject.Fort !== c.baseStats.SavesObject.Fort) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Fort >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Fort }})</span> }</p>
+                                               <p><span class="font-semibold">Ref:</span> {{ c.modifiedStats.SavesObject.Ref >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Ref }} @if(c.modifiedStats.SavesObject.Ref !== c.baseStats.SavesObject.Ref) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Ref >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Ref }})</span> }</p>
+                                               <p><span class="font-semibold">Will:</span> {{ c.modifiedStats.SavesObject.Will >= 0 ? '+' : '' }}{{ c.modifiedStats.SavesObject.Will }} @if(c.modifiedStats.SavesObject.Will !== c.baseStats.SavesObject.Will) { <span class="text-gray-400">({{ c.baseStats.SavesObject.Will >= 0 ? '+' : '' }}{{ c.baseStats.SavesObject.Will }})</span> }</p>
+                                               <p><span class="font-semibold">BAB:</span> {{ c.modifiedStats.BAB }} @if(c.modifiedStats.BAB !== c.baseStats.BAB) { <span class="text-gray-400">({{c.baseStats.BAB}})</span> }</p>
+                                               <p><span class="font-semibold">CMB:</span> {{ c.modifiedStats.CMB }} @if(c.modifiedStats.CMB !== c.baseStats.CMB) { <span class="text-gray-400">({{c.baseStats.CMB}})</span> }</p>
+                                               <p><span class="font-semibold">CMD:</span> {{ c.modifiedStats.CMD }} @if(c.modifiedStats.CMD !== c.baseStats.CMD) { <span class="text-gray-400">({{c.baseStats.CMD}})</span> }</p>
+                                           </div>
+
+                                           <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Ability Scores</h4>
+                                           <div class="grid grid-cols-3 gap-x-4 gap-y-2 text-sm">
+                                               @for(ability of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track ability) {
+                                                   <div class="flex items-center justify-between bg-gray-900/50 p-1 rounded cursor-pointer" (click)="openTempModModal(c._id, ability)">
+                                                       <span class="font-bold">{{ ability }}</span>
+                                                       <div>
+                                                           <span>{{ c.modifiedStats[ability] }}</span>
+                                                           <span class="text-gray-400 text-xs ml-1">({{ getAbilityModifier(c.modifiedStats[ability]) }})</span>
+                                                           @if(c.modifiedStats[ability] !== c.baseStats[ability]) {
+                                                               <span class="text-gray-500 text-xs ml-1">({{ c.baseStats[ability] }})</span>
+                                                           }
+                                                       </div>
+                                                   </div>
+                                               }
+                                           </div>
+
+                                           <div class="flex items-center justify-between">
+                                             <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Defenses</h4>
+                                             <button (click)="openResistancesModal(c)" class="text-sm text-blue-400 hover:text-blue-300">Edit</button>
+                                           </div>
+                                           <div class="text-sm grid grid-cols-2 gap-x-4 gap-y-1">
+                                               <p><span class="font-semibold">DR:</span> {{ getCaseInsensitiveProp(c.modifiedStats, 'DR') || '-' }}</p>
+                                               <p><span class="font-semibold">SR:</span> {{ getCaseInsensitiveProp(c.modifiedStats, 'SR') || '-' }}</p>
+                                               <p class="col-span-2"><span class="font-semibold">Resist:</span> {{ getCaseInsensitiveProp(c.modifiedStats, 'Resist') || '-' }}</p>
+                                               <p class="col-span-2"><span class="font-semibold">Immune:</span> {{ getCaseInsensitiveProp(c.modifiedStats, 'Immune') || '-' }}</p>
+                                           </div>
+
+                                           <div class="flex items-center justify-between">
+                                             <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Skills</h4>
+                                             <div>
+                                               <button (click)="openStatEditModal(c)" class="text-sm text-blue-400 hover:text-blue-300 mr-2">Edit Stats</button>
+                                               <button (click)="openSkillsModal(c)" class="text-sm text-blue-400 hover:text-blue-300">Edit</button>
+                                             </div>
+                                           </div>
+                                           <div class="text-sm grid grid-cols-2 gap-x-4 gap-y-1">
+                                               @for(skill of objectKeys(c.skills); track skill) {
+                                                   <p><span class="font-semibold">{{skill}}:</span> {{c.skills[skill] >= 0 ? '+' : ''}}{{c.skills[skill]}}</p>
+                                               }
+                                           </div>
+                                       </div>
+                                       <div>
+                                           <h4 class="font-semibold text-yellow-400 mb-2">Actions & Gear</h4>
+                                           <div class="space-y-2">
+                                               @if(c.attacks.length > 0) {
+                                                   <div>
+                                                       <h5 class="text-sm font-bold text-gray-300">Attacks</h5>
+                                                       <div class="p-2 bg-gray-900/50 rounded-md space-y-1 mt-1 text-sm font-mono">
+                                                           @for(attack of c.attacks; track $index) {
+                                                               <div>
+                                                                   <span class="text-white">{{ attack.name }}</span> <span class="text-green-400">{{ attack.bonus }}</span> <span class="text-gray-400">({{ attack.damage }})</span>
+                                                               </div>
+                                                           }
+                                                       </div>
+                                                   </div>
+                                               }
+                                               @if(c.allFeats.length > 0) {
+                                                   <div class="mt-2">
+                                                       <h5 class="text-sm font-bold text-gray-300">Feats</h5>
+                                                       <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2">
+                                                           @for(feat of c.allFeats; track feat.id) {
+                                                               <button
+                                                                   (click)="toggleActiveFeat(c._id, feat.id)"
+                                                                   [ngClass]="{
+                                                                       'bg-blue-600 text-white border-blue-400 hover:bg-blue-500': (c.activeFeats || []).includes(feat.id),
+                                                                       'bg-gray-700 text-gray-300 border-gray-600 hover:bg-gray-600': !(c.activeFeats || []).includes(feat.id)
+                                                                   }"
+                                                                   (mouseenter)="showTooltip($event, feat.id, 'rule')" (mouseleave)="hideTooltip()"
+                                                                   class="px-2 py-0.5 rounded border text-xs transition-colors">
+                                                                   {{ feat.name }}
+                                                               </button>
+                                                           }
+                                                       </div>
+                                                   </div>
+                                               }
+                                               @if(c.spells.length > 0) {
+                                                 <div class="mt-2">
+                                                   <div class="flex items-center justify-between">
+                                                       <h5 class="text-sm font-bold text-gray-300">Spells</h5>
+                                                       <button (click)="openSpellSlotsModal(c)" class="text-xs text-blue-400 hover:text-blue-300">Edit Slots</button>
+                                                   </div>
+                                                   <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2 text-xs">
+                                                     @for (spell of c.spells; track spell.id) {
+                                                       <div class="flex items-center gap-1 bg-gray-700 rounded pr-1">
+                                                         <button (click)="handleCastSpell(c, spell, targetSelect.value)" 
+                                                                 (mouseenter)="showTooltip($event, spell.id, 'spell')" 
+                                                                 (mouseleave)="hideTooltip()" 
+                                                                 class="px-2 py-0.5 text-gray-300 hover:text-white hover:bg-gray-600 rounded-l"
+                                                                 title="Cast {{spell.name}}">
+                                                           {{spell.name}}
+                                                         </button>
+                                                         <select #targetSelect class="bg-gray-900 text-xs text-gray-400 border-0 rounded-r focus:ring-0 cursor-pointer" style="max-width: 60px;" (click)="$event.stopPropagation()">
+                                                           <option [value]="c._id">Self</option>
+                                                           @for(target of combatants(); track target._id) {
+                                                             @if(target._id !== c._id) {
+                                                               <option [value]="target._id">{{ target.name.substring(0, 5) }}..</option>
+                                                             }
+                                                           }
+                                                         </select>
+                                                       </div>
+                                                     }
+                                                   </div>
+                                                   @if(c.spellSlots) {
+                                                   <div class="mt-2 text-xs">
+                                                       <h5 class="text-sm font-bold text-gray-300">Spell Slots</h5>
+                                                       <div class="flex flex-wrap gap-x-4 gap-y-1">
+                                                           @for(level of objectKeys(c.spellSlots); track level) {
+                                                               <span>Lvl {{level}}: {{c.spellSlots[level]}}</span>
+                                                           }
+                                                       </div>
+                                                   </div>
+                                                   }
+                                                 </div>
+                                               }
+                                               @if(c.equipment.length > 0 || c.magicItems.length > 0) {
+                                                   <div class="mt-2">
+                                                       <h5 class="text-sm font-bold text-gray-300">Equipment</h5>
+                                                       <div class="p-2 bg-gray-900/50 rounded-md mt-1 flex flex-wrap gap-2 text-xs">
+                                                           @for(item of c.equipment; track item.id) {
+                                                               <span (mouseenter)="showTooltip($event, item.id, 'equipment')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-gray-700 text-gray-300 cursor-pointer">{{item.name}}</span>
+                                                           }
+                                                            @for(item of c.magicItems; track item.id) {
+                                                               <span (mouseenter)="showTooltip($event, item.id, 'magic-item')" (mouseleave)="hideTooltip()" class="px-2 py-0.5 rounded bg-purple-900/50 text-purple-300 border border-purple-700 cursor-pointer">{{item.name}}</span>
+                                                           }
+                                                       </div>
+                                                   </div>
+                                               }
+                                           </div>
+                                           
+                                           <h4 class="font-semibold text-yellow-400 mb-2 mt-4">Add Effects</h4>
+                                           <div class="flex items-center gap-2">
+                                               <div class="relative flex-auto">
+                                                   <input type="text"
+                                                       [ngModel]="newEffectForCombatant(c._id).name"
+                                                       (ngModelChange)="updateNewEffect(c._id, 'name', $event)"
+                                                       (focus)="showEffectList(c._id)"
+                                                       (blur)="hideEffectListWithDelay(c._id)"
+                                                       placeholder="e.g., Bleed or Custom Effect"
+                                                       class="w-full bg-gray-800 border-gray-600 rounded p-1 text-sm" />
+                                                   @if(activeEffectDropdown() === c._id && filteredEffects(c._id).length > 0) {
+                                                       <div class="absolute top-full left-0 min-w-max bg-gray-800 border border-gray-700 rounded-b-md max-h-48 overflow-y-auto z-20">
+                                                           @for(effect of filteredEffects(c._id); track effect) {
+                                                               <button type="button"
+                                                                       (click)="selectEffect(c._id, effect)"
+                                                                       (mouseenter)="showTooltip($event, effect, 'effect')"
+                                                                       (mouseleave)="hideTooltip()"
+                                                                       class="w-full text-left px-3 py-2 hover:bg-yellow-600 relative group whitespace-nowrap">
+                                                                   {{effect}}
+                                                               </button>
+                                                           }
+                                                       </div>
+                                                   }
+                                               </div>
+                                               <input type="number"
+                                                   [ngModel]="newEffectForCombatant(c._id).duration"
+                                                   (ngModelChange)="updateNewEffect(c._id, 'duration', $event)"
+                                                   [disabled]="newEffectForCombatant(c._id).unit === 'permanent'"
+                                                   placeholder="3"
+                                                   class="w-16 bg-gray-800 border-gray-600 rounded p-1 text-sm disabled:bg-gray-700" />
+                                               <select [ngModel]="newEffectForCombatant(c._id).unit"
+                                                   (ngModelChange)="updateNewEffect(c._id, 'unit', $event)"
+                                                   class="bg-gray-800 border-gray-600 rounded p-1 text-sm">
+                                                   <option value="rounds">Rounds</option>
+                                                   <option value="minutes">Minutes</option>
+                                                   <option value="hours">Hours</option>
+                                                   <option value="days">Days</option>
+                                                   <option value="permanent">Permanent</option>
+                                               </select>
+                                               <button (click)="handleAddEffect(c._id)" class="bg-green-600 hover:bg-green-500 text-white font-bold py-1 px-3 rounded text-sm">+</button>
+                                               <button (click)="showCustomEffectModal = c._id" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-1 px-3 rounded text-sm ml-2">Custom</button>
+                                           </div>
+
+                                           @if(showCustomEffectModal === c._id) {
+                                               <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="showCustomEffectModal = null">
+                                                   <div class="bg-gray-800 rounded-lg p-6 w-full max-w-sm border border-gray-700" (click)="$event.stopPropagation()">
+                                                       <h3 class="text-xl font-bold mb-4 text-yellow-400">Create Custom Effect</h3>
+                                                       <input type="text" [(ngModel)]="customEffectName" placeholder="Effect Name" class="w-full mb-2 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                                       <input type="number" [(ngModel)]="customEffectDuration" placeholder="Duration" class="w-full mb-2 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white" />
+                                                       <select [(ngModel)]="customEffectUnit" class="w-full mb-4 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                                                           <option value="rounds">Rounds</option>
+                                                           <option value="minutes">Minutes</option>
+                                                           <option value="hours">Hours</option>
+                                                           <option value="days">Days</option>
+                                                           <option value="permanent">Permanent</option>
+                                                       </select>
+                                                       <button (click)="addCustomEffect(c._id)" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Save Effect</button>
+                                                       <button (click)="showCustomEffectModal = null" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded ml-2">Cancel</button>
+                                                   </div>
+                                               </div>
+                                           }
+                                        </div>
+                                   </div>
+                               </div>
+                             }
+                           </div>
+                       }
+                   </div>
+                   <div class="mt-6">
+                     <button (click)="isLogVisible.set(!isLogVisible())" class="text-gray-400 hover:text-white font-semibold mb-2">
+                       {{ isLogVisible() ? 'Hide' : 'Show' }} Combat Log
+                     </button>
+                     @if(isLogVisible()) {
+                       <div class="bg-gray-900/50 border border-gray-700 rounded-lg p-4 h-64 overflow-y-auto font-mono text-sm text-gray-300">
+                         @for(entry of fight.log; track $index) {
+                           <p class="whitespace-pre-wrap">{{ entry }}</p>
+                         }
+                         @if(!fight.log || fight.log.length === 0) {
+                           <p class="text-gray-500 italic">No events logged yet.</p>
+                         }
+                       </div>
+                     }
+                   </div>
+               </div>
+           } @else {
+             <div class="flex items-center justify-center h-64 text-gray-500">Select or create a fight.</div>
+           }
+       </div>
+   </div>
+</div>
+
+@if(editingCombatantResistances(); as c) {
+ <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeResistancesModal()">
+   <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700" (click)="$event.stopPropagation()">
+     <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Defenses for {{ c.name }}</h3>
+     <div class="space-y-4">
+       <div>
+         <label class="block text-sm font-medium text-gray-400">DR</label>
+         <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'DR')" #drInput class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+       </div>
+       <div>
+         <label class="block text-sm font-medium text-gray-400">SR</label>
+         <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'SR')" #srInput class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+       </div>
+       <div>
+         <label class="block text-sm font-medium text-gray-400">Resist</label>
+         <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'Resist')" #resistInput class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+       </div>
+       <div>
+         <label class="block text-sm font-medium text-gray-400">Immune</label>
+         <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'Immune')" #immuneInput class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+       </div>
+     </div>
+     <div class="mt-6 flex justify-end gap-4">
+       <button (click)="closeResistancesModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+       <button (click)="handleUpdateResistances(c, { DR: drInput.value, SR: srInput.value, Resist: resistInput.value, Immune: immuneInput.value })" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Save</button>
+     </div>
+   </div>
+ </div>
+}
+
+@if(editingCombatantSkills(); as c) {
+ <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeSkillsModal()">
+   <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700" (click)="$event.stopPropagation()">
+     <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Skills for {{ c.name }}</h3>
+     <div class="space-y-2 max-h-60 overflow-y-auto">
+       @for(skillName of objectKeys(getCaseInsensitiveProp(c.stats, 'skills') || {}); track skillName) {
+         <div class="flex items-center gap-2">
+           <input type="text" [value]="skillName" class="flex-grow bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white" readonly>
+           <input type="number" [ngModel]="getCaseInsensitiveProp(c.stats, 'skills')[skillName]" (ngModelChange)="handleUpdateSkill(c, skillName, $event)" class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+           <button (click)="handleRemoveSkill(c, skillName)" class="text-red-500 hover:text-red-400">X</button>
+         </div>
+       }
+     </div>
+     <div class="mt-4 pt-4 border-t border-gray-700">
+       <h4 class="text-lg font-semibold mb-2">Add New Skill</h4>
+       <div class="flex items-center gap-2">
+         <input type="text" [ngModel]="newSkill().name" (ngModelChange)="newSkill.set({name: $event, rank: newSkill().rank})" placeholder="Skill Name" class="flex-grow bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+         <input type="number" [ngModel]="newSkill().rank" (ngModelChange)="newSkill.set({name: newSkill().name, rank: $event})" class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+         <button (click)="handleUpdateSkill(c, newSkill().name, newSkill().rank); newSkill.set({name: '', rank: 0})" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Add</button>
+       </div>
+     </div>
+     <div class="mt-6 flex justify-end">
+       <button (click)="closeSkillsModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Done</button>
+     </div>
+   </div>
+ </div>
+}
+
+@if(editingCombatantSpellSlots(); as c) {
+ <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeSpellSlotsModal()">
+   <div class="bg-gray-800 rounded-lg p-6 w-full max-w-md border border-gray-700" (click)="$event.stopPropagation()">
+     <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Spell Slots for {{ c.name }}</h3>
+     <div class="space-y-2">
+       @for(level of [0,1,2,3,4,5,6,7,8,9]; track level) {
+         <div class="flex items-center gap-2">
+           <label class="w-24">Level {{level}}:</label>
+           <input type="number" [ngModel]="c.spellSlots ? c.spellSlots[level] : 0" (ngModelChange)="(c.spellSlots = c.spellSlots || {})[level] = +$event" class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+         </div>
+       }
+     </div>
+     <div class="mt-6 flex justify-end gap-4">
+       <button (click)="closeSpellSlotsModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+       <button (click)="handleUpdateSpellSlots(c._id, c.spellSlots)" class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Save</button>
+     </div>
+   </div>
+ </div>
+}
+
+@if(editingCombatantStats(); as c) {
+ <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeStatEditModal()">
+   <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700" (click)="$event.stopPropagation()">
+     <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Stats for {{ c.name }}</h3>
+     <div class="grid grid-cols-2 gap-4">
+       @for(stat of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track stat) {
+         <div class="flex items-center gap-2">
+           <label class="w-12">{{stat}}</label>
+           <input type="number" [ngModel]="getCaseInsensitiveProp(c.stats, stat)" (ngModelChange)="handleUpdateCombatantStat(c._id, stat, $event)" class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+         </div>
+       }
+     </div>
+     <div class="mt-6 flex justify-end">
+       <button (click)="closeStatEditModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Done</button>
+     </div>
+   </div>
+ </div>
+}
+
+@if(tooltipContent(); as content) {
+ <div 
+   class="fixed bg-gray-900 border border-indigo-700 text-white text-sm rounded-lg px-3 py-2 min-w-[300px] w-max max-w-md z-50 shadow-lg pointer-events-none"
+   [style.top]="tooltipPosition().top"
+   [style.left]="tooltipPosition().left">
+     <span class="font-bold block mb-1">{{ content.title }}</span>
+     @if(content.status === 'loading') {
+         <span>Loading...</span>
+     } @else if (content.status === 'error') {
+         <span class="text-red-400">{{ content.data?.description || 'Error fetching details.' }}</span>
+     } @else {
+         <span class="whitespace-pre-wrap">{{ content.data?.description || 'No description found.' }}</span>
+     }
+ </div>
+}
+
+@if(editingTempMod(); as modInfo) {
+ <div class="fixed inset-0 bg-black/60 flex items-center justify-center z-50" (click)="closeTempModModal()">
+   <div class="bg-gray-800 rounded-lg p-6 w-full max-w-sm border border-gray-700" (click)="$event.stopPropagation()">
+     <h3 class="text-xl font-bold mb-4 text-yellow-400">Set Temp Mod for {{modInfo.stat}}</h3>
+     <p class="text-gray-400 mb-4">Enter a temporary bonus or penalty. This will stack with other effects.</p>
+     <input
+       type="number"
+       [ngModel]="tempModValue()"
+       (ngModelChange)="setTempModValue($event)"
+       class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white text-center text-lg"
+       (keydown.enter)="handleSetTempMod()"
+     />
+     <div class="flex justify-end space-x-2 mt-6">
+       <button (click)="closeTempModModal()" class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+       <button (click)="handleSetTempMod()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded">Save</button>
+     </div>
+   </div>
+ </div>
+}

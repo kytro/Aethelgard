@@ -9,7 +9,13 @@ import { FormsModule } from '@angular/forms';
   standalone: true,
   imports: [CommonModule, FormsModule],
   templateUrl: './data-browser.component.html',
-  styleUrls: ['./data-browser.component.css']
+  styleUrls: ['./data-browser.component.css'],
+  styles: [`
+    :host {
+      display: block;
+      height: 100%;
+    }
+  `]
 })
 export class DataBrowserComponent {
   http = inject(HttpClient);
