@@ -1,0 +1,22 @@
+{
+  "tools": {
+    "allowed": [
+      "run_shell_command",
+      "cmd",
+      "powershell",
+      "bash",
+      "node",
+      "npm",
+      "npx",
+      "yarn",
+      "docker",
+      "docker-compose",
+      "git",
+      "tofu",
+      "terraform",
+      "python",
+      "python3",
+      "pip"
+    ]
+  }
+}

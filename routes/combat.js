@@ -62,7 +62,6 @@ module.exports = function(db) {
         res.json(combatants);
     });
 
-    // ==================== FULLY CORRECTED ROUTE START ====================
     router.post('/fights/:fightId/combatants', async (req, res) => {
         const { fightId } = req.params;
         let combatantData = req.body;
@@ -116,7 +115,6 @@ module.exports = function(db) {
             res.status(500).json({ message: "Failed to create combatant in the database." });
         }
     });
-    // ===================== FULLY CORRECTED ROUTE END =====================
 
     router.patch('/combatants/:id', async (req, res) => {
         const { id } = req.params;
@@ -201,33 +199,6 @@ module.exports = function(db) {
         await db.collection('dm_toolkit_fights').updateOne(getIdQuery(id), { $set: { currentTurnIndex: newIndex, roundCounter: newRound } });
         const updatedFight = await db.collection('dm_toolkit_fights').findOne(getIdQuery(id));
         res.status(200).json(updatedFight);
-    });
-    
-    // --- Sessions ---
-    router.get('/sessions', async (req, res) => {
-        res.set('Cache-Control', 'no-store');
-        const sessions = await db.collection('dm_toolkit_sessions').find().sort({ createdAt: -1 }).toArray();
-        res.json(sessions);
-    });
-
-    router.post('/sessions', async (req, res) => {
-        const result = await db.collection('dm_toolkit_sessions').insertOne({ title: '', notes: '', createdAt: new Date() });
-        const newSession = await db.collection('dm_toolkit_sessions').findOne({ _id: result.insertedId });
-        res.status(201).json(newSession);
-    });
-
-    router.patch('/sessions/:id', async (req, res) => {
-        const { id } = req.params;
-        const { _id, ...updateData } = req.body; // Destructure and exclude _id
-        await db.collection('dm_toolkit_sessions').updateOne(getIdQuery(id), { $set: updateData });
-        const updatedSession = await db.collection('dm_toolkit_sessions').findOne(getIdQuery(id));
-        res.status(200).json(updatedSession);
-    });
-    
-    router.delete('/sessions/:id', async (req, res) => {
-        const { id } = req.params;
-        await db.collection('dm_toolkit_sessions').deleteOne(getIdQuery(id));
-        res.sendStatus(204);
     });
 
     router.post('/fights/:id/migrate', async (req, res) => {
