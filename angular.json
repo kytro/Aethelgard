@@ -65,7 +65,7 @@
           "builder": "@angular/build:extract-i18n"
         },
         "test": {
-          "builder": "@angular-builders/jest:run",
+          "builder": "@angular-devkit/build-angular:karma",
           "options": {
             "tsConfig": "tsconfig.spec.json",
             "assets": [
@@ -73,7 +73,8 @@
             ],
             "styles": [
               "src/styles.css"
-            ]
+            ],
+            "karmaConfig": "karma.conf.js"
           }
         }
       }
