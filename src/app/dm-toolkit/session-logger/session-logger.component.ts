@@ -1,4 +1,4 @@
-import { Component, signal, inject, HostListener, WritableSignal, effect, input } from '@angular/core';
+import { Component, signal, inject, HostListener, WritableSignal, effect, input, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -68,6 +68,10 @@ interface Session { _id: string; title: string; notes: string; createdAt: any; }
 export class SessionLoggerComponent {
   http = inject(HttpClient);
   
+  @Output() sessionAdded = new EventEmitter<Session>();
+  @Output() sessionUpdated = new EventEmitter<Session>();
+  @Output() sessionDeleted = new EventEmitter<string>();
+
   sessions = input<Session[]>([]);
   currentSession: WritableSignal<Session | null> = signal(null);
   sessionNotes = signal('');
@@ -89,12 +93,15 @@ export class SessionLoggerComponent {
 
   async handleAddSession() {
       const newSession = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit/sessions', {}));
-      this.setCurrentSession({ _id: newSession._id, title: '', notes: '', createdAt: new Date() });
+      const session: Session = { ...newSession, _id: newSession._id, title: '', notes: '', createdAt: new Date() };
+      this.sessionAdded.emit(session);
+      this.setCurrentSession(session);
   }
 
   async handleDeleteSession(id: string) {
       if (!confirm('Are you sure you want to delete this session?')) return;
       await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/sessions/${id}`));
+      this.sessionDeleted.emit(id);
       if (this.currentSession()?._id === id) this.currentSession.set(null);
   }
 
@@ -123,6 +130,7 @@ export class SessionLoggerComponent {
       const updatedSession = await lastValueFrom(this.http.patch<Session>(`/codex/api/dm-toolkit/sessions/${session._id}`, { notes }));
       this.saveStatus.set('Saved');
       this.currentSession.set(updatedSession);
+      this.sessionUpdated.emit(updatedSession);
     } catch (e) {
       console.error("Failed to save session:", e);
       this.saveStatus.set('Error');

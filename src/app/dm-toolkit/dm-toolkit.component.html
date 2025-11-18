@@ -55,11 +55,18 @@
         ></app-npc-generator>
       }
       @case ('session') {
-        <app-session-logger [sessions]="sessions()"></app-session-logger>
+        <app-session-logger 
+          [sessions]="sessions()"
+          (sessionAdded)="onSessionAdded($event)"
+          (sessionUpdated)="onSessionUpdated($event)"
+          (sessionDeleted)="onSessionDeleted($event)"
+        ></app-session-logger>
       }
       @case ('combat-manager') {
         <app-combat-manager 
           [fights]="fights()"
+          (fightAdded)="onFightAdded($event)"
+          (fightDeleted)="onFightDeleted($event)"
           [codex]="codex()"
           [rulesCache]="rulesCache()"
           [equipmentCache]="equipmentCache()"

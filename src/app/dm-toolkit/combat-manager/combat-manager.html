@@ -52,7 +52,9 @@
                        <div class="flex-auto min-w-[120px]">
                            <label class="block text-sm font-medium text-gray-400">Source</label>
                            <select [ngModel]="addFormSource()" (ngModelChange)="handleSourceChange($event)" name="source" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
-                               <option>Custom</option><option>PC</option><option>NPC</option><option>Bestiary</option><option>Find</option><option>Found</option>
+                               @for(source of topLevelCategoryOptions(); track source) {
+                                   <option [value]="source">{{ source }}</option>
+                               }
                            </select>
                        </div>
                        @if(addFormSource() === 'Bestiary') {
@@ -120,8 +122,8 @@
                                <label class="block text-sm font-medium text-gray-400">Template</label>
                                <select [(ngModel)]="selectedTemplate" name="template" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
                                    <option value="">Select...</option>
-                                   @if(selectedTemplate()) {
-                                       <option [value]="selectedTemplate()">{{selectedTemplate()}}</option>
+                                   @for(option of templateOptions(); track option) {
+                                       <option [value]="option">{{ option }}</option>
                                    }
                                </select>
                            </div>

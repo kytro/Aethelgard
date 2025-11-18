@@ -103,4 +103,30 @@ export class DmToolkitComponent implements OnInit {
     }
     return root;
   }
+
+  onFightAdded(fight: any) {
+    this.fights.update(fights => [fight, ...fights]);
+  }
+
+  onFightDeleted(fightId: string) {
+    this.fights.update(fights => fights.filter(f => f._id !== fightId));
+  }
+
+  onSessionAdded(session: any) {
+    this.sessions.update(sessions => [...sessions, session]);
+  }
+
+  onSessionUpdated(session: any) {
+    this.sessions.update(sessions => {
+      const index = sessions.findIndex(s => s._id === session._id);
+      if (index !== -1) {
+        sessions[index] = session;
+      }
+      return [...sessions];
+    });
+  }
+
+  onSessionDeleted(sessionId: string) {
+    this.sessions.update(sessions => sessions.filter(s => s._id !== sessionId));
+  }
 }

@@ -1,5 +1,5 @@
 // services/geminiService.js
-const fetch = require('node-fetch'); // Ensure node-fetch is available or use built-in fetch in Node 18+
+// No longer need to require node-fetch in Node 20+
 
 async function generateContent(db, prompt, options = {}) {
     // 1. Fetch API Key
@@ -34,8 +34,15 @@ async function generateContent(db, prompt, options = {}) {
 
     // Add system instruction if provided (only supported by some models/endpoints, but good to have)
     if (options.systemInstruction) {
-        payload.system_instruction = {
+        payload.systemInstruction = {
             parts: [{ text: options.systemInstruction }]
+        };
+    }
+
+    // Add generationConfig for JSON mode to encourage a JSON response
+    if (options.jsonMode) {
+        payload.generationConfig = {
+            response_mime_type: "application/json",
         };
     }
 

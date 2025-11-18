@@ -77,20 +77,84 @@ interface GeneratedNpc {
               </div>
               <div class="space-y-4">
                 @for (npc of lastGeneratedNpcs(); track npc.name) {
-                  <div class="bg-gray-900/50 p-4 rounded-md">
-                    <h4 class="font-bold text-lg text-white">{{ npc.name }} <span class="text-sm font-normal text-gray-400">({{ npc.race }})</span></h4>
-                    <p class="text-gray-300 mt-1">{{ npc.description }}</p>
+                  <div class="bg-gray-900/50 p-4 rounded-md border border-gray-700">
+                    <h4 class="font-bold text-lg text-yellow-400">{{ npc.name }} <span class="text-sm font-normal text-gray-400">({{ npc.race }})</span></h4>
+                    
+                    @if (npc.class && npc.level) {
+                        <p class="text-purple-400 text-sm font-semibold">{{ npc.class }} {{ npc.level }}</p>
+                    }
+            
+                    <p class="text-gray-300 mt-2">{{ npc.description }}</p>
                     
                     @if (npc.baseStats) {
-                      <div class="grid grid-cols-6 gap-2 mt-3 mb-3">
-                        @for(stat of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track stat) {
-                          <div class="text-center bg-black/30 p-1 rounded">
-                             <span class="block font-semibold text-xs text-gray-500 uppercase">{{stat}}</span>
-                             <span class="block font-bold text-white">{{npc.baseStats[stat] || 10}}</span>
-                          </div>
-                        }
-                      </div>
+                        <div class="grid grid-cols-6 gap-2 mt-3 mb-3">
+                            @for(stat of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track stat) {
+                                <div class="text-center bg-black/30 p-1 rounded">
+                                    <span class="block font-semibold text-xs text-gray-500 uppercase">{{stat}}</span>
+                                    <span class="block font-bold text-white">{{npc.baseStats[stat] || 10}}</span>
+                                </div>
+                            }
+                        </div>
                     }
+            
+                    <div class="space-y-3 mt-3 text-sm">
+                        @if (npc.backstory) {
+                            <div>
+                                <h5 class="font-semibold text-gray-300">Backstory</h5>
+                                <p class="text-gray-400 text-sm italic">{{ npc.backstory }}</p>
+                            </div>
+                        }
+            
+                        @if (npc.skills && objectKeys(npc.skills).length > 0) {
+                            <div>
+                                <h5 class="font-semibold text-gray-300">Skills</h5>
+                                <div class="flex flex-wrap gap-x-4 gap-y-1">
+                                    @for(skill of objectKeys(npc.skills); track skill) {
+                                        <span class="text-gray-400">{{ skill }}: <span class="font-mono text-green-400">{{ npc.skills[skill] }}</span></span>
+                                    }
+                                </div>
+                            </div>
+                        }
+            
+                        @if (npc.feats && npc.feats.length > 0) {
+                            <div>
+                                <h5 class="font-semibold text-gray-300">Feats</h5>
+                                <p class="text-gray-400">{{ npc.feats.join(', ') }}</p>
+                            </div>
+                        }
+            
+                        @if (npc.specialAbilities && npc.specialAbilities.length > 0) {
+                            <div>
+                                <h5 class="font-semibold text-gray-300">Special Abilities</h5>
+                                <p class="text-gray-400">{{ npc.specialAbilities.join(', ') }}</p>
+                            </div>
+                        }
+            
+                        @if (npc.equipment && npc.equipment.length > 0) {
+                            <div>
+                                <h5 class="font-semibold text-gray-300">Equipment</h5>
+                                <p class="text-gray-400">{{ npc.equipment.join(', ') }}</p>
+                            </div>
+                        }
+            
+                        @if (npc.magicItems && npc.magicItems.length > 0) {
+                            <div>
+                                <h5 class="font-semibold text-gray-300">Magic Items</h5>
+                                <p class="text-gray-400">{{ npc.magicItems.join(', ') }}</p>
+                            </div>
+                        }
+            
+                        @if (npc.spells && objectKeys(npc.spells).length > 0) {
+                            <div>
+                                <h5 class="font-semibold text-gray-300">Spells</h5>
+                                @for(level of objectKeys(npc.spells); track level) {
+                                    @if(npc.spells[level].length > 0) {
+                                        <p class="text-gray-400"><b class="text-gray-300">Level {{level}}:</b> {{ npc.spells[level].join(', ') }}</p>
+                                    }
+                                }
+                            </div>
+                        }
+                    </div>
                   </div>
                 }
               </div>
@@ -113,12 +177,14 @@ export class NpcGeneratorComponent {
 
   npcGenQuery = '';
   npcGenContext = '';
-  npcGenGroupName = '';
+  npcGenGroupName = 'People/';
   isGeneratingNpcs = signal(false);
   isSavingNpcs = signal(false);
   lastGeneratedNpcs = signal<GeneratedNpc[]>([]);
   lastGeneratedGroupName = signal('');
   npcSaveSuccessMessage = signal('');
+
+  objectKeys = Object.keys;
 
   private mapToIds(names: string[], cache: Map<string, any>, idPrefix: string): string[] {
     if (!names || !Array.isArray(names)) return [];
@@ -179,8 +245,46 @@ export class NpcGeneratorComponent {
     const npcCount = this.lastGeneratedNpcs().length;
 
     try {
-        const basePath = pathString.split('/').filter(p => p.trim() !== '').map(p => p.trim().replace(/ /g, '_'));
-        const codexEntries: any[] = [];
+        const basePath = pathString.replace(/\\/g, '/').split('/').filter(p => p.trim() !== '').map(p => p.trim().replace(/ /g, '_'));
+        const allNewEntries: any[] = [];
+
+        // Create parent folder entries if they don't exist
+        const codex = this.codex();
+        if (codex) {
+            for (let i = 0; i < basePath.length; i++) {
+                const currentPath = basePath.slice(0, i + 1);
+                
+                let node = codex;
+                let pathExists = true;
+                for (const component of currentPath) {
+                    if (node && typeof node === 'object' && node.hasOwnProperty(component)) {
+                        node = node[component];
+                    } else {
+                        pathExists = false;
+                        break;
+                    }
+                }
+
+                if (!pathExists) {
+                    const pathName = currentPath[currentPath.length - 1];
+                    const parentEntry = {
+                        path_components: currentPath,
+                        name: pathName.replace(/_/g, ' '),
+                        content: null,
+                        category: null,
+                        summary: null
+                    };
+                    allNewEntries.push(parentEntry);
+
+                    // Simulate the creation in the local codex object to prevent duplicates in this run
+                    let tempNode = codex;
+                    for(const p of currentPath) {
+                        if(!tempNode[p]) tempNode[p] = {};
+                        tempNode = tempNode[p];
+                    }
+                }
+            }
+        }
 
         for (const npc of this.lastGeneratedNpcs()) {
             const completeBaseStats = calculateCompleteBaseStats(npc.baseStats);
@@ -243,11 +347,11 @@ export class NpcGeneratorComponent {
                 content: codexContent,
                 summary: `Auto-generated entry for NPC: ${npc.name}`
             };
-            codexEntries.push(codexEntry);
+            allNewEntries.push(codexEntry);
         }
 
-        if (codexEntries.length > 0) {
-            await lastValueFrom(this.http.put('/codex/api/codex/data', codexEntries));
+        if (allNewEntries.length > 0) {
+            await lastValueFrom(this.http.put('/codex/api/codex/data', allNewEntries));
         }
 
         this.lastGeneratedNpcs.set([]);

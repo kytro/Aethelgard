@@ -1,4 +1,4 @@
-import { Component, signal, inject, input, computed, WritableSignal, effect } from '@angular/core';
+import { Component, signal, inject, input, computed, WritableSignal, effect, Output, EventEmitter } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -26,6 +26,8 @@ interface CascadingDropdown { level: number; options: string[]; }
   styleUrls: []
 })
 export class CombatManagerComponent {
+  @Output() fightAdded = new EventEmitter<Fight>();
+  @Output() fightDeleted = new EventEmitter<string>();
   fights = input<Fight[]>([]);
   codex = input<any>();
   rulesCache = input<Map<string, any>>(new Map());
@@ -70,6 +72,7 @@ export class CombatManagerComponent {
   addFormSource = signal<string>('Custom');
   selectedCodexPath = signal<string[]>([]);
   selectedTemplate = signal('');
+  templateOptions = signal<string[]>([]);
   selectedFoundCreatureId = signal<string | null>(null);
 
   showCustomEffectModal: string | null = null;
@@ -115,16 +118,28 @@ export class CombatManagerComponent {
     effect(() => {
       const source = this.addFormSource();
       const path = this.selectedCodexPath();
+      this.selectedTemplate.set('');
+      this.templateOptions.set([]);
+
       if (!source || ['Custom', 'Found', 'Find'].includes(source)) {
-        if (source !== 'Found') this.selectedTemplate.set('');
         return;
       }
+
       const fullPath = [source, ...path];
       const node = this.getNodeFromCodex(fullPath);
+
       if (node && Array.isArray(node.content)) {
-        this.selectedTemplate.set(fullPath[fullPath.length - 1]);
-      } else {
-        this.selectedTemplate.set('');
+        const options = node.content.map((item: any) => typeof item === 'string' ? item : item.name).filter(Boolean);
+        this.templateOptions.set(options.sort());
+      } else if (node && typeof node === 'object') {
+        const options = Object.keys(node).filter(key => {
+          const child = node[key];
+          return typeof child === 'object' && child !== null && !['summary', 'content', 'category', 'isCombatManagerSource', 'enableCompletionTracking', 'isCompleted', 'path_components'].includes(key);
+        });
+        // Check if this is a leaf node for templates (i.e., no more sub-categories)
+        if (options.length > 0 && !this.cascadingDropdowns().some(d => d.level === path.length)) {
+            this.templateOptions.set(options.sort().map(formatName));
+        }
       }
     });
   }
@@ -153,8 +168,7 @@ export class CombatManagerComponent {
     this.isSavingFight.set(true);
     try {
       const newFight = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit/fights', { name: this.newFightName }));
-      // Since fights are an input signal, we assume parent refreshes data, OR we emit an event. 
-      // For this architecture, we should ideally emit an output, but since the parent subscribes to Firestore, it should update automatically.
+      this.fightAdded.emit(newFight);
       this.newFightName = '';
     } catch(e) { console.error(e); }  
     finally { this.isSavingFight.set(false); }
@@ -164,6 +178,7 @@ export class CombatManagerComponent {
     if (!confirm('Are you sure you want to delete this fight?')) return;
     try {
       await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/fights/${id}`));
+      this.fightDeleted.emit(id);
       if (this.currentFight()?._id === id) this.currentFight.set(null);
     } catch(e) { console.error(e); }
   }
