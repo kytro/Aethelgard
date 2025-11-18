@@ -101,6 +101,8 @@ export class CombatManagerComponent {
   editingCombatantSpellSlots = signal<CombatantWithModifiers | null>(null);
   newSkill = signal<{name: string, rank: number}>({name: '', rank: 0});
 
+  readonly METADATA_KEYS = ['summary', 'content', 'category', 'isCombatManagerSource', 'enableCompletionTracking', 'isCompleted', 'path_components'];
+
   constructor() {
     effect(() => {
       const fight = this.currentFight();
@@ -118,6 +120,7 @@ export class CombatManagerComponent {
     effect(() => {
       const source = this.addFormSource();
       const path = this.selectedCodexPath();
+      // Always reset template selection and options when path changes
       this.selectedTemplate.set('');
       this.templateOptions.set([]);
 
@@ -128,20 +131,54 @@ export class CombatManagerComponent {
       const fullPath = [source, ...path];
       const node = this.getNodeFromCodex(fullPath);
 
-      if (node && Array.isArray(node.content)) {
+      if (!node) return;
+
+      // Case 1: Node has a 'content' array (simple list of templates)
+      if (Array.isArray(node.content)) {
         const options = node.content.map((item: any) => typeof item === 'string' ? item : item.name).filter(Boolean);
         this.templateOptions.set(options.sort());
-      } else if (node && typeof node === 'object') {
-        const options = Object.keys(node).filter(key => {
-          const child = node[key];
-          return typeof child === 'object' && child !== null && !['summary', 'content', 'category', 'isCombatManagerSource', 'enableCompletionTracking', 'isCompleted', 'path_components'].includes(key);
+        return;
+      }
+
+      // Case 2: Node is an object that might contain templates (leaf nodes)
+      if (typeof node === 'object') {
+        const templateKeys = Object.keys(node).filter(key => {
+            const child = node[key];
+            // A child is a template if it's a valid object but not a navigable category itself.
+            return typeof child === 'object' && 
+                   child !== null && 
+                   !this.METADATA_KEYS.includes(key) && 
+                   !this._isNavigable(child);
         });
-        // Check if this is a leaf node for templates (i.e., no more sub-categories)
-        if (options.length > 0 && !this.cascadingDropdowns().some(d => d.level === path.length)) {
-            this.templateOptions.set(options.sort().map(formatName));
+
+        if (templateKeys.length > 0) {
+            this.templateOptions.set(templateKeys.sort().map(formatName));
         }
       }
     });
+  }
+
+  private _isNavigable(node: any): boolean {
+    if (typeof node !== 'object' || node === null) return false;
+    if (node.entityId || node.id) return false; // Templates are not navigable.
+
+    const childKeys = Object.keys(node).filter(key => 
+        typeof node[key] === 'object' && 
+        node[key] !== null && 
+        !this.METADATA_KEYS.includes(key)
+    );
+
+    if (childKeys.length === 0) return false;
+
+    // It's not navigable if it ONLY contains templates.
+    const allChildrenAreTemplates = childKeys.every(key => {
+        const child = node[key];
+        return child && (child.entityId || child.id);
+    });
+    if (allChildrenAreTemplates) return false;
+
+    // It IS navigable if it contains at least one navigable sub-category.
+    return childKeys.some(key => this._isNavigable(node[key]));
   }
 
   async loadCombatants(fightId: string) {
@@ -781,11 +818,16 @@ export class CombatManagerComponent {
     let pathIdx = 0;
     while(true) {
       const node = this.getNodeFromCodex(currentPath);
-      if (!node || typeof node !== 'object' || Array.isArray(node.content)) { break; }
+      if (!node || typeof node !== 'object' || Array.isArray(node.content) || !this._isNavigable(node)) { break; }
+      
       const options = Object.keys(node).filter(key => {
         const child = node[key];
-        return typeof child === 'object' && child !== null && !['summary', 'content', 'category', 'isCombatManagerSource', 'enableCompletionTracking', 'isCompleted', 'path_components'].includes(key);
+        return typeof child === 'object' && 
+               child !== null && 
+               !this.METADATA_KEYS.includes(key) && 
+               this._isNavigable(child);
       });
+
       if (options.length === 0) break;
       dropdowns.push({ level: pathIdx, options: options.sort() });
       const nextSegment = this.selectedCodexPath()[pathIdx];
