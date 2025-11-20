@@ -5,39 +5,39 @@ import { FormsModule } from '@angular/forms';
 import { lastValueFrom } from 'rxjs';
 import { calculateCompleteBaseStats } from '../dm-toolkit.utils';
 
-interface GeneratedNpc { 
-  name: string; 
-  race: string; 
-  description: string; 
-  baseStats?: { [key: string]: number }; 
-  class?: string;
-  level?: number;
-  skills?: { [key: string]: number };
-  equipment?: string[];
-  magicItems?: string[];
-  spells?: { [level: string]: string[] };
-  backstory?: string;
-  gender?: string;
-  alignment?: string;
-  deity?: string;
-  hitDice?: string;
-  baseAttackBonus?: number;
-  feats?: string[];
-  specialAbilities?: string[];
-  spellSlots?: { [level: string]: number };
-  cmb?: number;
-  cmd?: number;
-  dr?: string;
-  sr?: number;
-  resist?: string;
-  immune?: string;
+interface GeneratedNpc {
+    name: string;
+    race: string;
+    description: string;
+    baseStats?: { [key: string]: number };
+    class?: string;
+    level?: number;
+    skills?: { [key: string]: number };
+    equipment?: string[];
+    magicItems?: string[];
+    spells?: { [level: string]: string[] };
+    backstory?: string;
+    gender?: string;
+    alignment?: string;
+    deity?: string;
+    hitDice?: string;
+    baseAttackBonus?: number;
+    feats?: string[];
+    specialAbilities?: string[];
+    spellSlots?: { [level: string]: number };
+    cmb?: number;
+    cmd?: number;
+    dr?: string;
+    sr?: number;
+    resist?: string;
+    immune?: string;
 }
 
 @Component({
-  selector: 'app-npc-generator',
-  standalone: true,
-  imports: [CommonModule, FormsModule],
-  template: `
+    selector: 'app-npc-generator',
+    standalone: true,
+    imports: [CommonModule, FormsModule],
+    template: `
     <div id="npc-generator">
       <h2 class="text-3xl font-bold text-white mb-6 text-yellow-500">NPC Generator</h2>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -166,203 +166,203 @@ interface GeneratedNpc {
   `
 })
 export class NpcGeneratorComponent {
-  codex = input<any>();
-  existingEntityNames = input<string[]>([]);
-  rulesCache = input<Map<string, any>>(new Map());
-  equipmentCache = input<Map<string, any>>(new Map());
-  magicItemsCache = input<Map<string, any>>(new Map());
-  spellsCache = input<Map<string, any>>(new Map());
+    codex = input<any>();
+    existingEntityNames = input<string[]>([]);
+    rulesCache = input<Map<string, any>>(new Map());
+    equipmentCache = input<Map<string, any>>(new Map());
+    magicItemsCache = input<Map<string, any>>(new Map());
+    spellsCache = input<Map<string, any>>(new Map());
 
-  http = inject(HttpClient);
+    http = inject(HttpClient);
 
-  npcGenQuery = '';
-  npcGenContext = '';
-  npcGenGroupName = 'People/';
-  isGeneratingNpcs = signal(false);
-  isSavingNpcs = signal(false);
-  lastGeneratedNpcs = signal<GeneratedNpc[]>([]);
-  lastGeneratedGroupName = signal('');
-  npcSaveSuccessMessage = signal('');
+    npcGenQuery = '';
+    npcGenContext = '';
+    npcGenGroupName = 'People/';
+    isGeneratingNpcs = signal(false);
+    isSavingNpcs = signal(false);
+    lastGeneratedNpcs = signal<GeneratedNpc[]>([]);
+    lastGeneratedGroupName = signal('');
+    npcSaveSuccessMessage = signal('');
 
-  objectKeys = Object.keys;
+    objectKeys = Object.keys;
 
-  private mapToIds(names: string[], cache: Map<string, any>, idPrefix: string): string[] {
-    if (!names || !Array.isArray(names)) return [];
-    return names.map(name => {
-        for (const [id, item] of cache.entries()) {
-            if (item.name.toLowerCase() === name.toLowerCase()) {
-                return id;
+    private mapToIds(names: string[], cache: Map<string, any>, idPrefix: string): string[] {
+        if (!names || !Array.isArray(names)) return [];
+        return names.map(name => {
+            for (const [id, item] of cache.entries()) {
+                if (item.name.toLowerCase() === name.toLowerCase()) {
+                    return id;
+                }
             }
-        }
-        return ''; 
-    }).filter(id => id !== '');
-  }
-
-  async handleGenerateNpcs() {
-    if (!this.npcGenQuery.trim() || !this.npcGenContext.trim() || !this.npcGenGroupName.trim()) return;
-    
-    if (this.codex()?.['Generated Characters']?.[this.npcGenGroupName]) {
-        console.error("Group name already exists"); 
-        this.npcSaveSuccessMessage.set('Error: Group name already exists in Codex.');
-        return;
+            return '';
+        }).filter(id => id !== '');
     }
 
-    this.isGeneratingNpcs.set(true);
-    this.lastGeneratedNpcs.set([]);
-    this.npcSaveSuccessMessage.set('');
-    
-    try {
-        const codexData = this.codex();
-        const places = codexData ? codexData['Places'] : null;
+    async handleGenerateNpcs() {
+        if (!this.npcGenQuery.trim() || !this.npcGenContext.trim() || !this.npcGenGroupName.trim()) return;
 
-        const npcs = await lastValueFrom(this.http.post<GeneratedNpc[]>('/codex/api/dm-toolkit-ai/generate-npcs', {
-            query: this.npcGenQuery,
-            options: {
-                codex: {
-                    userContext: this.npcGenContext,
-                    worldPlaces: places
-                },
-                existingEntityNames: this.existingEntityNames()
-            }
-        }));
-        
-        this.lastGeneratedNpcs.set(npcs);
-        this.lastGeneratedGroupName.set(this.npcGenGroupName);
-    } catch (e: any) { 
-        console.error("Error generating NPCs:", e); 
-        this.npcSaveSuccessMessage.set(`Error: ${e.error?.error || e.message}`);
-    } finally { 
-        this.isGeneratingNpcs.set(false); 
-    }
-  }
-
-  async handleSaveNpcsToCodex() {
-    if (this.lastGeneratedNpcs().length === 0 || !this.lastGeneratedGroupName()) return;
-
-    this.isSavingNpcs.set(true);
-    this.npcSaveSuccessMessage.set('');
-    const pathString = this.lastGeneratedGroupName();
-    const npcCount = this.lastGeneratedNpcs().length;
-
-    try {
-        const basePath = pathString.replace(/\\/g, '/').split('/').filter(p => p.trim() !== '').map(p => p.trim().replace(/ /g, '_'));
-        const allNewEntries: any[] = [];
-
-        // Create parent folder entries if they don't exist
-        const codex = this.codex();
-        if (codex) {
-            for (let i = 0; i < basePath.length; i++) {
-                const currentPath = basePath.slice(0, i + 1);
-                
-                let node = codex;
-                let pathExists = true;
-                for (const component of currentPath) {
-                    if (node && typeof node === 'object' && node.hasOwnProperty(component)) {
-                        node = node[component];
-                    } else {
-                        pathExists = false;
-                        break;
-                    }
-                }
-
-                if (!pathExists) {
-                    const pathName = currentPath[currentPath.length - 1];
-                    const parentEntry = {
-                        path_components: currentPath,
-                        name: pathName.replace(/_/g, ' '),
-                        content: null,
-                        category: null,
-                        summary: null
-                    };
-                    allNewEntries.push(parentEntry);
-
-                    // Simulate the creation in the local codex object to prevent duplicates in this run
-                    let tempNode = codex;
-                    for(const p of currentPath) {
-                        if(!tempNode[p]) tempNode[p] = {};
-                        tempNode = tempNode[p];
-                    }
-                }
-            }
+        if (this.codex()?.['Generated Characters']?.[this.npcGenGroupName]) {
+            console.error("Group name already exists");
+            this.npcSaveSuccessMessage.set('Error: Group name already exists in Codex.');
+            return;
         }
 
-        for (const npc of this.lastGeneratedNpcs()) {
-            const completeBaseStats = calculateCompleteBaseStats(npc.baseStats);
-
-            const linkedEquipment = this.mapToIds(npc.equipment || [], this.equipmentCache(), 'eq_');
-            const linkedMagicItems = this.mapToIds(npc.magicItems || [], this.magicItemsCache(), 'mi_');
-            const rulesToLink = [...(npc.feats || []), ...(npc.specialAbilities || [])];
-            const linkedRules = this.mapToIds(rulesToLink, this.rulesCache(), 'feat_');
-
-            const linkedSpells: { [level: string]: string[] } = {};
-            if (npc.spells) {
-                for (const level of Object.keys(npc.spells)) {
-                    linkedSpells[level] = this.mapToIds(npc.spells[level], this.spellsCache(), 'sp_');
-                }
-            }
-
-            const entity: any = {
-                name: npc.name,
-                baseStats: completeBaseStats,
-                description: npc.description,
-                sourceCodexPath: [...basePath, npc.name.replace(/ /g, '_')],
-                rules: linkedRules,
-                equipment: linkedEquipment,
-                magicItems: linkedMagicItems,
-                spells: linkedSpells,
-                deity: npc.deity || '',
-            };
-
-            if(npc.class) entity.baseStats.Class = npc.class;
-            if(npc.level) entity.baseStats.Level = npc.level;
-            if(npc.gender) entity.baseStats.Gender = npc.gender;
-            if(npc.alignment) entity.baseStats.Alignment = npc.alignment;
-            if(npc.hitDice) entity.baseStats.HitDice = npc.hitDice;
-            if(npc.baseAttackBonus !== undefined) entity.baseStats.BaseAttackBonus = npc.baseAttackBonus;
-            if(npc.spellSlots) entity.spellSlots = npc.spellSlots;
-            if(npc.cmb !== undefined) entity.baseStats.CMB = npc.cmb;
-            if(npc.cmd !== undefined) entity.baseStats.CMD = npc.cmd;
-            if(npc.dr) entity.baseStats.DR = npc.dr;
-            if(npc.sr) entity.baseStats.SR = npc.sr;
-            if(npc.resist) entity.baseStats.Resist = npc.resist;
-            if(npc.immune) entity.baseStats.Immune = npc.immune;
-            if(npc.skills) entity.baseStats.skills = npc.skills;
-
-            const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
-
-            const codexContent = [
-                { type: 'statblock', entityId: newEntity.insertedId },
-                { type: 'heading', text: 'Description' },
-                { type: 'paragraph', text: npc.description }
-            ];
-            
-            if(npc.backstory) {
-                 codexContent.push({ type: 'heading', text: 'Backstory' });
-                 codexContent.push({ type: 'paragraph', text: npc.backstory });
-            }
-
-            const codexEntry = {
-                path_components: [...basePath, npc.name.replace(/ /g, '_')],
-                name: npc.name.replace(/ /g, '_'),
-                content: codexContent,
-                summary: `Auto-generated entry for NPC: ${npc.name}`
-            };
-            allNewEntries.push(codexEntry);
-        }
-
-        if (allNewEntries.length > 0) {
-            await lastValueFrom(this.http.put('/codex/api/codex/data', allNewEntries));
-        }
-
+        this.isGeneratingNpcs.set(true);
         this.lastGeneratedNpcs.set([]);
-        this.lastGeneratedGroupName.set('');
-        this.npcSaveSuccessMessage.set(`${npcCount} NPCs saved to codex under "${pathString}"!`);
+        this.npcSaveSuccessMessage.set('');
 
-    } catch (error: any) {
-        console.error('Error saving NPCs:', error);
-        this.npcSaveSuccessMessage.set(`Failed to save: ${error.message}`);
-    } finally {
-        this.isSavingNpcs.set(false);
+        try {
+            const codexData = this.codex();
+            const places = codexData ? codexData['Places'] : null;
+
+            const npcs = await lastValueFrom(this.http.post<GeneratedNpc[]>('/codex/api/dm-toolkit-ai/generate-npcs', {
+                query: this.npcGenQuery,
+                options: {
+                    codex: {
+                        userContext: this.npcGenContext,
+                        worldPlaces: places
+                    },
+                    existingEntityNames: this.existingEntityNames()
+                }
+            }));
+
+            this.lastGeneratedNpcs.set(npcs);
+            this.lastGeneratedGroupName.set(this.npcGenGroupName);
+        } catch (e: any) {
+            console.error("Error generating NPCs:", e);
+            this.npcSaveSuccessMessage.set(`Error: ${e.error?.error || e.message}`);
+        } finally {
+            this.isGeneratingNpcs.set(false);
+        }
     }
-  }
+
+    async handleSaveNpcsToCodex() {
+        if (this.lastGeneratedNpcs().length === 0 || !this.lastGeneratedGroupName()) return;
+
+        this.isSavingNpcs.set(true);
+        this.npcSaveSuccessMessage.set('');
+        const pathString = this.lastGeneratedGroupName();
+        const npcCount = this.lastGeneratedNpcs().length;
+
+        try {
+            const basePath = pathString.replace(/\\/g, '/').split('/').filter(p => p.trim() !== '').map(p => p.trim().replace(/ /g, '_'));
+            const allNewEntries: any[] = [];
+
+            // Create parent folder entries if they don't exist
+            const codex = this.codex();
+            if (codex) {
+                for (let i = 0; i < basePath.length; i++) {
+                    const currentPath = basePath.slice(0, i + 1);
+
+                    let node = codex;
+                    let pathExists = true;
+                    for (const component of currentPath) {
+                        if (node && typeof node === 'object' && node.hasOwnProperty(component)) {
+                            node = node[component];
+                        } else {
+                            pathExists = false;
+                            break;
+                        }
+                    }
+
+                    if (!pathExists) {
+                        const pathName = currentPath[currentPath.length - 1];
+                        const parentEntry = {
+                            path_components: currentPath,
+                            name: pathName.replace(/_/g, ' '),
+                            content: null,
+                            category: null,
+                            summary: null
+                        };
+                        allNewEntries.push(parentEntry);
+
+                        // Simulate the creation in the local codex object to prevent duplicates in this run
+                        let tempNode = codex;
+                        for (const p of currentPath) {
+                            if (!tempNode[p]) tempNode[p] = {};
+                            tempNode = tempNode[p];
+                        }
+                    }
+                }
+            }
+
+            for (const npc of this.lastGeneratedNpcs()) {
+                const completeBaseStats = calculateCompleteBaseStats(npc.baseStats);
+
+                const linkedEquipment = this.mapToIds(npc.equipment || [], this.equipmentCache(), 'eq_');
+                const linkedMagicItems = this.mapToIds(npc.magicItems || [], this.magicItemsCache(), 'mi_');
+                const rulesToLink = [...(npc.feats || []), ...(npc.specialAbilities || [])];
+                const linkedRules = this.mapToIds(rulesToLink, this.rulesCache(), 'feat_');
+
+                const linkedSpells: { [level: string]: string[] } = {};
+                if (npc.spells) {
+                    for (const level of Object.keys(npc.spells)) {
+                        linkedSpells[level] = this.mapToIds(npc.spells[level], this.spellsCache(), 'sp_');
+                    }
+                }
+
+                const entity: any = {
+                    name: npc.name,
+                    baseStats: completeBaseStats,
+                    description: npc.description,
+                    sourceCodexPath: [...basePath, npc.name.replace(/ /g, '_')],
+                    rules: linkedRules,
+                    equipment: linkedEquipment,
+                    magicItems: linkedMagicItems,
+                    spells: linkedSpells,
+                    deity: npc.deity || '',
+                };
+
+                if (npc.class) entity.baseStats.Class = npc.class;
+                if (npc.level) entity.baseStats.Level = npc.level;
+                if (npc.gender) entity.baseStats.Gender = npc.gender;
+                if (npc.alignment) entity.baseStats.Alignment = npc.alignment;
+                if (npc.hitDice) entity.baseStats.HitDice = npc.hitDice;
+                if (npc.baseAttackBonus !== undefined) entity.baseStats.BaseAttackBonus = npc.baseAttackBonus;
+                if (npc.spellSlots) entity.spellSlots = npc.spellSlots;
+                if (npc.cmb !== undefined) entity.baseStats.CMB = npc.cmb;
+                if (npc.cmd !== undefined) entity.baseStats.CMD = npc.cmd;
+                if (npc.dr) entity.baseStats.DR = npc.dr;
+                if (npc.sr) entity.baseStats.SR = npc.sr;
+                if (npc.resist) entity.baseStats.Resist = npc.resist;
+                if (npc.immune) entity.baseStats.Immune = npc.immune;
+                if (npc.skills) entity.baseStats.skills = npc.skills;
+
+                const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
+
+                const codexContent = [
+                    { type: 'heading', text: 'Description' },
+                    { type: 'paragraph', text: npc.description }
+                ];
+
+                if (npc.backstory) {
+                    codexContent.push({ type: 'heading', text: 'Backstory' });
+                    codexContent.push({ type: 'paragraph', text: npc.backstory });
+                }
+
+                const codexEntry = {
+                    path_components: [...basePath, npc.name.replace(/ /g, '_')],
+                    name: npc.name.replace(/ /g, '_'),
+                    content: codexContent,
+                    summary: `Auto-generated entry for NPC: ${npc.name}`,
+                    entityId: newEntity.insertedId
+                };
+                allNewEntries.push(codexEntry);
+            }
+
+            if (allNewEntries.length > 0) {
+                await lastValueFrom(this.http.put('/codex/api/codex/data', allNewEntries));
+            }
+
+            this.lastGeneratedNpcs.set([]);
+            this.lastGeneratedGroupName.set('');
+            this.npcSaveSuccessMessage.set(`${npcCount} NPCs saved to codex under "${pathString}"!`);
+
+        } catch (error: any) {
+            console.error('Error saving NPCs:', error);
+            this.npcSaveSuccessMessage.set(`Failed to save: ${error.message}`);
+        } finally {
+            this.isSavingNpcs.set(false);
+        }
+    }
 }
