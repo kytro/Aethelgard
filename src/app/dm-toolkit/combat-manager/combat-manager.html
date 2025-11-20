@@ -120,7 +120,7 @@
                            }
                            <div class="flex-auto min-w-[200px]">
                                <label class="block text-sm font-medium text-gray-400">Template</label>
-                               <select [(ngModel)]="selectedTemplate" name="template" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
+                               <select [ngModel]="selectedTemplate()" (ngModelChange)="selectedTemplate.set($event)" name="template" class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
                                    <option value="">Select...</option>
                                    @for(option of templateOptions(); track option) {
                                        <option [value]="option">{{ option }}</option>
