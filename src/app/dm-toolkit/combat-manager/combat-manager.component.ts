@@ -3,9 +3,9 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { lastValueFrom } from 'rxjs';
-import { 
-    formatTime, getAbilityModifierAsNumber, calculateCompleteBaseStats, getCaseInsensitiveProp,
-    formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP 
+import {
+  formatTime, getAbilityModifierAsNumber, calculateCompleteBaseStats, getCaseInsensitiveProp,
+  formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP
 } from '../dm-toolkit.utils';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
@@ -35,14 +35,14 @@ export class CombatManagerComponent {
   magicItemsCache = input<Map<string, any>>(new Map());
   spellsCache = input<Map<string, any>>(new Map());
   effectsCache = input<Map<string, CacheEntry>>(new Map());
-  entitiesCache = input<any[]>([]); 
+  entitiesCache = input<any[]>([]);
   foundCreatures = input<FoundCreature[]>([]);
 
   http = inject(HttpClient);
 
   currentFight: WritableSignal<Fight | null> = signal(null);
   combatants = signal<Combatant[]>([]);
-  
+
   newFightName = '';
   isSavingFight = signal(false);
   isSavingCombatant = signal(false);
@@ -68,7 +68,7 @@ export class CombatManagerComponent {
   tooltipContent = signal<{ title: string, data: any, status: 'loading' | 'loaded' | 'error' } | null>(null);
   tooltipPosition = signal({ top: '0px', left: '0px' });
   isLogVisible = signal<boolean>(false);
-  
+
   addFormSource = signal<string>('Custom');
   selectedCodexPath = signal<string[]>([]);
   selectedTemplate = signal('');
@@ -99,7 +99,7 @@ export class CombatManagerComponent {
   editingCombatantResistances = signal<CombatantWithModifiers | null>(null);
   editingCombatantSkills = signal<CombatantWithModifiers | null>(null);
   editingCombatantSpellSlots = signal<CombatantWithModifiers | null>(null);
-  newSkill = signal<{name: string, rank: number}>({name: '', rank: 0});
+  newSkill = signal<{ name: string, rank: number }>({ name: '', rank: 0 });
 
   readonly METADATA_KEYS = ['summary', 'content', 'category', 'isCombatManagerSource', 'enableCompletionTracking', 'isCompleted', 'path_components'];
 
@@ -143,16 +143,16 @@ export class CombatManagerComponent {
       // Case 2: Node is an object that might contain templates (leaf nodes)
       if (typeof node === 'object') {
         const templateKeys = Object.keys(node).filter(key => {
-            const child = node[key];
-            // A child is a template if it's a valid object but not a navigable category itself.
-            return typeof child === 'object' && 
-                   child !== null && 
-                   !this.METADATA_KEYS.includes(key) && 
-                   !this._isNavigable(child);
+          const child = node[key];
+          // A child is a template if it's a valid object but not a navigable category itself.
+          return typeof child === 'object' &&
+            child !== null &&
+            !this.METADATA_KEYS.includes(key) &&
+            !this._isNavigable(child);
         });
 
         if (templateKeys.length > 0) {
-            this.templateOptions.set(templateKeys.sort().map(formatName));
+          this.templateOptions.set(templateKeys.sort().map(formatName));
         }
       }
     });
@@ -162,42 +162,35 @@ export class CombatManagerComponent {
     if (typeof node !== 'object' || node === null) return false;
     if (node.entityId || node.id) return false; // Templates are not navigable.
 
-    const childKeys = Object.keys(node).filter(key => 
-        typeof node[key] === 'object' && 
-        node[key] !== null && 
-        !this.METADATA_KEYS.includes(key)
+    const childKeys = Object.keys(node).filter(key =>
+      typeof node[key] === 'object' &&
+      node[key] !== null &&
+      !this.METADATA_KEYS.includes(key)
     );
 
     if (childKeys.length === 0) return false;
 
-    // It's not navigable if it ONLY contains templates.
-    const allChildrenAreTemplates = childKeys.every(key => {
-        const child = node[key];
-        return child && (child.entityId || child.id);
-    });
-    if (allChildrenAreTemplates) return false;
-
-    // It IS navigable if it contains at least one navigable sub-category.
-    return childKeys.some(key => this._isNavigable(node[key]));
+    // It IS navigable if it contains at least one navigable sub-category OR if it contains templates.
+    return true;
   }
 
   async loadCombatants(fightId: string) {
     try {
-        const combatants = await lastValueFrom(this.http.get<Combatant[]>(`/codex/api/dm-toolkit/fights/${fightId}/combatants`));
-        this.combatants.set(combatants);
-    } catch(e) { console.error(e); }
+      const combatants = await lastValueFrom(this.http.get<Combatant[]>(`/codex/api/dm-toolkit/fights/${fightId}/combatants`));
+      this.combatants.set(combatants);
+    } catch (e) { console.error(e); }
   }
 
   async logAction(message: string) {
     const fight = this.currentFight();
     if (!fight) return;
-    const timestamp = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit'});
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const entry = `[${timestamp}] ${message}`;
     const updatedLog = [...(fight.log || []), entry];
     this.currentFight.update(f => f ? ({ ...f, log: updatedLog }) : null);
     try {
-        await lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/fights/${fight._id}`, { log: updatedLog }));
-    } catch(e) { console.error("Failed to save log entry:", e); }
+      await lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/fights/${fight._id}`, { log: updatedLog }));
+    } catch (e) { console.error("Failed to save log entry:", e); }
   }
 
   async handleAddFight() {
@@ -207,7 +200,7 @@ export class CombatManagerComponent {
       const newFight = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit/fights', { name: this.newFightName }));
       this.fightAdded.emit(newFight);
       this.newFightName = '';
-    } catch(e) { console.error(e); }  
+    } catch (e) { console.error(e); }
     finally { this.isSavingFight.set(false); }
   }
 
@@ -217,7 +210,7 @@ export class CombatManagerComponent {
       await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/fights/${id}`));
       this.fightDeleted.emit(id);
       if (this.currentFight()?._id === id) this.currentFight.set(null);
-    } catch(e) { console.error(e); }
+    } catch (e) { console.error(e); }
   }
 
   setCurrentFight(fight: Fight) {
@@ -226,8 +219,8 @@ export class CombatManagerComponent {
     this.currentFight.set(fight);
   }
 
-  updateCustomCombatant(field: 'name'|'hp'|'initiative', val: any) { 
-      this.customCombatant.update(c => ({...c, [field]: val})); 
+  updateCustomCombatant(field: 'name' | 'hp' | 'initiative', val: any) {
+    this.customCombatant.update(c => ({ ...c, [field]: val }));
   }
 
   async handleAddCombatant(event: Event) {
@@ -238,63 +231,63 @@ export class CombatManagerComponent {
     let combatantData: Partial<Combatant> = {};
 
     try {
-        const source = this.addFormSource();
-        if (source === 'Custom') {
-            const custom = this.customCombatant();
-            if (!custom.name) throw new Error("Name required.");
-            combatantData = { name: custom.name, initiative: +custom.initiative, hp: +custom.hp, maxHp: +custom.hp, type: 'Custom', stats: {} };
-        } else if (source === 'Found') {
-            const entityId = this.selectedFoundCreatureId();
-            if (!entityId) throw new Error("Select a creature.");
-            const found = this.foundCreatures().find(f => f.id === entityId);
-            let hpVal = 10;
-            if (found && found.hp) hpVal = this.computeHpFromString(String(found.hp), this.monsterHpOption);
-            combatantData = { type: 'Bestiary', entityId: entityId, hp: hpVal, maxHp: hpVal };
-        } else {
-            const templateName = this.selectedTemplate();
-            if (!templateName) throw new Error("Select a template.");
-            
-            // Resolve Codex Node
-            const fullPath = [source, ...this.selectedCodexPath(), templateName].filter(Boolean);
-            const node = this.getNodeFromCodex(fullPath);
-            let resolvedEntityId: string | undefined;
-            let hpVal = 10;
+      const source = this.addFormSource();
+      if (source === 'Custom') {
+        const custom = this.customCombatant();
+        if (!custom.name) throw new Error("Name required.");
+        combatantData = { name: custom.name, initiative: +custom.initiative, hp: +custom.hp, maxHp: +custom.hp, type: 'Custom', stats: {} };
+      } else if (source === 'Found') {
+        const entityId = this.selectedFoundCreatureId();
+        if (!entityId) throw new Error("Select a creature.");
+        const found = this.foundCreatures().find(f => f.id === entityId);
+        let hpVal = 10;
+        if (found && found.hp) hpVal = this.computeHpFromString(String(found.hp), this.monsterHpOption);
+        combatantData = { type: 'Bestiary', entityId: entityId, hp: hpVal, maxHp: hpVal };
+      } else {
+        const templateName = this.selectedTemplate();
+        if (!templateName) throw new Error("Select a template.");
 
-            if (node) {
-                if ((node as any).entityId) resolvedEntityId = (node as any).entityId;
-                else if ((node as any).id) resolvedEntityId = (node as any).id;
-                
-                const hpField = getCaseInsensitiveProp((node as any).baseStats || node, 'hp') || getCaseInsensitiveProp((node as any).baseStats || node, 'HP');
-                if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
-            }
+        // Resolve Codex Node
+        const fullPath = [source, ...this.selectedCodexPath(), templateName].filter(Boolean);
+        const node = this.getNodeFromCodex(fullPath);
+        let resolvedEntityId: string | undefined;
+        let hpVal = 10;
 
-            if (!resolvedEntityId) {
-                const entities = this.entitiesCache();
-                const resolvedEntity = entities.find((e: any) => e.name === templateName || e.name === formatName(templateName));
-                resolvedEntityId = resolvedEntity?.id;
-                if (resolvedEntity && hpVal === 10) {
-                    const hpField = getCaseInsensitiveProp(resolvedEntity.baseStats || {}, 'hp') || getCaseInsensitiveProp(resolvedEntity.baseStats || {}, 'HP');
-                    if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
-                }
-            }
+        if (node) {
+          if ((node as any).entityId) resolvedEntityId = (node as any).entityId;
+          else if ((node as any).id) resolvedEntityId = (node as any).id;
 
-            if (!resolvedEntityId) throw new Error(`Template '${templateName}' not found.`);
-            combatantData = { type: source, entityId: resolvedEntityId, hp: hpVal, maxHp: hpVal };
+          const hpField = getCaseInsensitiveProp((node as any).baseStats || node, 'hp') || getCaseInsensitiveProp((node as any).baseStats || node, 'HP');
+          if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
         }
 
-        const newCombatant = await lastValueFrom(this.http.post<Combatant>(`/codex/api/dm-toolkit/fights/${fight._id}/combatants`, combatantData));
-        this.combatants.update(c => [...c, newCombatant].sort((a, b) => (b.initiative || 0) - (a.initiative || 0) || a.name.localeCompare(b.name)));
-        this.logAction(`${newCombatant.name} added. HP: ${newCombatant.hp}, Init: ${newCombatant.initiative}`);
-        
-        this.customCombatant.set({ name: '', initiative: 10, hp: 10 });
-        this.selectedCodexPath.set([]);
-        this.selectedTemplate.set('');
-        this.selectedFoundCreatureId.set(null);
-        this.addFormSource.set('Custom');
+        if (!resolvedEntityId) {
+          const entities = this.entitiesCache();
+          const resolvedEntity = entities.find((e: any) => e.name === templateName || e.name === formatName(templateName));
+          resolvedEntityId = resolvedEntity?.id;
+          if (resolvedEntity && hpVal === 10) {
+            const hpField = getCaseInsensitiveProp(resolvedEntity.baseStats || {}, 'hp') || getCaseInsensitiveProp(resolvedEntity.baseStats || {}, 'HP');
+            if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
+          }
+        }
 
-    } catch (e: any) { 
-        console.error(e); 
-        alert(e.error?.message || e.message);
+        if (!resolvedEntityId) throw new Error(`Template '${templateName}' not found.`);
+        combatantData = { type: source, entityId: resolvedEntityId, hp: hpVal, maxHp: hpVal };
+      }
+
+      const newCombatant = await lastValueFrom(this.http.post<Combatant>(`/codex/api/dm-toolkit/fights/${fight._id}/combatants`, combatantData));
+      this.combatants.update(c => [...c, newCombatant].sort((a, b) => (b.initiative || 0) - (a.initiative || 0) || a.name.localeCompare(b.name)));
+      this.logAction(`${newCombatant.name} added. HP: ${newCombatant.hp}, Init: ${newCombatant.initiative}`);
+
+      this.customCombatant.set({ name: '', initiative: 10, hp: 10 });
+      this.selectedCodexPath.set([]);
+      this.selectedTemplate.set('');
+      this.selectedFoundCreatureId.set(null);
+      this.addFormSource.set('Custom');
+
+    } catch (e: any) {
+      console.error(e);
+      alert(e.error?.message || e.message);
     } finally { this.isSavingCombatant.set(false); }
   }
 
@@ -307,11 +300,11 @@ export class CombatManagerComponent {
   }
 
   async handleUpdateCombatant(id: string, field: keyof Combatant, val: any) {
-     const combatant = this.combatants().find(c => c._id === id);
-     if (!combatant) return;
-     const valueToPatch = (typeof val === 'number' || !isNaN(+val)) && field !== 'effects' ? +val : val;
-     await lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/combatants/${id}`, { [field]: valueToPatch }));
-     this.combatants.update(c => c.map(cb => cb._id === id ? {...cb, [field]: valueToPatch} : cb));
+    const combatant = this.combatants().find(c => c._id === id);
+    if (!combatant) return;
+    const valueToPatch = (typeof val === 'number' || !isNaN(+val)) && field !== 'effects' ? +val : val;
+    await lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/combatants/${id}`, { [field]: valueToPatch }));
+    this.combatants.update(c => c.map(cb => cb._id === id ? { ...cb, [field]: valueToPatch } : cb));
   }
 
   async handleStartCombat() {
@@ -380,27 +373,27 @@ export class CombatManagerComponent {
     if (!this.findCreatureTerm) return;
     this.isFindingCreature.set(true);
     try {
-        const creatures = await lastValueFrom(this.http.post<FoundCreature[]>('/codex/api/dm-toolkit-ai/creature', {
-            query: this.findCreatureTerm, options: { pcCount: this.pcCount(), pcLevel: this.pcLevel() }
-        }));
-        // We need to update the parent's list via DB to share state, or emit event.
-        // Assuming the backend stores these in `dm_toolkit_found_creatures`.
-        // Since the original code used Gemini to fetch then saved to DB, we should check if the API did that.
-        // The API route `creature` just returns JSON. We need to save it.
-        // ... Logic to save to DB ...
-        // To simplify, we will just update the local view for selection if API doesn't save.
-        // BUT, for consistency, let's assume the API returns data and we select it.
-        // The component input `foundCreatures` comes from DB.
-        // If we want to persist, we must post to a collection route.
-        // For now, we will rely on the immediate response.
-        // (Note: In a full refactor, we'd move DB saving to the backend AI route).
-    } catch(e) { console.error(e); } 
+      const creatures = await lastValueFrom(this.http.post<FoundCreature[]>('/codex/api/dm-toolkit-ai/creature', {
+        query: this.findCreatureTerm, options: { pcCount: this.pcCount(), pcLevel: this.pcLevel() }
+      }));
+      // We need to update the parent's list via DB to share state, or emit event.
+      // Assuming the backend stores these in `dm_toolkit_found_creatures`.
+      // Since the original code used Gemini to fetch then saved to DB, we should check if the API did that.
+      // The API route `creature` just returns JSON. We need to save it.
+      // ... Logic to save to DB ...
+      // To simplify, we will just update the local view for selection if API doesn't save.
+      // BUT, for consistency, let's assume the API returns data and we select it.
+      // The component input `foundCreatures` comes from DB.
+      // If we want to persist, we must post to a collection route.
+      // For now, we will rely on the immediate response.
+      // (Note: In a full refactor, we'd move DB saving to the backend AI route).
+    } catch (e) { console.error(e); }
     finally { this.isFindingCreature.set(false); }
   }
-  
-  selectFoundCreature(creature: FoundCreature) { 
-    this.selectedTemplate.set(creature.name); 
-    this.foundCreatureFilter.set(creature.name); 
+
+  selectFoundCreature(creature: FoundCreature) {
+    this.selectedTemplate.set(creature.name);
+    this.foundCreatureFilter.set(creature.name);
     this.selectedFoundCreatureId.set(creature.id);
     this.showFoundCreaturesList.set(false);
     this.addFormSource.set('Found');
@@ -409,7 +402,7 @@ export class CombatManagerComponent {
   filteredFoundCreatures = computed(() => this.foundCreatures().filter(c => c.name.toLowerCase().includes(this.foundCreatureFilter().toLowerCase())));
 
   // --- Logic Helpers ---
-  
+
   computeHpFromString = (hpString: string, option: 'average' | 'rolled' | 'max'): number => {
     if (!hpString) return 10;
     const diceMatch = hpString.match(/(\d+)d(\d+)(?:\s*([+-]\s*\d+))?/i);
@@ -463,259 +456,259 @@ export class CombatManagerComponent {
   openResistancesModal(combatant: CombatantWithModifiers) { this.editingCombatantResistances.set(combatant); }
   closeResistancesModal() { this.editingCombatantResistances.set(null); }
   async handleUpdateResistances(combatant: CombatantWithModifiers, resistances: any) {
-      const newStats = { ...combatant.stats, ...resistances };
-      await this.handleUpdateCombatant(combatant._id, 'stats', newStats);
-      this.closeResistancesModal();
+    const newStats = { ...combatant.stats, ...resistances };
+    await this.handleUpdateCombatant(combatant._id, 'stats', newStats);
+    this.closeResistancesModal();
   }
 
   openSkillsModal(combatant: CombatantWithModifiers) { this.editingCombatantSkills.set(combatant); }
-  closeSkillsModal() { this.editingCombatantSkills.set(null); this.newSkill.set({name: '', rank: 0}); }
+  closeSkillsModal() { this.editingCombatantSkills.set(null); this.newSkill.set({ name: '', rank: 0 }); }
   async handleUpdateSkill(combatant: CombatantWithModifiers, skillName: string, rank: number) {
-      if (!skillName) return;
-      const skills = getCaseInsensitiveProp(combatant.stats, 'skills') || {};
-      const newSkills = { ...skills, [skillName]: rank };
-      await this.handleUpdateCombatant(combatant._id, 'stats', { ...combatant.stats, skills: newSkills });
+    if (!skillName) return;
+    const skills = getCaseInsensitiveProp(combatant.stats, 'skills') || {};
+    const newSkills = { ...skills, [skillName]: rank };
+    await this.handleUpdateCombatant(combatant._id, 'stats', { ...combatant.stats, skills: newSkills });
   }
   async handleRemoveSkill(combatant: CombatantWithModifiers, skillName: string) {
-      const skills = getCaseInsensitiveProp(combatant.stats, 'skills') || {};
-      const newSkills = { ...skills };
-      delete newSkills[skillName];
-      await this.handleUpdateCombatant(combatant._id, 'stats', { ...combatant.stats, skills: newSkills });
+    const skills = getCaseInsensitiveProp(combatant.stats, 'skills') || {};
+    const newSkills = { ...skills };
+    delete newSkills[skillName];
+    await this.handleUpdateCombatant(combatant._id, 'stats', { ...combatant.stats, skills: newSkills });
   }
 
   openSpellSlotsModal(combatant: CombatantWithModifiers) { this.editingCombatantSpellSlots.set(combatant); }
   closeSpellSlotsModal() { this.editingCombatantSpellSlots.set(null); }
   async handleUpdateSpellSlots(combatantId: string, spellSlots: any) {
-      await this.handleUpdateCombatant(combatantId, 'spellSlots', spellSlots);
-      this.closeSpellSlotsModal();
+    await this.handleUpdateCombatant(combatantId, 'spellSlots', spellSlots);
+    this.closeSpellSlotsModal();
   }
 
   // --- Complex Computed ---
   modifiedCombatants = computed<CombatantWithModifiers[]>(() => {
     return this.combatants().map(c => {
-        const entity = c.entityId ? this.entitiesCache().find(e => e.id === c.entityId) : null;
-        const baseStats = calculateCompleteBaseStats(c.stats);
-        // Saves parsing
-        const savesStr = getCaseInsensitiveProp(baseStats, 'Saves');
-        const resSaves = { Fort: 0, Ref: 0, Will: 0 };
-        if (typeof savesStr === 'string') {
-            resSaves.Fort = parseInt(savesStr.match(/Fort\s*([+-]?\d+)/i)?.[1]||'0',10);
-            resSaves.Ref = parseInt(savesStr.match(/Ref\s*([+-]?\d+)/i)?.[1]||'0',10);
-            resSaves.Will = parseInt(savesStr.match(/Will\s*([+-]?\d+)/i)?.[1]||'0',10);
-        } else {
-            resSaves.Fort=getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con')); 
-            resSaves.Ref=getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex')); 
-            resSaves.Will=getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
-        }
-        baseStats.SavesObject = resSaves;
-        
-        const allFeats = entity ? (entity.rules || []).map((id: string) => ({ id, ...this.rulesCache().get(id) })).filter((f: any) => f.name) : [];
-        
-        const mappedEquipment = entity ? (entity.equipment || []).map((id: string) => ({ id, ...this.equipmentCache().get(id), isMagic: false })).filter((e: any) => e.name) : [];
-        const mappedMagicItems = entity ? (entity.magicItems || []).map((id: string) => ({ id, ...this.magicItemsCache().get(id), isMagic: true })).filter((mi: any) => mi.name) : [];
+      const entity = c.entityId ? this.entitiesCache().find(e => e.id === c.entityId) : null;
+      const baseStats = calculateCompleteBaseStats(c.stats);
+      // Saves parsing
+      const savesStr = getCaseInsensitiveProp(baseStats, 'Saves');
+      const resSaves = { Fort: 0, Ref: 0, Will: 0 };
+      if (typeof savesStr === 'string') {
+        resSaves.Fort = parseInt(savesStr.match(/Fort\s*([+-]?\d+)/i)?.[1] || '0', 10);
+        resSaves.Ref = parseInt(savesStr.match(/Ref\s*([+-]?\d+)/i)?.[1] || '0', 10);
+        resSaves.Will = parseInt(savesStr.match(/Will\s*([+-]?\d+)/i)?.[1] || '0', 10);
+      } else {
+        resSaves.Fort = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
+        resSaves.Ref = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
+        resSaves.Will = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
+      }
+      baseStats.SavesObject = resSaves;
 
-        // Combine equipment
-        const combinedItemsMap = new Map<string, any>();
-        [...mappedEquipment, ...mappedMagicItems].forEach(item => {
-            if (item.id) { 
-                if (combinedItemsMap.has(item.id) && !item.isMagic) return; 
-                combinedItemsMap.set(item.id, item);
+      const allFeats = entity ? (entity.rules || []).map((id: string) => ({ id, ...this.rulesCache().get(id) })).filter((f: any) => f.name) : [];
+
+      const mappedEquipment = entity ? (entity.equipment || []).map((id: string) => ({ id, ...this.equipmentCache().get(id), isMagic: false })).filter((e: any) => e.name) : [];
+      const mappedMagicItems = entity ? (entity.magicItems || []).map((id: string) => ({ id, ...this.magicItemsCache().get(id), isMagic: true })).filter((mi: any) => mi.name) : [];
+
+      // Combine equipment
+      const combinedItemsMap = new Map<string, any>();
+      [...mappedEquipment, ...mappedMagicItems].forEach(item => {
+        if (item.id) {
+          if (combinedItemsMap.has(item.id) && !item.isMagic) return;
+          combinedItemsMap.set(item.id, item);
+        }
+      });
+      const uniqueItems = Array.from(combinedItemsMap.values());
+      const equipment = uniqueItems.filter(item => !item.isMagic);
+      const magicItems = uniqueItems.filter(item => item.isMagic);
+
+      let spellIds: string[] = [];
+      if (entity && entity.spells && typeof entity.spells === 'object') {
+        spellIds = Object.values(entity.spells).flat() as string[];
+      }
+      const spells = entity ? (spellIds).map(id => ({ id, ...this.spellsCache().get(id) })).filter(s => s.name) : [];
+
+      const allMods: { [stat: string]: { [type: string]: (number | string)[] } } = {};
+      const addMod = (stat: string, type: string, value: number | string) => {
+        if (!allMods[stat]) allMods[stat] = {};
+        if (!allMods[stat][type]) allMods[stat][type] = [];
+        allMods[stat][type].push(value);
+      };
+
+      (c.effects || []).forEach(effect => {
+        const cached = this.effectsCache().get(effect.name);
+        if (cached?.data?.modifiers) Object.entries(cached.data.modifiers).forEach(([s, m]: [string, any]) => addMod(s, m.type, m.value));
+      });
+      Object.entries(c.tempMods || {}).forEach(([s, v]) => addMod(s, 'untyped', v));
+      (c.activeFeats || []).forEach(featId => {
+        const featData = this.rulesCache().get(featId);
+        if (featData?.effects) featData.effects.forEach((eff: any) => addMod(eff.target, eff.type, eff.value));
+      });
+
+      const finalBonuses: { [key: string]: number } = {};
+      const stringyMods: { [key: string]: string[] } = {};
+
+      for (const stat in allMods) {
+        finalBonuses[stat] = 0;
+        stringyMods[stat] = [];
+        for (const type in allMods[stat]) {
+          const numVals = allMods[stat][type].filter((v): v is number => typeof v === 'number');
+          stringyMods[stat].push(...allMods[stat][type].filter((v): v is string => typeof v === 'string'));
+          if (numVals.length > 0) {
+            if (['dodge', 'untyped', 'penalty', 'circumstance', 'morale', 'competence'].includes(type)) finalBonuses[stat] += numVals.reduce((s, v) => s + v, 0);
+            else {
+              const pos = numVals.filter(v => v > 0);
+              const neg = numVals.filter(v => v < 0);
+              if (pos.length > 0) finalBonuses[stat] += Math.max(...pos);
+              if (neg.length > 0) finalBonuses[stat] += Math.min(...neg);
             }
-        });
-        const uniqueItems = Array.from(combinedItemsMap.values());
-        const equipment = uniqueItems.filter(item => !item.isMagic);
-        const magicItems = uniqueItems.filter(item => item.isMagic);
-        
-        let spellIds: string[] = [];
-        if (entity && entity.spells && typeof entity.spells === 'object') {
-          spellIds = Object.values(entity.spells).flat() as string[];
+          }
         }
-        const spells = entity ? (spellIds).map(id => ({ id, ...this.spellsCache().get(id) })).filter(s => s.name) : [];
+      }
 
-        const allMods: { [stat: string]: { [type: string]: (number | string)[] } } = {};
-        const addMod = (stat: string, type: string, value: number | string) => {
-            if (!allMods[stat]) allMods[stat] = {};
-            if (!allMods[stat][type]) allMods[stat][type] = [];
-            allMods[stat][type].push(value);
+      const modifiedStats: { [key: string]: any } = { ...baseStats };
+      const modifiedSaves = { ...baseStats.SavesObject };
+
+      for (const stat in finalBonuses) {
+        const bonus = finalBonuses[stat];
+        if (stat === 'Saves') { modifiedSaves.Fort += bonus; modifiedSaves.Ref += bonus; modifiedSaves.Will += bonus; }
+        else if (['Reflex', 'Ref'].includes(stat)) modifiedSaves.Ref += bonus;
+        else if (['Fortitude', 'Fort'].includes(stat)) modifiedSaves.Fort += bonus;
+        else if (stat === 'Will') modifiedSaves.Will += bonus;
+        else if (typeof getCaseInsensitiveProp(modifiedStats, stat) !== 'undefined') {
+          const baseVal = parseInt(String(getCaseInsensitiveProp(modifiedStats, stat)).match(/-?\d+/)?.[0] || '0', 10);
+          if (!isNaN(baseVal)) modifiedStats[stat] = baseVal + bonus;
+        }
+      }
+      (stringyMods['Speed'] || []).forEach(v => { if (v === 'half') modifiedStats['Speed'] = `${Math.floor(parseInt(String(getCaseInsensitiveProp(modifiedStats, 'Speed')).match(/\d+/)?.[0] || '30', 10) / 2)} ft.`; });
+
+      const dexModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
+      const conModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Con')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
+      const wisModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Wis')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
+      modifiedSaves.Ref += dexModDiff; modifiedSaves.Fort += conModDiff; modifiedSaves.Will += wisModDiff;
+      modifiedStats['AC'] = (getCaseInsensitiveProp(modifiedStats, 'AC') || 10) + dexModDiff;
+      modifiedStats['Touch'] = (getCaseInsensitiveProp(modifiedStats, 'Touch') || 10) + dexModDiff;
+      if (conModDiff !== 0) {
+        const lvl = getCaseInsensitiveProp(baseStats, 'Level') || parseInt(String(getCaseInsensitiveProp(baseStats, 'HP') || '1d8').match(/\((\d+)d\d+/)?.[1] || '1', 10);
+        modifiedStats['maxHp'] = (c.maxHp || 10) + (conModDiff * lvl);
+        if (modifiedStats['maxHp'] < 1) modifiedStats['maxHp'] = 1;
+      } else modifiedStats['maxHp'] = c.maxHp || getCaseInsensitiveProp(baseStats, 'maxHp');
+      const formatSaves = (s: { Fort: number; Ref: number; Will: number }) => `Fort ${s.Fort >= 0 ? '+' : ''}${s.Fort}, Ref ${s.Ref >= 0 ? '+' : ''}${s.Ref}, Will ${s.Will >= 0 ? '+' : ''}${s.Will}`;
+      modifiedStats['Saves'] = formatSaves(modifiedSaves);
+      modifiedStats['SavesObject'] = modifiedSaves;
+
+      const initiativeMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
+
+      const parseAttacks = (s: any) => {
+        const attacks: ParsedAttack[] = [];
+        const melee = getCaseInsensitiveProp(s, 'Melee') || '';
+        const ranged = getCaseInsensitiveProp(s, 'Ranged') || '';
+        const parse = (str: string) => {
+          const regex = /(.+?)\s*([+-]\d+(?:\/[+-]\d+)*)\s*\((.+?)\)/g;
+          let m; while ((m = regex.exec(str)) !== null) attacks.push({ name: m[1].trim(), bonus: m[2].trim(), damage: m[3].trim() });
         };
+        parse(melee); parse(ranged);
+        return attacks;
+      }
+      const naturalAttacks = parseAttacks(baseStats);
 
-        (c.effects || []).forEach(effect => {
-            const cached = this.effectsCache().get(effect.name);
-            if (cached?.data?.modifiers) Object.entries(cached.data.modifiers).forEach(([s, m]: [string, any]) => addMod(s, m.type, m.value));
-        });
-        Object.entries(c.tempMods || {}).forEach(([s, v]) => addMod(s, 'untyped', v));
-        (c.activeFeats || []).forEach(featId => {
-            const featData = this.rulesCache().get(featId);
-            if (featData?.effects) featData.effects.forEach((eff: any) => addMod(eff.target, eff.type, eff.value));
-        });
+      // Weapon attack generation logic
+      const weaponAttacks: ParsedAttack[] = [];
+      const allItems = [...equipment, ...magicItems];
+      const weapons = allItems.filter(item => item.type === 'weapon' && item.properties);
+      const hasWeaponFinesse = allFeats.some((f: any) => f.name === 'Weapon Finesse');
+      const powerAttackFeat = allFeats.find((f: any) => f.name === 'Power Attack');
+      const hasPowerAttack = powerAttackFeat && (c.activeFeats || []).includes(powerAttackFeat.id);
 
-        const finalBonuses: { [key: string]: number } = {};
-        const stringyMods: { [key: string]: string[] } = {};
+      for (const weapon of weapons) {
+        const props = weapon.properties || {};
+        const weaponName = weapon.name || 'Unknown Weapon';
+        const lowerWeaponName = weaponName.toLowerCase();
+        const isRanged = props.range || lowerWeaponName.includes('bow') || lowerWeaponName.includes('crossbow') || lowerWeaponName.includes('sling');
+        const isThrown = props.range && parseInt(props.range) > 0 && !lowerWeaponName.includes('bow') && !lowerWeaponName.includes('crossbow');
+        const isLight = props.light || lowerWeaponName.includes('dagger') || lowerWeaponName.includes('shortsword') || lowerWeaponName.includes('handaxe');
 
-        for (const stat in allMods) {
-            finalBonuses[stat] = 0;
-            stringyMods[stat] = [];
-            for (const type in allMods[stat]) {
-                const numVals = allMods[stat][type].filter((v): v is number => typeof v === 'number');
-                stringyMods[stat].push(...allMods[stat][type].filter((v): v is string => typeof v === 'string'));
-                if (numVals.length > 0) {
-                    if (['dodge', 'untyped', 'penalty', 'circumstance', 'morale', 'competence'].includes(type)) finalBonuses[stat] += numVals.reduce((s, v) => s + v, 0);
-                    else {
-                        const pos = numVals.filter(v => v > 0);
-                        const neg = numVals.filter(v => v < 0);
-                        if (pos.length > 0) finalBonuses[stat] += Math.max(...pos);
-                        if (neg.length > 0) finalBonuses[stat] += Math.min(...neg);
-                    }
-                }
+        let attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
+        let damageAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
+
+        if (isRanged && !isThrown) {
+          attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
+          const isComposite = lowerWeaponName.includes('composite');
+          damageAbilityMod = isComposite ? getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str')) : 0;
+        } else if (hasWeaponFinesse && isLight) {
+          attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
+        }
+
+        const enhancementBonusMatch = weaponName.match(/^(\+\d+)/);
+        const enhancementBonus = enhancementBonusMatch ? parseInt(enhancementBonusMatch[1], 10) : 0;
+
+        let powerAttackPenalty = 0;
+        let powerAttackDamage = 0;
+        if (hasPowerAttack && !isRanged) {
+          const bab = getCaseInsensitiveProp(modifiedStats, 'BAB') || 0;
+          powerAttackPenalty = bab >= 12 ? -4 : bab >= 8 ? -3 : bab >= 4 ? -2 : -1;
+          powerAttackDamage = Math.abs(powerAttackPenalty) * 2;
+        }
+
+        const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty;
+        const formattedAttackBonus = totalAttackBonus >= 0 ? `+${totalAttackBonus}` : `${totalAttackBonus}`;
+
+        let totalDamageBonus = damageAbilityMod + enhancementBonus + powerAttackDamage;
+        let damageString = props.damage_m || '1d6';
+        if (totalDamageBonus !== 0) damageString += totalDamageBonus > 0 ? `+${totalDamageBonus}` : ` ${totalDamageBonus}`;
+        const critString = props.critical ? ` (${props.critical})` : '';
+
+        weaponAttacks.push({ name: weaponName, bonus: formattedAttackBonus, damage: `${damageString}${critString}`.trim() });
+      }
+
+      let allAttacks = [...naturalAttacks, ...weaponAttacks];
+      if (!allAttacks.some(a => a.name.toLowerCase().includes('unarmed strike'))) {
+        const strMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
+        const bab = getCaseInsensitiveProp(modifiedStats, 'BAB') || 0;
+        const hasImprovedUnarmedStrike = allFeats.some((f: any) => f.name === 'Improved Unarmed Strike');
+        const unarmedAttackBonus = bab + strMod;
+        const formattedBonus = unarmedAttackBonus >= 0 ? `+${unarmedAttackBonus}` : `${unarmedAttackBonus}`;
+        const strDamageBonus = strMod > 0 ? `+${strMod}` : strMod !== 0 ? ` ${strMod}` : '';
+        const unarmedDamage = `1d3${strDamageBonus}${hasImprovedUnarmedStrike ? '' : ' (nonlethal)'}`;
+        allAttacks.push({ name: 'Unarmed Strike', bonus: formattedBonus, damage: unarmedDamage });
+      }
+
+      // Skills parsing
+      const skills: { [key: string]: number } = {};
+      const skillsObject = getCaseInsensitiveProp(baseStats, 'skills');
+      if (skillsObject && typeof skillsObject === 'object' && Object.keys(skillsObject).length > 0) {
+        Object.assign(skills, skillsObject);
+      } else {
+        const skillsString = getCaseInsensitiveProp(baseStats, 'Skills') || '';
+        if (skillsString) {
+          skillsString.split(',').forEach((entry: string) => {
+            const match = entry.trim().match(/^(.*?)\s*([+-]\d+)/);
+            if (match) {
+              let skillName = match[1].trim();
+              const originalBonus = parseInt(match[2], 10);
+              const simpleSkillName = skillName.startsWith('Knowledge') ? 'Knowledge (arcana)' : skillName;
+              const governingAbility = SKILL_ABILITY_MAP[simpleSkillName];
+
+              if (governingAbility) {
+                const baseAbilityMods = {
+                  'Str': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Str')),
+                  'Dex': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex')),
+                  'Con': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con')),
+                  'Int': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Int')),
+                  'Wis': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis')),
+                  'Cha': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Cha'))
+                };
+                const baseAbilityMod = baseAbilityMods[governingAbility] || 0;
+                const ranksAndMisc = originalBonus - baseAbilityMod;
+                const modifiedAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, governingAbility));
+                const genericSkillPenalty = finalBonuses['Skill Checks'] || 0;
+                skills[skillName] = ranksAndMisc + modifiedAbilityMod + genericSkillPenalty;
+              } else {
+                skills[skillName] = originalBonus;
+              }
             }
+          });
         }
-        
-        const modifiedStats: { [key: string]: any } = { ...baseStats };
-        const modifiedSaves = { ...baseStats.SavesObject };
+      }
 
-        for(const stat in finalBonuses) {
-            const bonus = finalBonuses[stat];
-            if (stat === 'Saves') { modifiedSaves.Fort += bonus; modifiedSaves.Ref += bonus; modifiedSaves.Will += bonus; }
-            else if (['Reflex', 'Ref'].includes(stat)) modifiedSaves.Ref += bonus;
-            else if (['Fortitude', 'Fort'].includes(stat)) modifiedSaves.Fort += bonus;
-            else if (stat === 'Will') modifiedSaves.Will += bonus;
-            else if (typeof getCaseInsensitiveProp(modifiedStats, stat) !== 'undefined') {
-                const baseVal = parseInt(String(getCaseInsensitiveProp(modifiedStats, stat)).match(/-?\d+/)?.[0] || '0', 10);
-                if (!isNaN(baseVal)) modifiedStats[stat] = baseVal + bonus;
-            }
-        }
-        (stringyMods['Speed'] || []).forEach(v => { if (v === 'half') modifiedStats['Speed'] = `${Math.floor(parseInt(String(getCaseInsensitiveProp(modifiedStats, 'Speed')).match(/\d+/)?.[0] || '30', 10) / 2)} ft.`; });
-
-        const dexModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
-        const conModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Con')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
-        const wisModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Wis')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
-        modifiedSaves.Ref += dexModDiff; modifiedSaves.Fort += conModDiff; modifiedSaves.Will += wisModDiff;
-        modifiedStats['AC'] = (getCaseInsensitiveProp(modifiedStats, 'AC') || 10) + dexModDiff;
-        modifiedStats['Touch'] = (getCaseInsensitiveProp(modifiedStats, 'Touch') || 10) + dexModDiff;
-        if (conModDiff !== 0) {
-            const lvl = getCaseInsensitiveProp(baseStats, 'Level') || parseInt(String(getCaseInsensitiveProp(baseStats, 'HP') || '1d8').match(/\((\d+)d\d+/)?.[1] || '1', 10);
-            modifiedStats['maxHp'] = (c.maxHp || 10) + (conModDiff * lvl);
-            if (modifiedStats['maxHp'] < 1) modifiedStats['maxHp'] = 1;
-        } else modifiedStats['maxHp'] = c.maxHp || getCaseInsensitiveProp(baseStats, 'maxHp');
-        const formatSaves = (s: {Fort:number;Ref:number;Will:number}) => `Fort ${s.Fort>=0?'+':''}${s.Fort}, Ref ${s.Ref>=0?'+':''}${s.Ref}, Will ${s.Will>=0?'+':''}${s.Will}`;
-        modifiedStats['Saves'] = formatSaves(modifiedSaves);
-        modifiedStats['SavesObject'] = modifiedSaves;
-        
-        const initiativeMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
-        
-        const parseAttacks = (s: any) => {
-            const attacks: ParsedAttack[] = [];
-            const melee = getCaseInsensitiveProp(s, 'Melee') || '';
-            const ranged = getCaseInsensitiveProp(s, 'Ranged') || '';
-            const parse = (str: string) => {
-              const regex = /(.+?)\s*([+-]\d+(?:\/[+-]\d+)*)\s*\((.+?)\)/g;
-              let m; while ((m = regex.exec(str)) !== null) attacks.push({ name: m[1].trim(), bonus: m[2].trim(), damage: m[3].trim() });
-            };
-            parse(melee); parse(ranged);
-            return attacks;
-        }
-        const naturalAttacks = parseAttacks(baseStats);
-        
-        // Weapon attack generation logic
-        const weaponAttacks: ParsedAttack[] = [];
-        const allItems = [...equipment, ...magicItems];
-        const weapons = allItems.filter(item => item.type === 'weapon' && item.properties);
-        const hasWeaponFinesse = allFeats.some((f: any) => f.name === 'Weapon Finesse');
-        const powerAttackFeat = allFeats.find((f: any) => f.name === 'Power Attack');
-        const hasPowerAttack = powerAttackFeat && (c.activeFeats || []).includes(powerAttackFeat.id);
-
-        for (const weapon of weapons) {
-            const props = weapon.properties || {};
-            const weaponName = weapon.name || 'Unknown Weapon';
-            const lowerWeaponName = weaponName.toLowerCase();
-            const isRanged = props.range || lowerWeaponName.includes('bow') || lowerWeaponName.includes('crossbow') || lowerWeaponName.includes('sling');
-            const isThrown = props.range && parseInt(props.range) > 0 && !lowerWeaponName.includes('bow') && !lowerWeaponName.includes('crossbow');
-            const isLight = props.light || lowerWeaponName.includes('dagger') || lowerWeaponName.includes('shortsword') || lowerWeaponName.includes('handaxe');
-
-            let attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
-            let damageAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
-            
-            if (isRanged && !isThrown) {
-                attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
-                const isComposite = lowerWeaponName.includes('composite');
-                damageAbilityMod = isComposite ? getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str')) : 0; 
-            } else if (hasWeaponFinesse && isLight) {
-                attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
-            }
-
-            const enhancementBonusMatch = weaponName.match(/^(\+\d+)/);
-            const enhancementBonus = enhancementBonusMatch ? parseInt(enhancementBonusMatch[1], 10) : 0;
-            
-            let powerAttackPenalty = 0;
-            let powerAttackDamage = 0;
-            if(hasPowerAttack && !isRanged) {
-                const bab = getCaseInsensitiveProp(modifiedStats, 'BAB') || 0;
-                powerAttackPenalty = bab >= 12 ? -4 : bab >= 8 ? -3 : bab >= 4 ? -2 : -1;
-                powerAttackDamage = Math.abs(powerAttackPenalty) * 2;
-            }
-
-            const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty;
-            const formattedAttackBonus = totalAttackBonus >= 0 ? `+${totalAttackBonus}` : `${totalAttackBonus}`;
-
-            let totalDamageBonus = damageAbilityMod + enhancementBonus + powerAttackDamage;
-            let damageString = props.damage_m || '1d6';
-            if (totalDamageBonus !== 0) damageString += totalDamageBonus > 0 ? `+${totalDamageBonus}` : ` ${totalDamageBonus}`;
-            const critString = props.critical ? ` (${props.critical})` : '';
-            
-            weaponAttacks.push({ name: weaponName, bonus: formattedAttackBonus, damage: `${damageString}${critString}`.trim() });
-        }
-
-        let allAttacks = [...naturalAttacks, ...weaponAttacks];
-        if (!allAttacks.some(a => a.name.toLowerCase().includes('unarmed strike'))) {
-            const strMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
-            const bab = getCaseInsensitiveProp(modifiedStats, 'BAB') || 0;
-            const hasImprovedUnarmedStrike = allFeats.some((f: any) => f.name === 'Improved Unarmed Strike');
-            const unarmedAttackBonus = bab + strMod;
-            const formattedBonus = unarmedAttackBonus >= 0 ? `+${unarmedAttackBonus}` : `${unarmedAttackBonus}`;
-            const strDamageBonus = strMod > 0 ? `+${strMod}` : strMod !== 0 ? ` ${strMod}` : '';
-            const unarmedDamage = `1d3${strDamageBonus}${hasImprovedUnarmedStrike ? '' : ' (nonlethal)'}`;
-            allAttacks.push({ name: 'Unarmed Strike', bonus: formattedBonus, damage: unarmedDamage });
-        }
-
-        // Skills parsing
-        const skills: { [key: string]: number } = {};
-        const skillsObject = getCaseInsensitiveProp(baseStats, 'skills');
-        if (skillsObject && typeof skillsObject === 'object' && Object.keys(skillsObject).length > 0) {
-            Object.assign(skills, skillsObject);
-        } else {
-            const skillsString = getCaseInsensitiveProp(baseStats, 'Skills') || '';
-            if (skillsString) {
-                skillsString.split(',').forEach((entry: string) => {
-                    const match = entry.trim().match(/^(.*?)\s*([+-]\d+)/);
-                    if (match) {
-                        let skillName = match[1].trim();
-                        const originalBonus = parseInt(match[2], 10);
-                        const simpleSkillName = skillName.startsWith('Knowledge') ? 'Knowledge (arcana)' : skillName;
-                        const governingAbility = SKILL_ABILITY_MAP[simpleSkillName];
-                        
-                        if (governingAbility) {
-                            const baseAbilityMods = {
-                                'Str': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Str')),
-                                'Dex': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex')),
-                                'Con': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con')),
-                                'Int': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Int')),
-                                'Wis': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis')),
-                                'Cha': getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Cha'))
-                            };
-                            const baseAbilityMod = baseAbilityMods[governingAbility] || 0;
-                            const ranksAndMisc = originalBonus - baseAbilityMod;
-                            const modifiedAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, governingAbility));
-                            const genericSkillPenalty = finalBonuses['Skill Checks'] || 0;
-                            skills[skillName] = ranksAndMisc + modifiedAbilityMod + genericSkillPenalty;
-                        } else {
-                            skills[skillName] = originalBonus; 
-                        }
-                    }
-                });
-            }
-        }
-
-        return { ...c, baseStats, modifiedStats, initiativeMod, attacks: allAttacks, allFeats, equipment, magicItems, spells, skills };
+      return { ...c, baseStats, modifiedStats, initiativeMod, attacks: allAttacks, allFeats, equipment, magicItems, spells, skills };
     }).sort((a, b) => {
       const initA = a.initiative || 0;
       const initB = b.initiative || 0;
@@ -774,29 +767,29 @@ export class CombatManagerComponent {
   }
 
   // Tooltips logic
-  showTooltip(e:MouseEvent, id: string, type: 'rule' | 'equipment' | 'magic-item' | 'effect' | 'spell') {
+  showTooltip(e: MouseEvent, id: string, type: 'rule' | 'equipment' | 'magic-item' | 'effect' | 'spell') {
     let cache: any;
-    switch(type) {
-        case 'rule': cache = this.rulesCache(); break;
-        case 'equipment': cache = this.equipmentCache(); break;
-        case 'magic-item': cache = this.magicItemsCache(); break;
-        case 'spell': cache = this.spellsCache(); break;
-        case 'effect': cache = this.effectsCache(); break;
+    switch (type) {
+      case 'rule': cache = this.rulesCache(); break;
+      case 'equipment': cache = this.equipmentCache(); break;
+      case 'magic-item': cache = this.magicItemsCache(); break;
+      case 'spell': cache = this.spellsCache(); break;
+      case 'effect': cache = this.effectsCache(); break;
     }
     const item = cache.get(id);
     const data = (type === 'effect') ? item?.data : item;
     this.tooltipContent.set({ title: data?.name || 'Unknown', data: data, status: data ? 'loaded' : 'error' });
     this.tooltipPosition.set({ top: `${e.clientY + 15}px`, left: `${e.clientX + 15}px` });
   }
-  
+
   showSkillsTooltip(e: MouseEvent, combatant: CombatantWithModifiers) {
-      if (!combatant.skills || Object.keys(combatant.skills).length === 0) {
-          this.tooltipContent.set({ title: 'Skills', data: { description: 'None' }, status: 'loaded' });
-      } else {
-          const description = Object.entries(combatant.skills).map(([n, v]) => `${n} ${v >= 0 ? '+' : ''}${v}`).join('\n');
-          this.tooltipContent.set({ title: `${combatant.name}'s Skills`, data: { description }, status: 'loaded' });
-      }
-      this.tooltipPosition.set({ top: `${e.clientY + 15}px`, left: `${e.clientX + 15}px` });
+    if (!combatant.skills || Object.keys(combatant.skills).length === 0) {
+      this.tooltipContent.set({ title: 'Skills', data: { description: 'None' }, status: 'loaded' });
+    } else {
+      const description = Object.entries(combatant.skills).map(([n, v]) => `${n} ${v >= 0 ? '+' : ''}${v}`).join('\n');
+      this.tooltipContent.set({ title: `${combatant.name}'s Skills`, data: { description }, status: 'loaded' });
+    }
+    this.tooltipPosition.set({ top: `${e.clientY + 15}px`, left: `${e.clientX + 15}px` });
   }
   hideTooltip() { this.tooltipContent.set(null); }
 
@@ -816,16 +809,16 @@ export class CombatManagerComponent {
     const dropdowns: CascadingDropdown[] = [];
     let currentPath = [source];
     let pathIdx = 0;
-    while(true) {
+    while (true) {
       const node = this.getNodeFromCodex(currentPath);
       if (!node || typeof node !== 'object' || Array.isArray(node.content) || !this._isNavigable(node)) { break; }
-      
+
       const options = Object.keys(node).filter(key => {
         const child = node[key];
-        return typeof child === 'object' && 
-               child !== null && 
-               !this.METADATA_KEYS.includes(key) && 
-               this._isNavigable(child);
+        return typeof child === 'object' &&
+          child !== null &&
+          !this.METADATA_KEYS.includes(key) &&
+          this._isNavigable(child);
       });
 
       if (options.length === 0) break;
@@ -849,7 +842,7 @@ export class CombatManagerComponent {
       return newPath;
     });
   }
-  
+
   addCustomEffect(combatantId: string) {
     if (!this.customEffectName.trim()) return;
     const effect: CombatantEffect = {
