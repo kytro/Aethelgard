@@ -657,7 +657,7 @@ export class CombatManagerComponent {
           powerAttackDamage = Math.abs(powerAttackPenalty) * 2;
         }
 
-        const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty;
+        const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty + (finalBonuses['Attack'] || 0);
         const formattedAttackBonus = totalAttackBonus >= 0 ? `+${totalAttackBonus}` : `${totalAttackBonus}`;
 
         let totalDamageBonus = damageAbilityMod + enhancementBonus + powerAttackDamage;
@@ -673,7 +673,7 @@ export class CombatManagerComponent {
         const strMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
         const bab = getCaseInsensitiveProp(modifiedStats, 'BAB') || 0;
         const hasImprovedUnarmedStrike = allFeats.some((f: any) => f.name === 'Improved Unarmed Strike');
-        const unarmedAttackBonus = bab + strMod;
+        const unarmedAttackBonus = bab + strMod + (finalBonuses['Attack'] || 0);
         const formattedBonus = unarmedAttackBonus >= 0 ? `+${unarmedAttackBonus}` : `${unarmedAttackBonus}`;
         const strDamageBonus = strMod > 0 ? `+${strMod}` : strMod !== 0 ? ` ${strMod}` : '';
         const unarmedDamage = `1d3${strDamageBonus}${hasImprovedUnarmedStrike ? '' : ' (nonlethal)'}`;

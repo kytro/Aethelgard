@@ -563,8 +563,67 @@ describe('CombatManagerComponent', () => {
             component.selectedCodexPath.set(['Solarran_Freehold', 'Merchant_Quarter']);
 
             component.handlePathChange(1, '');
-
             expect(component.selectedCodexPath()).toEqual(['Solarran_Freehold']);
+        });
+    });
+
+    describe('Detailed Modifiers & Effects', () => {
+        // Setup a combatant for these tests
+        beforeEach(async () => {
+            component.combatants.set([createMockCombatant({
+                _id: 'c1',
+                name: 'Test',
+                stats: { Str: 10, Dex: 10, Con: 10, skills: { 'Stealth': 5 } }
+            })]);
+            fixture.detectChanges();
+            await fixture.whenStable();
+        });
+
+        it('should add and process a custom effect', async () => {
+            // 1. Add Effect
+            component.newEffects.set(new Map([['c1', { name: 'Bless', duration: 10, unit: 'rounds' }]]));
+            component.handleAddEffect('c1');
+
+            const req = httpMock.expectOne('/codex/api/dm-toolkit/combatants/c1');
+            expect(req.request.body.effects[0].name).toBe('Bless');
+            req.flush({});
+
+            // Update local state manually to simulate reload or optimistic UI
+            const c = component.combatants()[0];
+            const effect = { name: 'Bless', duration: 10, unit: 'rounds', startRound: 1, remainingRounds: 10 };
+            component.combatants.set([{ ...c, effects: [effect] as any }]);
+
+            // 2. Mock the Effect Cache to return modifiers for "Bless"
+            fixture.componentRef.setInput('effectsCache', new Map([
+                ['Bless', { status: 'loaded', data: { modifiers: { 'Attack': { value: 1, type: 'morale' } } } }]
+            ]));
+
+            // 3. Trigger re-computation
+            fixture.detectChanges();
+
+            // 4. Verify modifier is applied in modifiedCombatants
+            const modified = component.modifiedCombatants()[0];
+            // Base attack is 0 (BAB 0 + Str 0). Bless adds +1 morale.
+            // We check if any attack has the bonus
+            const unarmed = modified.attacks.find(a => a.name === 'Unarmed Strike');
+            expect(unarmed?.bonus).toBe('+1');
+        });
+
+        it('should update skills via modal', async () => {
+            const c = component.combatants()[0];
+
+            // Open Modal
+            component.openSkillsModal(component.modifiedCombatants()[0]);
+            expect(component.editingCombatantSkills()).toBeTruthy();
+
+            // Update Skill
+            component.handleUpdateSkill(component.modifiedCombatants()[0], 'Stealth', 10);
+
+            const req = httpMock.expectOne('/codex/api/dm-toolkit/combatants/c1');
+            expect(req.request.method).toBe('PATCH');
+            expect(req.request.body.stats.skills['Stealth']).toBe(10);
+
+            req.flush({});
         });
     });
 });
