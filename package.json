@@ -8,7 +8,9 @@
     "watch": "ng build --watch --configuration development",
     "test": "jest",
     "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "prettier": {
     "printWidth": 100,
@@ -39,7 +41,7 @@
     "google-auth-library": "^10.4.0",
     "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
-    "mongodb": "^6.20.0",
+    "mongodb": "^6.19.0",
     "multer": "^1.4.5-lts.1",
     "node-fetch": "^2.6.7",
     "rxjs": "~7.8.0",
@@ -51,6 +53,7 @@
     "@angular/cli": "^20.3.4",
     "@angular/compiler-cli": "^20.3.0",
     "@angular/platform-browser-dynamic": "^20.3.0",
+    "@playwright/test": "^1.56.1",
     "@types/jest": "^30.0.0",
     "autoprefixer": "^10.4.21",
     "jest": "^30.2.0",

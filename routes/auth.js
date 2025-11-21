@@ -4,7 +4,7 @@ const jwt = require('jsonwebtoken');
 
 const router = express.Router();
 
-module.exports = function(db, JWT_SECRET, GOOGLE_CLIENT_ID) {
+module.exports = function (db, JWT_SECRET, GOOGLE_CLIENT_ID) {
   const client = new OAuth2Client(GOOGLE_CLIENT_ID);
 
   router.post('/google/callback', async (req, res) => {
@@ -38,6 +38,17 @@ module.exports = function(db, JWT_SECRET, GOOGLE_CLIENT_ID) {
       res.status(401).json({ error: 'Authentication failed.' });
     }
   });
+
+  if (process.env.NODE_ENV === 'test') {
+    router.post('/test/login', (req, res) => {
+      const appToken = jwt.sign(
+        { userId: 'test-user-id', roles: ['admin'], name: 'Test User' },
+        JWT_SECRET,
+        { expiresIn: '1h' }
+      );
+      res.json({ token: appToken, user: { name: 'Test User', email: 'test@example.com', picture: '' } });
+    });
+  }
 
   return router;
 };
