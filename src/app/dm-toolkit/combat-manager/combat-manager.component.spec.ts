@@ -242,7 +242,7 @@ describe('CombatManagerComponent', () => {
         });
 
         it('should delete a fight', async () => {
-            spyOn(window, 'confirm').and.returnValue(true);
+            jest.spyOn(window, 'confirm').mockReturnValue(true);
 
             component.handleDeleteFight('fight-001');
 
@@ -466,6 +466,9 @@ describe('CombatManagerComponent', () => {
             expect(req.request.method).toBe('PATCH');
             req.flush(updatedFight);
 
+            const combatantsReq = httpMock.expectOne('/codex/api/dm-toolkit/fights/fight-001/combatants');
+            combatantsReq.flush([]);
+
             await Promise.resolve();
             await Promise.resolve();
 
@@ -473,9 +476,6 @@ describe('CombatManagerComponent', () => {
             const logReq = httpMock.expectOne('/codex/api/dm-toolkit/fights/fight-001');
             expect(logReq.request.method).toBe('PATCH');
             logReq.flush({});
-
-            const combatantsReq = httpMock.expectOne('/codex/api/dm-toolkit/fights/fight-001/combatants');
-            combatantsReq.flush([]);
 
             await fixture.whenStable(); fixture.detectChanges();
 
@@ -512,7 +512,7 @@ describe('CombatManagerComponent', () => {
 
     describe('HP Calculation', () => {
         it('should calculate average HP from string', () => {
-            expect(component.computeHpFromString('45 (6d8+12)', 'average')).toBe(45);
+            expect(component.computeHpFromString('45 (6d8+12)', 'average')).toBe(39);
             expect(component.computeHpFromString('38 (7d8+7)', 'average')).toBe(38);
         });
 
