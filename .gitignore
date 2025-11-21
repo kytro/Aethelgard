@@ -38,6 +38,13 @@ testem.log
 /typings
 __screenshots__/
 
+# Test results
+test-results.txt
+test_output.txt
+*.test-result.txt
+
+*.txt
+
 # System files
 .DS_Store
 Thumbs.db
