@@ -1,0 +1,170 @@
+﻿node.exe : PASS src/ap
+p/dm-toolkit/combat-ma
+nager/combat-manager.c
+omponent.spec.ts
+At line:1 char:1
++ & "C:\Program Files\
+nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (PASS src/a   
+ pp/dm...mponent.s    
+pec.ts:String) []    
+, RemoteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+  
+CombatManagerComponent
+    Component 
+Initialization
+      Γùï skipped 
+should create the 
+component
+      Γùï skipped 
+should initialize 
+with default values
+      Γùï skipped 
+should have 
+METADATA_KEYS 
+including baseStats, 
+stats, and entityId
+    _isNavigable 
+Method
+      Γùï skipped 
+should return false 
+for null or undefined 
+nodes
+      Γùï skipped 
+should return false 
+for primitive values
+      Γùï skipped 
+should return false 
+for nodes with no 
+children
+      Γùï skipped 
+should return true 
+for container 
+entities with children
+      Γùï skipped 
+should return true 
+for categories with 
+templates
+      Γùï skipped 
+should filter out 
+METADATA_KEYS from 
+child detection
+      Γùï skipped 
+should return false 
+for leaf templates 
+(entityId with no 
+navigable children)
+    topLevelCategoryOp
+tions Computed Signal
+      Γùï skipped 
+should return Custom 
+and Find when no 
+codex data
+      Γùï skipped 
+should include 
+sources marked with 
+isCombatManagerSource
+      Γùï skipped 
+should sort sources 
+alphabetically
+    Template 
+Detection Logic
+      Γùï skipped 
+should extract 
+templates from child 
+objects
+      Γùï skipped 
+should handle content 
+arrays with 
+non-rich-text
+      Γùï skipped 
+should ignore rich 
+text content arrays
+      Γùï skipped 
+should reset template 
+options when source 
+changes
+    Fight Management
+      Γùï skipped 
+should create a new 
+fight
+      Γùï skipped 
+should not create 
+fight with empty name
+      Γùï skipped 
+should delete a fight
+      Γùï skipped 
+should set current 
+fight and load 
+combatants
+    Combatant 
+Management
+      ΓêÜ should add 
+custom combatant (305 
+ms)
+      Γùï skipped 
+should remove 
+combatant
+      Γùï skipped 
+should update 
+combatant HP
+    Combat State 
+Transitions
+      Γùï skipped 
+should start combat
+      Γùï skipped 
+should end combat
+    Turn Management
+      Γùï skipped 
+should advance to 
+next turn
+      Γùï skipped 
+should go to previous 
+turn
+    HP Calculation
+      Γùï skipped 
+should calculate 
+average HP from string
+      Γùï skipped 
+should calculate max 
+HP from dice string
+      Γùï skipped 
+should handle HP 
+strings without dice 
+notation
+    Cascading 
+Dropdowns
+      Γùï skipped 
+should compute 
+correct dropdown 
+levels
+      Γùï skipped 
+should handle path 
+changes correctly
+
+Test Suites: 1 
+passed, 1 total
+Tests:       32 
+skipped, 1 passed, 33 
+total
+Snapshots:   0 total
+Time:        1.676 s
+Ran all test suites 
+matching combat-manage
+r.component.spec.ts 
+with tests matching 
+"should add custom 
+combatant".

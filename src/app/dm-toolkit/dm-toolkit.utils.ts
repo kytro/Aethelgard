@@ -1,15 +1,15 @@
 // src/app/dm-toolkit/dm-toolkit.utils.ts
 
 export const SKILL_ABILITY_MAP: { [key: string]: 'Str' | 'Dex' | 'Con' | 'Int' | 'Wis' | 'Cha' } = {
-  'Acrobatics': 'Dex', 'Appraise': 'Int', 'Bluff': 'Cha', 'Climb': 'Str', 'Craft': 'Int',
-  'Diplomacy': 'Cha', 'Disable Device': 'Dex', 'Disguise': 'Cha', 'Escape Artist': 'Dex',
-  'Fly': 'Dex', 'Handle Animal': 'Cha', 'Heal': 'Wis', 'Intimidate': 'Cha',
-  'Knowledge (arcana)': 'Int', 'Knowledge (dungeoneering)': 'Int', 'Knowledge (engineering)': 'Int',
-  'Knowledge (geography)': 'Int', 'Knowledge (history)': 'Int', 'Knowledge (local)': 'Int',
-  'Knowledge (nature)': 'Int', 'Knowledge (nobility)': 'Int', 'Knowledge (planes)': 'Int',
-  'Knowledge (religion)': 'Int', 'Linguistics': 'Int', 'Perception': 'Wis', 'Perform': 'Cha',
-  'Profession': 'Wis', 'Ride': 'Dex', 'Sense Motive': 'Wis', 'Sleight of Hand': 'Dex',
-  'Spellcraft': 'Int', 'Stealth': 'Dex', 'Survival': 'Wis', 'Swim': 'Str', 'Use Magic Device': 'Cha'
+    'Acrobatics': 'Dex', 'Appraise': 'Int', 'Bluff': 'Cha', 'Climb': 'Str', 'Craft': 'Int',
+    'Diplomacy': 'Cha', 'Disable Device': 'Dex', 'Disguise': 'Cha', 'Escape Artist': 'Dex',
+    'Fly': 'Dex', 'Handle Animal': 'Cha', 'Heal': 'Wis', 'Intimidate': 'Cha',
+    'Knowledge (arcana)': 'Int', 'Knowledge (dungeoneering)': 'Int', 'Knowledge (engineering)': 'Int',
+    'Knowledge (geography)': 'Int', 'Knowledge (history)': 'Int', 'Knowledge (local)': 'Int',
+    'Knowledge (nature)': 'Int', 'Knowledge (nobility)': 'Int', 'Knowledge (planes)': 'Int',
+    'Knowledge (religion)': 'Int', 'Linguistics': 'Int', 'Perception': 'Wis', 'Perform': 'Cha',
+    'Profession': 'Wis', 'Ride': 'Dex', 'Sense Motive': 'Wis', 'Sleight of Hand': 'Dex',
+    'Spellcraft': 'Int', 'Stealth': 'Dex', 'Survival': 'Wis', 'Swim': 'Str', 'Use Magic Device': 'Cha'
 };
 
 export const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17];
@@ -46,26 +46,26 @@ export const calculateAverageHp = (diceString: string): number => {
     return Math.floor(numDice * averageRoll) + modifier;
 };
 
-export const formatName = (name: string): string => { 
-    return name ? name.replace(/_/g, ' ').replace(/-/g, ' ') : ''; 
+export const formatName = (name: string): string => {
+    return name ? name.replace(/_/g, ' ').replace(/-/g, ' ') : '';
 };
 
 export const formatTime = (t: any): string => {
     if (!t) return '';
     let date;
     if (t && typeof t.toDate === 'function') {
-      date = t.toDate();
+        date = t.toDate();
     } else {
-      date = new Date(t);
+        date = new Date(t);
     }
     if (isNaN(date.getTime())) return '';
-    
+
     const year = date.getFullYear();
     const month = (date.getMonth() + 1).toString().padStart(2, '0');
     const day = date.getDate().toString().padStart(2, '0');
     const hours = date.getHours().toString().padStart(2, '0');
     const minutes = date.getMinutes().toString().padStart(2, '0');
-    
+
     return `${year}-${month}-${day} ${hours}:${minutes}`;
 };
 
@@ -88,7 +88,7 @@ export const calculateCompleteBaseStats = (stats: any): any => {
         if (touchMatch) newStats['Touch'] = parseInt(touchMatch[1], 10);
         if (ffMatch) newStats['Flat-Footed'] = parseInt(ffMatch[1], 10);
     }
-    
+
     if (typeof getCaseInsensitiveProp(newStats, 'AC') !== 'number') newStats['AC'] = 10 + dexMod;
     if (typeof getCaseInsensitiveProp(newStats, 'Touch') !== 'number') newStats['Touch'] = 10 + dexMod;
     if (typeof getCaseInsensitiveProp(newStats, 'Flat-Footed') !== 'number') newStats['Flat-Footed'] = (newStats['AC'] || 10) - dexMod;
@@ -96,41 +96,43 @@ export const calculateCompleteBaseStats = (stats: any): any => {
     if (!getCaseInsensitiveProp(newStats, 'Saves')) {
         const level = parseInt(String(getCaseInsensitiveProp(newStats, 'Level') || getCaseInsensitiveProp(newStats, 'CR') || 1), 10);
         const safeLevelIndex = Math.max(0, Math.min(level - 1, GOOD_SAVES.length - 1));
-        
+
         // Heuristic for good/bad saves
         const con = parseInt(String(newStats['Con']), 10);
         const dex = parseInt(String(newStats['Dex']), 10);
         const wis = parseInt(String(newStats['Wis']), 10);
-        
-        const isFortGood = con >= 14; 
+
+        const isFortGood = con >= 14;
         const isRefGood = dex >= 14;
         const isWillGood = wis >= 14;
 
         const baseFort = isFortGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
         const baseRef = isRefGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
         const baseWill = isWillGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
-        
+
         const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
         newStats['Saves'] = `Fort ${formatMod(baseFort + conMod)}, Ref ${formatMod(baseRef + dexMod)}, Will ${formatMod(baseWill + wisMod)}`;
     }
 
     if (!getCaseInsensitiveProp(newStats, 'Speed')) newStats['Speed'] = '30 ft.';
-    
+
     if (typeof newStats['BAB'] !== 'number') {
         newStats['BAB'] = parseInt(String(getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || getCaseInsensitiveProp(newStats, 'BAB') || 0).match(/-?\d+/)?.[0] || '0', 10);
     }
-    
+
     if (typeof getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + strMod;
     if (typeof getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + newStats['BAB'] + strMod + dexMod;
-    
+
     const hpValue = getCaseInsensitiveProp(newStats, 'hp') || getCaseInsensitiveProp(newStats, 'HP') || '1d8';
+    const isDiceNotation = /^\d+d\d+/.test(String(hpValue));
     const avgHpMatch = String(hpValue).match(/^(\d+)/);
     const diceInParenMatch = String(hpValue).match(/\((\s*\d+d\d+[+-]?\s*\d*\s*)\)/);
-    
-    if (avgHpMatch) newStats['maxHp'] = parseInt(avgHpMatch[1], 10);
+
+    if (isDiceNotation) newStats['maxHp'] = calculateAverageHp(String(hpValue));
+    else if (avgHpMatch) newStats['maxHp'] = parseInt(avgHpMatch[1], 10);
     else if (diceInParenMatch) newStats['maxHp'] = calculateAverageHp(diceInParenMatch[1]);
     else newStats['maxHp'] = calculateAverageHp(String(hpValue));
-    
+
     if (isNaN(newStats['maxHp']) || newStats['maxHp'] <= 0) newStats['maxHp'] = 10;
 
     return newStats;

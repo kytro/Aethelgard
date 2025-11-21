@@ -1,0 +1,265 @@
+﻿node.exe : 
+ts-jest[ts-compiler] 
+(WARN) 
+At line:1 char:1
++ & "C:\Program Files\
+nodejs/node.exe" 
+"C:\Program 
+Files\nodejs/node_mo 
+...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
+~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (ts-jest[ts   
+ -compiler] (WARN)    
+ :String) [], Rem    
+oteException
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+                
+TypeScript compiler 
+option 
+'isolatedModules' may 
+prevent the 'emitDecor
+atorMetadata' option 
+from emitting all 
+metadata.
+                The 'e
+mitDecoratorMetadata' 
+option is not 
+required by Angular 
+and can be removed if 
+not explicitly 
+required by the 
+project.'
+            
+  console.log
+    Combatants in test: [
+      {
+        _id: 'combatant-001',
+        fightId: 'fight-001',
+        name: 'Test Combatant',
+        initiative: 15,
+        hp: 30,
+        maxHp: 30,
+        stats: { Str: 10, Dex: 10, Con: 10, Int: 10, Wis: 10, Cha: 10 },
+        effects: [],
+        tempMods: {},
+        activeFeats: [],
+        type: 'Custom'
+      }
+    ]
+
+      at Object.<anonymous> (src/app/dm-toolkit/combat-manager/combat-manager.component.spec.ts:352:21)
+
+FAIL src/app/dm-toolki
+t/combat-manager/comba
+t-manager.component.sp
+ec.ts
+  
+CombatManagerComponent
+    Component 
+Initialization
+      Γùï skipped 
+should create the 
+component
+      Γùï skipped 
+should initialize 
+with default values
+      Γùï skipped 
+should have 
+METADATA_KEYS 
+including baseStats, 
+stats, and entityId
+    _isNavigable 
+Method
+      Γùï skipped 
+should return false 
+for null or undefined 
+nodes
+      Γùï skipped 
+should return false 
+for primitive values
+      Γùï skipped 
+should return false 
+for nodes with no 
+children
+      Γùï skipped 
+should return true 
+for container 
+entities with children
+      Γùï skipped 
+should return true 
+for categories with 
+templates
+      Γùï skipped 
+should filter out 
+METADATA_KEYS from 
+child detection
+      Γùï skipped 
+should return false 
+for leaf templates 
+(entityId with no 
+navigable children)
+    topLevelCategoryOp
+tions Computed Signal
+      Γùï skipped 
+should return Custom 
+and Find when no 
+codex data
+      Γùï skipped 
+should include 
+sources marked with 
+isCombatManagerSource
+      Γùï skipped 
+should sort sources 
+alphabetically
+    Template 
+Detection Logic
+      Γùï skipped 
+should extract 
+templates from child 
+objects
+      Γùï skipped 
+should handle content 
+arrays with 
+non-rich-text
+      Γùï skipped 
+should ignore rich 
+text content arrays
+      Γùï skipped 
+should reset template 
+options when source 
+changes
+    Fight Management
+      Γùï skipped 
+should create a new 
+fight
+      Γùï skipped 
+should not create 
+fight with empty name
+      Γùï skipped 
+should delete a fight
+      Γùï skipped 
+should set current 
+fight and load 
+combatants
+    Combatant 
+Management
+      ├ù should 
+update combatant HP 
+(317 ms)
+      Γùï skipped 
+should add custom 
+combatant
+      Γùï skipped 
+should remove 
+combatant
+    Combat State 
+Transitions
+      Γùï skipped 
+should start combat
+      Γùï skipped 
+should end combat
+    Turn Management
+      Γùï skipped 
+should advance to 
+next turn
+      Γùï skipped 
+should go to previous 
+turn
+    HP Calculation
+      Γùï skipped 
+should calculate 
+average HP from string
+      Γùï skipped 
+should calculate max 
+HP from dice string
+      Γùï skipped 
+should handle HP 
+strings without dice 
+notation
+    Cascading 
+Dropdowns
+      Γùï skipped 
+should compute 
+correct dropdown 
+levels
+      Γùï skipped 
+should handle path 
+changes correctly
+
+  ΓùÅ CombatManagerCom
+ponent ΓÇ║ Combatant 
+Management ΓÇ║ should 
+update combatant HP
+
+    Expected one 
+matching request for 
+criteria "Match URL: /
+codex/api/dm-toolkit/f
+ights/fight-001", 
+found none.
+
+    [0m [90m 362 
+|[39m             
+[36mawait[39m [33mP
+romise[39m[33m.[39m
+resolve()[33m;[39m
+     [90m 363 |[39m
+    [31m[1m>[22m[3
+9m[90m 364 |[39m    
+         
+[36mconst[39m 
+logReq [33m=[39m htt
+pMock[33m.[39mexpect
+One([32m'/codex/api/d
+m-toolkit/fights/fight
+-001'[39m)[33m;[39m
+     [90m     |[39m 
+                      
+              
+[31m[1m^[22m[39m
+     [90m 365 |[39m 
+            expect(log
+Req[33m.[39mrequest
+[33m.[39mmethod)[33m
+.[39mtoBe([32m'PATCH
+'[39m)[33m;[39m
+     [90m 366 |[39m 
+            logReq[33
+m.[39mflush({})[33m;
+[39m
+     [90m 367 
+|[39m[0m
+
+      at _HttpClientTe
+stingBackend.expectOne
+ (node_modules/@angula
+r/common/fesm2022/http
+/testing.mjs:273:19)
+      at 
+Object.<anonymous> (sr
+c/app/dm-toolkit/comba
+t-manager/combat-manag
+er.component.spec.ts:3
+64:37)
+
+Test Suites: 1 
+failed, 1 total
+Tests:       1 
+failed, 32 skipped, 
+33 total
+Snapshots:   0 total
+Time:        1.797 s
+Ran all test suites 
+matching combat-manage
+r.component.spec.ts 
+with tests matching 
+"should update 
+combatant HP".
