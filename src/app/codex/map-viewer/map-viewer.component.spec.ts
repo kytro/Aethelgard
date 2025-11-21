@@ -1,5 +1,6 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { MapViewerComponent } from './map-viewer.component';
+import { provideZonelessChangeDetection } from '@angular/core';
 
 // Mock Panzoom
 const mockPanzoomInstance = {
@@ -23,7 +24,8 @@ describe('MapViewerComponent', () => {
 
     beforeEach(async () => {
         await TestBed.configureTestingModule({
-            imports: [MapViewerComponent]
+            imports: [MapViewerComponent],
+            providers: [provideZonelessChangeDetection()]
         }).compileComponents();
 
         fixture = TestBed.createComponent(MapViewerComponent);

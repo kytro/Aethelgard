@@ -16,7 +16,10 @@ describe('DmToolkitComponent', () => {
             schemas: [NO_ERRORS_SCHEMA]
         })
             .overrideComponent(DmToolkitComponent, {
-                set: { imports: [CommonModule] }
+                set: {
+                    imports: [CommonModule],
+                    schemas: [NO_ERRORS_SCHEMA] // Added this to suppress NG0304 in standalone component
+                }
             })
             .compileComponents();
 
