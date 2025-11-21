@@ -133,14 +133,19 @@ export class CombatManagerComponent {
 
       if (!node) return;
 
+      let optionsFromContent: string[] = [];
+
       // Case 1: Node has a 'content' array (simple list of templates)
+      // Check if content exists and is NOT rich text (which contains blocks with 'type')
       if (Array.isArray(node.content)) {
-        const options = node.content.map((item: any) => typeof item === 'string' ? item : item.name).filter(Boolean);
-        this.templateOptions.set(options.sort());
-        return;
+        const isRichText = node.content.some((c: any) => c.type === 'heading' || c.type === 'paragraph' || c.type === 'statblock' || c.type === 'table');
+        if (!isRichText) {
+          optionsFromContent = node.content.map((item: any) => typeof item === 'string' ? item : item.name).filter(Boolean);
+        }
       }
 
       // Case 2: Node is an object that might contain templates (leaf nodes)
+      let optionsFromChildren: string[] = [];
       if (typeof node === 'object') {
         const templateKeys = Object.keys(node).filter(key => {
           const child = node[key];
@@ -150,10 +155,13 @@ export class CombatManagerComponent {
             !this.METADATA_KEYS.includes(key) &&
             !this._isNavigable(child);
         });
+        optionsFromChildren = templateKeys;
+      }
 
-        if (templateKeys.length > 0) {
-          this.templateOptions.set(templateKeys.sort().map(formatName));
-        }
+      // Combine and set
+      const allOptions = [...new Set([...optionsFromContent, ...optionsFromChildren])];
+      if (allOptions.length > 0) {
+        this.templateOptions.set(allOptions.sort().map(formatName));
       }
     });
   }
