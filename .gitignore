@@ -30,6 +30,8 @@ pnpm-lock.yaml
 /test-results
 /playwright-report
 /playwright/.cache
+jest-output.json
+jest-results.json
 *.test-result.txt
 test-results.txt
 test_output.txt
@@ -107,6 +109,7 @@ Desktop.ini
 $RECYCLE.BIN/
 
 # AI/Personal
+.gemini/
 todo.md
 Dockerfile
 notes.md
