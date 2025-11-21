@@ -803,12 +803,12 @@ export class CombatManagerComponent {
 
   topLevelCategoryOptions = computed<string[]>(() => {
     const codexData = this.codex();
-    if (!codexData) return ['Custom', 'Find', 'Found'];
+    if (!codexData) return ['Custom', 'Find'];
     const sources = Object.keys(codexData).filter(key => {
       const node = codexData[key];
       return typeof node === 'object' && node !== null && node.isCombatManagerSource === true;
     });
-    return ['Custom', 'Find', 'Found', ...sources.sort()];
+    return ['Custom', 'Find', ...sources.sort()];
   });
 
   cascadingDropdowns = computed<CascadingDropdown[]>(() => {
