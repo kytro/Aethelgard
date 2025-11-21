@@ -199,8 +199,9 @@ describe('CombatManagerComponent', () => {
             await fixture.whenStable(); fixture.detectChanges();
 
             const options = component.templateOptions();
-            // Should not include content from rich text, only child categories
+            // Should not include content from rich text, only child templates (like Town_Guard from helpers)
             expect(options.length).toBeGreaterThan(0);
+            expect(options).toContain('Town Guard');
         });
 
         it('should reset template options when source changes', async () => {
@@ -466,13 +467,25 @@ describe('CombatManagerComponent', () => {
             expect(req.request.method).toBe('PATCH');
             req.flush(updatedFight);
 
-            const combatantsReq = httpMock.expectOne('/codex/api/dm-toolkit/fights/fight-001/combatants');
-            combatantsReq.flush([]);
+            // WAITING FOR ASYNC: Component awaits the patch, then calls loadCombatants
+            await fixture.whenStable();
+
+            // Updated to handle 2 requests: one from effect() and one explicit
+            const requests = httpMock.match('/codex/api/dm-toolkit/fights/fight-001/combatants');
+            expect(requests.length).toBe(2);
+            requests.forEach(req => {
+                expect(req.request.method).toBe('GET');
+                // Flush actual combatants so 'active' is found and logAction triggers
+                req.flush([
+                    createMockCombatant({ _id: 'c1', name: 'C1', initiative: 20 }),
+                    createMockCombatant({ _id: 'c2', name: 'C2', initiative: 10 })
+                ]);
+            });
 
             await Promise.resolve();
             await Promise.resolve();
 
-            // handleNextTurn likely logs
+            // handleNextTurn logs the turn change because we now have combatants
             const logReq = httpMock.expectOne('/codex/api/dm-toolkit/fights/fight-001');
             expect(logReq.request.method).toBe('PATCH');
             logReq.flush({});
@@ -499,8 +512,16 @@ describe('CombatManagerComponent', () => {
             expect(req.request.method).toBe('PATCH');
             req.flush(updatedFight);
 
-            const combatantsReq = httpMock.expectOne('/codex/api/dm-toolkit/fights/fight-001/combatants');
-            combatantsReq.flush([]);
+            // WAITING FOR ASYNC
+            await fixture.whenStable();
+
+            // Updated to handle 2 requests: one from effect() and one explicit
+            const requests = httpMock.match('/codex/api/dm-toolkit/fights/fight-001/combatants');
+            expect(requests.length).toBe(2);
+            requests.forEach(req => {
+                expect(req.request.method).toBe('GET');
+                req.flush([]);
+            });
 
             await fixture.whenStable(); fixture.detectChanges();
 

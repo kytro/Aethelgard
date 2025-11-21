@@ -11,6 +11,15 @@ export function createMockCodex() {
                     { type: 'heading', text: 'Solarran Freehold' },
                     { type: 'paragraph', text: 'A bustling trade hub' }
                 ],
+                // ADDED: A leaf node template to verify detection works alongside rich text
+                'Town_Guard': {
+                    entityId: 'npc-guard-001',
+                    baseStats: {
+                        Str: 14, Dex: 12, Con: 14,
+                        HP: '20 (3d8+6)',
+                        AC: 16
+                    }
+                },
                 'Merchant_Quarter': {
                     entityId: 'loc-merchant-001',
                     baseStats: { Type: 'Location' },
