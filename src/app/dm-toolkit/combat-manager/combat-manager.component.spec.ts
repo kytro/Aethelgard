@@ -567,6 +567,69 @@ describe('CombatManagerComponent', () => {
         });
     });
 
+    describe('Size Mechanics', () => {
+        it('should apply size modifiers to AC and CMB/CMD', async () => {
+            // Create a Small combatant
+            const smallCombatant = createMockCombatant({
+                _id: 'small1',
+                name: 'Goblin',
+                size: 'Small',
+                stats: { Str: 10, Dex: 10, BAB: 1 }
+            });
+
+            // Create a Large combatant
+            const largeCombatant = createMockCombatant({
+                _id: 'large1',
+                name: 'Ogre',
+                size: 'Large',
+                stats: { Str: 10, Dex: 10, BAB: 1 }
+            });
+
+            component.combatants.set([smallCombatant, largeCombatant]);
+            fixture.detectChanges();
+            await fixture.whenStable();
+
+            const modified = component.modifiedCombatants();
+            const small = modified.find(c => c._id === 'small1');
+            const large = modified.find(c => c._id === 'large1');
+
+            // Small: AC +1 size, CMB -1 size, CMD -1 size
+            // AC: 10 + 0 (Dex) + 1 (Size) = 11
+            expect(small?.baseStats.AC).toBe(11);
+            // CMB: 1 (BAB) + 0 (Str) - 1 (Size) = 0
+            expect(small?.baseStats.CMB).toBe(0);
+            // CMD: 10 + 1 (BAB) + 0 (Str) + 0 (Dex) - 1 (Size) = 10
+            expect(small?.baseStats.CMD).toBe(10);
+
+            // Large: AC -1 size, CMB +1 size, CMD +1 size
+            // AC: 10 + 0 (Dex) - 1 (Size) = 9
+            expect(large?.baseStats.AC).toBe(9);
+            // CMB: 1 (BAB) + 0 (Str) + 1 (Size) = 2
+            expect(large?.baseStats.CMB).toBe(2);
+            // CMD: 10 + 1 (BAB) + 0 (Str) + 0 (Dex) + 1 (Size) = 12
+            expect(large?.baseStats.CMD).toBe(12);
+        });
+
+        it('should default to Medium if size is missing', async () => {
+            const mediumCombatant = createMockCombatant({
+                _id: 'med1',
+                name: 'Human',
+                stats: { Str: 10, Dex: 10, BAB: 1 }
+            });
+
+            component.combatants.set([mediumCombatant]);
+            fixture.detectChanges();
+            await fixture.whenStable();
+
+            const modified = component.modifiedCombatants()[0];
+
+            // Medium: No modifiers
+            expect(modified.baseStats.AC).toBe(10);
+            expect(modified.baseStats.CMB).toBe(1);
+            expect(modified.baseStats.CMD).toBe(11);
+        });
+    });
+
     describe('Detailed Modifiers & Effects', () => {
         // Setup a combatant for these tests
         beforeEach(async () => {
