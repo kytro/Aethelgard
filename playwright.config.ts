@@ -10,7 +10,8 @@ export default defineConfig({
     globalSetup: require.resolve('./tests/e2e/global.setup.ts'),
     globalTeardown: require.resolve('./tests/e2e/global.teardown.ts'),
     use: {
-        baseURL: 'http://localhost:8081/codex',
+        // Use BASE_URL from environment (set in docker-compose.yml) or default to localhost
+        baseURL: process.env.BASE_URL || 'http://localhost:8081/codex',
         trace: 'on-first-retry',
     },
     projects: [

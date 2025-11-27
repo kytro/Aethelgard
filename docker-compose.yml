@@ -1,4 +1,10 @@
-version: '3.8'
+# Docker Compose configuration for Codex Admin test environment
+# Services:
+#   - mongo: MongoDB database
+#   - app: Node.js/Angular application  
+#   - nginx: Reverse proxy
+#   - e2e: Playwright E2E tests (run with: docker-compose run --rm e2e)
+
 services:
   mongo:
     image: mongo:latest
@@ -9,6 +15,12 @@ services:
       - mongo_data:/data/db
     networks:
       - codex-test-net
+    healthcheck:
+      test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   app:
     build: .
@@ -21,23 +33,54 @@ services:
       - TZ=Australia/Brisbane
       - JWT_SECRET=test_secret
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     volumes:
       - map_data:/app/public/maps
     networks:
       - codex-test-net
 
   nginx:
-    image: nginx:alpine
+    build:
+      context: ./nginx
     container_name: codex-test-proxy
     ports:
       - "8081:80"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - app
     networks:
       - codex-test-net
+    healthcheck:
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/health" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  #  Run tests with: docker-compose run --rm e2e
+  # This runs Playwright tests inside Docker on the same network as MongoDB
+  # This avoids Windows/WSL2 port forwarding issues
+  e2e:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    container_name: codex-e2e-tests
+    environment:
+      - DATABASE_URL=mongodb://mongo:27017/codex
+      - NODE_ENV=test
+      - BASE_URL=http://nginx:80/codex
+    depends_on:
+      mongo:
+        condition: service_healthy
+      app:
+        condition: service_started
+      nginx:
+        condition: service_healthy
+    networks:
+      - codex-test-net
+    volumes:
+      - ./playwright-report:/app/playwright-report
+      - ./test-results:/app/test-results
 
 volumes:
   mongo_data:

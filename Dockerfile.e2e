@@ -1,0 +1,35 @@
+# Dockerfile for running Playwright E2E tests inside Docker
+# This eliminates Windows/WSL2 port forwarding issues by running tests
+# on the same Docker network as MongoDB and the app
+
+FROM mcr.microsoft.com/playwright:v1.56.1-noble
+
+# Set working directory
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+# Note: We need all dependencies including devDependencies for tests
+RUN npm install --legacy-peer-deps
+
+# Copy test files and configuration
+COPY playwright.config.ts ./
+COPY tests ./tests
+COPY tsconfig.json ./
+
+# Copy any other files needed for tests (e.g., .env files if used)
+# COPY .env.test ./ 
+
+# Set environment variables
+# The DATABASE_URL uses 'mongo' as the hostname because we're on the same Docker network
+ENV DATABASE_URL=mongodb://mongo:27017/codex
+ENV NODE_ENV=test
+
+# Install Playwright browsers (already included in the base image, but ensures latest)
+# RUN npx playwright install --with-deps
+
+# Default command to run tests
+# Use --reporter=list for better output in CI/Docker logs
+CMD ["npx", "playwright", "test", "--reporter=list"]
