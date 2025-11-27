@@ -3,7 +3,8 @@ module.exports = {
     setupFilesAfterEnv: ['<rootDir>/setup-jest.ts'],
     testPathIgnorePatterns: [
         '<rootDir>/node_modules/',
-        '<rootDir>/dist/'
+        '<rootDir>/dist/',
+        '<rootDir>/tests/e2e/'
     ],
     coverageDirectory: 'coverage',
     collectCoverageFrom: [
