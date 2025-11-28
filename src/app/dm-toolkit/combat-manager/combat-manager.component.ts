@@ -687,7 +687,7 @@ export class CombatManagerComponent {
         Object.assign(skills, skillsObject);
       } else {
         const skillsString = getCaseInsensitiveProp(baseStats, 'Skills') || '';
-        if (skillsString) {
+        if (skillsString && typeof skillsString === 'string') {
           skillsString.split(',').forEach((entry: string) => {
             const match = entry.trim().match(/^(.*?)\s*([+-]\d+)/);
             if (match) {
