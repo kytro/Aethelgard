@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 
 test.describe('Smoke & Health', () => {
     test('Health check should return ok', async ({ request }) => {
-        const response = await request.get('/health');
-        expect(response.ok()).toBeTruthy();
+        const response = await request.get('http://nginx:80/codex/api/health');
+        expect(response.status()).toBe(200);
         const data = await response.json();
         expect(data).toEqual({ status: 'ok', db: true });
     });
