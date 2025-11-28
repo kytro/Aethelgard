@@ -1,4 +1,3 @@
-// src/app/dm-toolkit/dm-toolkit.utils.ts
 
 export const SKILL_ABILITY_MAP: { [key: string]: 'Str' | 'Dex' | 'Con' | 'Int' | 'Wis' | 'Cha' } = {
     'Acrobatics': 'Dex', 'Appraise': 'Int', 'Bluff': 'Cha', 'Climb': 'Str', 'Craft': 'Int',
@@ -72,7 +71,14 @@ export const formatTime = (t: any): string => {
 export const calculateCompleteBaseStats = (stats: any): any => {
     const newStats: { [key: string]: any } = { ...(stats || {}) };
     const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
-    abilities.forEach(ability => { if (getCaseInsensitiveProp(newStats, ability) === undefined) newStats[ability] = 10; });
+    abilities.forEach(ability => {
+        const val = getCaseInsensitiveProp(newStats, ability);
+        if (val !== undefined) {
+            newStats[ability] = val; // Normalize key
+        } else {
+            newStats[ability] = 10; // Default
+        }
+    });
 
     const strMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Str'));
     const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Dex'));

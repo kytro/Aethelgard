@@ -9,7 +9,7 @@ import {
 } from '../dm-toolkit.utils';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
-interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; stats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; }
+interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; baseStats: any; stats?: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; }
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
@@ -229,8 +229,7 @@ export class CombatManagerComponent {
   }
 
   setCurrentFight(fight: Fight) {
-    // Optional migration hook if needed
-    this.http.post(`/codex/api/dm-toolkit/fights/${fight._id}/migrate`, {}).subscribe({ error: e => console.error(e) });
+
     this.currentFight.set(fight);
   }
 
@@ -459,15 +458,15 @@ export class CombatManagerComponent {
   async handleUpdateCombatantStat(combatantId: string, statName: string, value: any) {
     const combatant = this.combatants().find(c => c._id === combatantId);
     if (!combatant) return;
-    const newStats = { ...combatant.stats, [statName]: Number(value) };
-    await this.handleUpdateCombatant(combatantId, 'stats', newStats);
+    const newStats = { ...combatant.baseStats, [statName]: Number(value) };
+    await this.handleUpdateCombatant(combatantId, 'baseStats', newStats);
   }
 
   openResistancesModal(combatant: CombatantWithModifiers) { this.editingCombatantResistances.set(combatant); }
   closeResistancesModal() { this.editingCombatantResistances.set(null); }
   async handleUpdateResistances(combatant: CombatantWithModifiers, resistances: any) {
-    const newStats = { ...combatant.stats, ...resistances };
-    await this.handleUpdateCombatant(combatant._id, 'stats', newStats);
+    const newStats = { ...combatant.baseStats, ...resistances };
+    await this.handleUpdateCombatant(combatant._id, 'baseStats', newStats);
     this.closeResistancesModal();
   }
 
@@ -475,15 +474,15 @@ export class CombatManagerComponent {
   closeSkillsModal() { this.editingCombatantSkills.set(null); this.newSkill.set({ name: '', rank: 0 }); }
   async handleUpdateSkill(combatant: CombatantWithModifiers, skillName: string, rank: number) {
     if (!skillName) return;
-    const skills = getCaseInsensitiveProp(combatant.stats, 'skills') || {};
+    const skills = getCaseInsensitiveProp(combatant.baseStats, 'skills') || {};
     const newSkills = { ...skills, [skillName]: rank };
-    await this.handleUpdateCombatant(combatant._id, 'stats', { ...combatant.stats, skills: newSkills });
+    await this.handleUpdateCombatant(combatant._id, 'baseStats', { ...combatant.baseStats, skills: newSkills });
   }
   async handleRemoveSkill(combatant: CombatantWithModifiers, skillName: string) {
-    const skills = getCaseInsensitiveProp(combatant.stats, 'skills') || {};
+    const skills = getCaseInsensitiveProp(combatant.baseStats, 'skills') || {};
     const newSkills = { ...skills };
     delete newSkills[skillName];
-    await this.handleUpdateCombatant(combatant._id, 'stats', { ...combatant.stats, skills: newSkills });
+    await this.handleUpdateCombatant(combatant._id, 'baseStats', { ...combatant.baseStats, skills: newSkills });
   }
 
   openSpellSlotsModal(combatant: CombatantWithModifiers) { this.editingCombatantSpellSlots.set(combatant); }
@@ -497,7 +496,7 @@ export class CombatManagerComponent {
   modifiedCombatants = computed<CombatantWithModifiers[]>(() => {
     return this.combatants().map(c => {
       const entity = c.entityId ? this.entitiesCache().find(e => e.id === c.entityId) : null;
-      const baseStats = calculateCompleteBaseStats(c.stats);
+      const baseStats = calculateCompleteBaseStats(c.baseStats || c.stats);
       // Saves parsing
       const savesStr = getCaseInsensitiveProp(baseStats, 'Saves');
       const resSaves = { Fort: 0, Ref: 0, Will: 0 };

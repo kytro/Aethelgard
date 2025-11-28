@@ -104,8 +104,8 @@ module.exports = function (db) {
         combatantData.tempMods = combatantData.tempMods || {};
 
         try {
-            const result = await db.collection('combatants').insertOne(combatantData);
-            const newCombatant = await db.collection('combatants').findOne({ _id: result.insertedId });
+            const result = await db.collection('dm_toolkit_combatants').insertOne(combatantData);
+            const newCombatant = await db.collection('dm_toolkit_combatants').findOne({ _id: result.insertedId });
             res.status(201).json(newCombatant);
         } catch (err) {
             console.error('[Combat Routes] Error creating combatant:', err);
@@ -117,7 +117,7 @@ module.exports = function (db) {
     router.get('/fights/:fightId/combatants', async (req, res) => {
         const { fightId } = req.params;
         try {
-            const combatants = await db.collection('combatants').find({ fightId }).toArray();
+            const combatants = await db.collection('dm_toolkit_combatants').find({ fightId }).toArray();
             res.status(200).json(combatants);
         } catch (err) {
             console.error('[Combat Routes] Error fetching combatants:', err);
@@ -131,11 +131,11 @@ module.exports = function (db) {
         const updates = req.body;
         try {
             const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
-            const result = await db.collection('combatants').updateOne(query, { $set: updates });
+            const result = await db.collection('dm_toolkit_combatants').updateOne(query, { $set: updates });
             if (result.matchedCount === 0) {
                 return res.status(404).json({ message: 'Combatant not found' });
             }
-            const updatedCombatant = await db.collection('combatants').findOne(query);
+            const updatedCombatant = await db.collection('dm_toolkit_combatants').findOne(query);
             res.status(200).json(updatedCombatant);
         } catch (err) {
             console.error('[Combat Routes] Error updating combatant:', err);
@@ -148,7 +148,7 @@ module.exports = function (db) {
         const { id } = req.params;
         try {
             const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
-            const result = await db.collection('combatants').deleteOne(query);
+            const result = await db.collection('dm_toolkit_combatants').deleteOne(query);
             if (result.deletedCount === 0) {
                 return res.status(404).json({ message: 'Combatant not found' });
             }
@@ -162,7 +162,7 @@ module.exports = function (db) {
     // GET all fights
     router.get('/fights', async (req, res) => {
         try {
-            const fights = await db.collection('fights').find({}).toArray();
+            const fights = await db.collection('dm_toolkit_fights').find({}).toArray();
             res.status(200).json(fights);
         } catch (err) {
             console.error('[Combat Routes] Error fetching fights:', err);
@@ -183,8 +183,8 @@ module.exports = function (db) {
             createdAt: new Date()
         };
         try {
-            const result = await db.collection('fights').insertOne(newFight);
-            const createdFight = await db.collection('fights').findOne({ _id: result.insertedId });
+            const result = await db.collection('dm_toolkit_fights').insertOne(newFight);
+            const createdFight = await db.collection('dm_toolkit_fights').findOne({ _id: result.insertedId });
             res.status(201).json(createdFight);
         } catch (err) {
             console.error('[Combat Routes] Error creating fight:', err);
@@ -197,8 +197,8 @@ module.exports = function (db) {
         const { fightId } = req.params;
         try {
             const query = ObjectId.isValid(fightId) ? { _id: new ObjectId(fightId) } : { _id: fightId };
-            await db.collection('combatants').deleteMany({ fightId });
-            const result = await db.collection('fights').deleteOne(query);
+            await db.collection('dm_toolkit_combatants').deleteMany({ fightId });
+            const result = await db.collection('dm_toolkit_fights').deleteOne(query);
             if (result.deletedCount === 0) {
                 return res.status(404).json({ message: 'Fight not found' });
             }
@@ -215,11 +215,11 @@ module.exports = function (db) {
         const updates = req.body;
         try {
             const query = ObjectId.isValid(fightId) ? { _id: new ObjectId(fightId) } : { _id: fightId };
-            const result = await db.collection('fights').updateOne(query, { $set: updates });
+            const result = await db.collection('dm_toolkit_fights').updateOne(query, { $set: updates });
             if (result.matchedCount === 0) {
                 return res.status(404).json({ message: 'Fight not found' });
             }
-            const updatedFight = await db.collection('fights').findOne(query);
+            const updatedFight = await db.collection('dm_toolkit_fights').findOne(query);
             res.status(200).json(updatedFight);
         } catch (err) {
             console.error('[Combat Routes] Error updating fight:', err);

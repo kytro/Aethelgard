@@ -500,22 +500,22 @@
     <div class="space-y-4">
       <div>
         <label class="block text-sm font-medium text-gray-400">DR</label>
-        <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'DR')" #drInput
+        <input type="text" [ngModel]="getCaseInsensitiveProp(c.baseStats, 'DR')" #drInput
           class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-400">SR</label>
-        <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'SR')" #srInput
+        <input type="text" [ngModel]="getCaseInsensitiveProp(c.baseStats, 'SR')" #srInput
           class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-400">Resist</label>
-        <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'Resist')" #resistInput
+        <input type="text" [ngModel]="getCaseInsensitiveProp(c.baseStats, 'Resist')" #resistInput
           class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-400">Immune</label>
-        <input type="text" [ngModel]="getCaseInsensitiveProp(c.stats, 'Immune')" #immuneInput
+        <input type="text" [ngModel]="getCaseInsensitiveProp(c.baseStats, 'Immune')" #immuneInput
           class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
       </div>
     </div>
@@ -535,11 +535,11 @@
   <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700" (click)="$event.stopPropagation()">
     <h3 class="text-xl font-bold mb-4 text-yellow-400">Edit Skills for {{ c.name }}</h3>
     <div class="space-y-2 max-h-60 overflow-y-auto">
-      @for(skillName of objectKeys(getCaseInsensitiveProp(c.stats, 'skills') || {}); track skillName) {
+      @for(skillName of objectKeys(getCaseInsensitiveProp(c.baseStats, 'skills') || {}); track skillName) {
       <div class="flex items-center gap-2">
         <input type="text" [value]="skillName"
           class="flex-grow bg-gray-700 border border-gray-600 rounded-md px-3 py-2 text-white" readonly>
-        <input type="number" [ngModel]="getCaseInsensitiveProp(c.stats, 'skills')[skillName]"
+        <input type="number" [ngModel]="getCaseInsensitiveProp(c.baseStats, 'skills')[skillName]"
           (ngModelChange)="handleUpdateSkill(c, skillName, $event)"
           class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
         <button (click)="handleRemoveSkill(c, skillName)" class="text-red-500 hover:text-red-400">X</button>
@@ -599,7 +599,7 @@
       @for(stat of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']; track stat) {
       <div class="flex items-center gap-2">
         <label class="w-12">{{stat}}</label>
-        <input type="number" [ngModel]="getCaseInsensitiveProp(c.stats, stat)"
+        <input type="number" [ngModel]="getCaseInsensitiveProp(c.baseStats, stat)"
           (ngModelChange)="handleUpdateCombatantStat(c._id, stat, $event)"
           class="w-24 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
       </div>
