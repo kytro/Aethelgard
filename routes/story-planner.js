@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { generateContent } = require('../services/geminiService');
 
-module.exports = function(db) {
+module.exports = function (db) {
 
   router.post('/suggest', async (req, res) => {
     const { context, model } = req.body;
