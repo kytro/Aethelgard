@@ -4,8 +4,8 @@ const router = express.Router();
 
 const getIdQuery = (id) => (ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id });
 
-module.exports = function(db) {
-    
+module.exports = function (db) {
+
     // --- Sessions ---
     router.get('/sessions', async (req, res) => {
         res.set('Cache-Control', 'no-store');
@@ -26,7 +26,7 @@ module.exports = function(db) {
         const updatedSession = await db.collection('dm_toolkit_sessions').findOne(getIdQuery(id));
         res.status(200).json(updatedSession);
     });
-    
+
     router.delete('/sessions/:id', async (req, res) => {
         const { id } = req.params;
         await db.collection('dm_toolkit_sessions').deleteOne(getIdQuery(id));

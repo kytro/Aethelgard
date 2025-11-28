@@ -261,14 +261,9 @@ describe('CombatManagerComponent', () => {
 
             component.setCurrentFight(mockFight);
 
-            // Expect migration call
-            const migrateReq = httpMock.expectOne(`/codex/api/dm-toolkit/fights/${mockFight._id}/migrate`);
-            migrateReq.flush({});
-
             fixture.detectChanges();
             await fixture.whenStable();
 
-            // Expect combatants load
             const combatantsReq = httpMock.expectOne(`/codex/api/dm-toolkit/fights/${mockFight._id}/combatants`);
             combatantsReq.flush(mockCombatants);
 
@@ -621,7 +616,7 @@ describe('CombatManagerComponent', () => {
 
             const req = httpMock.expectOne('/codex/api/dm-toolkit/combatants/c1');
             expect(req.request.method).toBe('PATCH');
-            expect(req.request.body.stats.skills['Stealth']).toBe(10);
+            expect(req.request.body.baseStats.skills['Stealth']).toBe(10);
 
             req.flush({});
         });

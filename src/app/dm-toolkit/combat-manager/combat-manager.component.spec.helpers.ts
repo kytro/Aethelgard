@@ -77,6 +77,9 @@ export function createMockCombatant(overrides = {}) {
         stats: {
             Str: 10, Dex: 10, Con: 10, Int: 10, Wis: 10, Cha: 10
         },
+        baseStats: {
+            Str: 10, Dex: 10, Con: 10, Int: 10, Wis: 10, Cha: 10
+        },
         effects: [],
         tempMods: {},
         activeFeats: [],

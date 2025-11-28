@@ -30,16 +30,16 @@ module.exports = function (db) {
       return res.status(400).json({ error: '`name` and `key` are required' });
     }
     if (!db) return res.status(503).json({ error: 'Database not ready' });
-    
+
     try {
       const newKey = { id: new ObjectId().toString(), name, key };
-      
+
       const result = await db.collection('settings').findOneAndUpdate(
         { _id: 'api_keys' },
-        { 
+        {
           $push: { keys: newKey },
           // If there is no active key, make this new one active.
-          $setOnInsert: { active_key_id: newKey.id } 
+          $setOnInsert: { active_key_id: newKey.id }
         },
         { upsert: true, returnDocument: 'after' }
       );
@@ -47,8 +47,8 @@ module.exports = function (db) {
       // If an existing doc was updated and had no active key, set this one.
       if (result.value && !result.value.active_key_id) {
         await db.collection('settings').updateOne(
-            { _id: 'api_keys' },
-            { $set: { active_key_id: newKey.id } }
+          { _id: 'api_keys' },
+          { $set: { active_key_id: newKey.id } }
         );
       }
 
@@ -66,26 +66,26 @@ module.exports = function (db) {
     if (!db) return res.status(503).json({ error: 'Database not ready' });
 
     try {
-        const doc = await db.collection('settings').findOne({ _id: 'api_keys' });
-        if (!doc) return res.status(404).json({ error: 'API keys document not found.' });
+      const doc = await db.collection('settings').findOne({ _id: 'api_keys' });
+      if (!doc) return res.status(404).json({ error: 'API keys document not found.' });
 
-        const keyToDelete = doc.keys.find(k => k.id === id);
-        if (!keyToDelete) return res.status(404).json({ error: 'Key not found.' });
+      const keyToDelete = doc.keys.find(k => k.id === id);
+      if (!keyToDelete) return res.status(404).json({ error: 'Key not found.' });
 
-        const update = { $pull: { keys: { id: id } } };
-        
-        // If the deleted key was the active one, pick a new active key
-        if (doc.active_key_id === id) {
-            const remainingKeys = doc.keys.filter(k => k.id !== id);
-            update.$set = { active_key_id: remainingKeys.length > 0 ? remainingKeys[0].id : null };
-        }
+      const update = { $pull: { keys: { id: id } } };
 
-        await db.collection('settings').updateOne({ _id: 'api_keys' }, update);
+      // If the deleted key was the active one, pick a new active key
+      if (doc.active_key_id === id) {
+        const remainingKeys = doc.keys.filter(k => k.id !== id);
+        update.$set = { active_key_id: remainingKeys.length > 0 ? remainingKeys[0].id : null };
+      }
 
-        res.status(200).json({ message: 'API key deleted successfully.' });
+      await db.collection('settings').updateOne({ _id: 'api_keys' }, update);
+
+      res.status(200).json({ message: 'API key deleted successfully.' });
     } catch (e) {
-        console.error('[SETTINGS] DELETE api-key:', e);
-        res.status(500).json({ error: e.message });
+      console.error('[SETTINGS] DELETE api-key:', e);
+      res.status(500).json({ error: e.message });
     }
   });
 
@@ -97,19 +97,19 @@ module.exports = function (db) {
     if (!db) return res.status(503).json({ error: 'Database not ready' });
 
     try {
-        const doc = await db.collection('settings').findOne({ _id: 'api_keys' });
-        if (!doc || !doc.keys.some(k => k.id === id)) {
-            return res.status(404).json({ error: 'Key ID not found.' });
-        }
+      const doc = await db.collection('settings').findOne({ _id: 'api_keys' });
+      if (!doc || !doc.keys.some(k => k.id === id)) {
+        return res.status(404).json({ error: 'Key ID not found.' });
+      }
 
-        await db.collection('settings').updateOne(
-            { _id: 'api_keys' },
-            { $set: { active_key_id: id } }
-        );
-        res.status(200).json({ message: 'Active key updated.' });
+      await db.collection('settings').updateOne(
+        { _id: 'api_keys' },
+        { $set: { active_key_id: id } }
+      );
+      res.status(200).json({ message: 'Active key updated.' });
     } catch (e) {
-        console.error('[SETTINGS] POST set-active:', e);
-        res.status(500).json({ error: e.message });
+      console.error('[SETTINGS] POST set-active:', e);
+      res.status(500).json({ error: e.message });
     }
   });
 
@@ -145,20 +145,20 @@ module.exports = function (db) {
   router.post('/settings/general', async (req, res) => {
     const { default_ai_model } = req.body;
     if (!default_ai_model) {
-        return res.status(400).json({ error: 'default_ai_model is required.' });
+      return res.status(400).json({ error: 'default_ai_model is required.' });
     }
     if (!db) return res.status(503).json({ error: 'Database not ready' });
 
     try {
-        await db.collection('settings').updateOne(
-            { _id: 'general' },
-            { $set: { default_ai_model: default_ai_model } },
-            { upsert: true } // Creates the document if it doesn't exist
-        );
-        res.status(200).json({ message: 'General settings updated successfully.' });
+      await db.collection('settings').updateOne(
+        { _id: 'general' },
+        { $set: { default_ai_model: default_ai_model } },
+        { upsert: true } // Creates the document if it doesn't exist
+      );
+      res.status(200).json({ message: 'General settings updated successfully.' });
     } catch (err) {
-        console.error('[SETTINGS] Error updating general settings:', err);
-        res.status(500).json({ error: 'Failed to update general settings.' });
+      console.error('[SETTINGS] Error updating general settings:', err);
+      res.status(500).json({ error: 'Failed to update general settings.' });
     }
   });
 
