@@ -86,23 +86,6 @@ __screenshots__/
 ._*
 .Spotlight-V100
 .Trashes
-ehthumbs.db
-Thumbs.db
-Thumbs.db:encryptable
-Desktop.ini
-$RECYCLE.BIN/
-
-# AI/Personal
-.gemini/
-todo.md
-Dockerfile
-notes.md
-scratch.md
-
-# Temporary files
-*.tmp
-*.temp
-*.bak
 *.backup
 *~
 
@@ -144,3 +127,25 @@ package-lock.json
 # AI Assistant internal tracking files
 DEBUGGING_SKILLS.md
 CHANGES_NEEDED.md
+# AI/Personal
+.gemini/
+.agent/
+.ai/
+.cursor/
+.windsurf/
+.cursorrules
+.windsurfrules
+task.md
+implementation_plan.md
+walkthrough.md
+memory.md
+todo.md
+Dockerfile
+notes.md
+scratch.md
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
