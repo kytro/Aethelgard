@@ -2,71 +2,64 @@ const express = require('express');
 const { ObjectId } = require('mongodb');
 const router = express.Router();
 
-// --- HELPERS ---
-const getAbilityModifierAsNumber = (score) => {
-    const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
-    if (isNaN(numScore)) return 0;
-    return Math.floor((numScore - 10) / 2);
-};
+const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17];
+const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
 
-const calculateAverageHp = (diceString) => {
-    const match = String(diceString).match(/(\d+)d(\d+)\s*([+-]\s*\d+)?/);
+/**
+ * Calculates average HP from a dice string (e.g., "4d10+8" => 30)
+ */
+function calculateAverageHp(hpString) {
+    if (!hpString || typeof hpString !== 'string') return 1;
+    const match = hpString.match(/(\d+)d(\d+)([+-]\d+)?/);
     if (!match) {
-        const singleNumber = parseInt(diceString, 10);
-        return isNaN(singleNumber) ? 10 : singleNumber;
+        const singleNumber = parseInt(hpString, 10);
+        return isNaN(singleNumber) ? 1 : singleNumber;
     }
     const numDice = parseInt(match[1], 10);
     const dieSize = parseInt(match[2], 10);
-    const modifier = parseInt((match[3] || '0').replace(/\s/g, ''), 10);
+    const bonus = match[3] ? parseInt(match[3], 10) : 0;
+    return Math.floor(numDice * (dieSize + 1) / 2) + bonus;
+}
 
-    const averageRoll = (dieSize + 1) / 2;
-    return Math.floor(numDice * averageRoll) + modifier;
-};
+/**
+ * Retrieves ability modifier as a number
+ */
+function getAbilityModifier(score) {
+    const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
+    if (isNaN(numScore)) return 0;
+    return Math.floor((numScore - 10) / 2);
+}
 
-const getIdQuery = (id) => (ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id });
+/**
+ * Calculates BAB from level and class type
+ */
+function calculateBAB(level, classType = 'average') {
+    if (classType === 'full') return level;
+    if (classType === 'medium') return Math.floor(level * 0.75);
+    return Math.floor(level / 2);
+}
+
+/**
+ * Calculates saves based on level and ability modifiers
+ */
+function calculateSaves(level, con, dex, wis, classType = 'balanced') {
+    const safeLevel = Math.max(0, Math.min(level - 1, GOOD_SAVES.length - 1));
+    return {
+        fort: (classType === 'fort' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + con,
+        ref: (classType === 'ref' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + dex,
+        will: (classType === 'will' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + wis
+    };
+}
 
 module.exports = function (db) {
+    if (!db) throw new Error('[Combat Routes] Database not provided');
 
-    // --- Fights ---
-    router.get('/fights', async (req, res) => {
-        const fights = await db.collection('dm_toolkit_fights').find().sort({ createdAt: -1 }).toArray();
-        res.json(fights);
-    });
-
-    router.post('/fights', async (req, res) => {
-        const { name } = req.body;
-        const result = await db.collection('dm_toolkit_fights').insertOne({ name, createdAt: new Date(), roundCounter: 1, currentTurnIndex: 0, combatStartTime: null, log: [] });
-        const newFight = await db.collection('dm_toolkit_fights').findOne({ _id: result.insertedId });
-        res.status(201).json(newFight);
-    });
-
-    router.delete('/fights/:id', async (req, res) => {
-        const { id } = req.params;
-        await db.collection('dm_toolkit_fights').deleteOne(getIdQuery(id));
-        await db.collection('dm_toolkit_combatants').deleteMany({ fightId: id });
-        res.sendStatus(204);
-    });
-
-    router.patch('/fights/:id', async (req, res) => {
-        const { id } = req.params;
-        const { id: bodyId, ...updateData } = req.body;
-        await db.collection('dm_toolkit_fights').updateOne(getIdQuery(id), { $set: updateData });
-        const fight = await db.collection('dm_toolkit_fights').findOne(getIdQuery(id));
-        res.status(200).json(fight);
-    });
-
-    // --- Combatants ---
-    router.get('/fights/:fightId/combatants', async (req, res) => {
-        const { fightId } = req.params;
-        const combatants = await db.collection('dm_toolkit_combatants').find({ fightId }).sort({ initiative: -1, name: 1 }).toArray();
-        res.json(combatants);
-    });
-
+    // POST a new combatant to a specific fight
     router.post('/fights/:fightId/combatants', async (req, res) => {
         const { fightId } = req.params;
         let combatantData = req.body;
 
-        // If an entityId is provided, fetch the source entity to get its stats.
+        // If an entityId is provided, fetch the source entity to get its baseStats.
         if (combatantData.entityId) {
             const query = ObjectId.isValid(combatantData.entityId) ? { _id: new ObjectId(combatantData.entityId) } : { _id: combatantData.entityId };
             const entity = await db.collection('entities_pf1e').findOne(query);
@@ -77,159 +70,160 @@ module.exports = function (db) {
                 return res.status(404).json({ message: `Entity with ID ${combatantData.entityId} not found.` });
             }
 
-            // Directly copy the stats and other canonical data from the database.
-            const stats = entity.baseStats || {};
+            // Use baseStats (not stats) from the entity
+            const baseStats = entity.baseStats || {};
             combatantData.name = entity.name;
-            combatantData.stats = stats;
+            combatantData.baseStats = baseStats;  // Changed from .stats to .baseStats
 
             // Log what stats we're transferring for debugging
             console.log(`[Combat Manager] Adding: ${entity.name}`);
             console.log(`[Combat Manager] Ability Scores:`, {
-                Str: stats.Str, Dex: stats.Dex, Con: stats.Con,
-                Int: stats.Int, Wis: stats.Wis, Cha: stats.Cha
+                Str: baseStats.Str || baseStats.str,
+                Dex: baseStats.Dex || baseStats.dex,
+                Con: baseStats.Con || baseStats.con,
+                Int: baseStats.Int || baseStats.int,
+                Wis: baseStats.Wis || baseStats.wis,
+                Cha: baseStats.Cha || baseStats.cha
             });
-            console.log(`[Combat Manager] Skills:`, stats.Skills || stats.skills || 'none');
+            console.log(`[Combat Manager] Skills:`, baseStats.Skills || baseStats.skills || {});
 
             // Recalculate HP on the server based on official stats for consistency.
-            const hpValue = calculateAverageHp(stats.HP || stats.hp || '1d8');
+            const hpValue = calculateAverageHp(baseStats.HP || baseStats.hp || '1d8');
             combatantData.hp = hpValue;
             combatantData.maxHp = hpValue;
         }
 
-        // For all combatants (including Custom ones), guarantee a `stats` object exists.
-        if (!combatantData.stats) {
-            combatantData.stats = {};
-        }
-
-        // Roll initiative if it wasn't provided by the client.
+        // Default to 0 initiative if not provided
         if (combatantData.initiative === undefined || combatantData.initiative === null) {
-            const dexMod = getAbilityModifierAsNumber(combatantData.stats.Dex || combatantData.stats.dex);
-            combatantData.initiative = Math.floor(Math.random() * 20) + 1 + (dexMod || 0);
+            combatantData.initiative = null;
         }
 
-        // Set default empty values for other fields to ensure a consistent document structure.
+        // Set defaults for required fields
         combatantData.fightId = fightId;
         combatantData.effects = combatantData.effects || [];
         combatantData.tempMods = combatantData.tempMods || {};
-        combatantData.activeFeats = combatantData.activeFeats || [];
 
-        // Insert the prepared combatant data into the database.
         try {
-            const result = await db.collection('dm_toolkit_combatants').insertOne(combatantData);
-            const newCombatant = await db.collection('dm_toolkit_combatants').findOne({ _id: result.insertedId });
+            const result = await db.collection('combatants').insertOne(combatantData);
+            const newCombatant = await db.collection('combatants').findOne({ _id: result.insertedId });
             res.status(201).json(newCombatant);
-        } catch (error) {
-            console.error("Failed to insert new combatant:", error);
-            res.status(500).json({ message: "Failed to create combatant in the database." });
+        } catch (err) {
+            console.error('[Combat Routes] Error creating combatant:', err);
+            res.status(500).json({ message: 'Failed to create combatant', error: err.message });
         }
     });
 
+    // GET all combatants for a specific fight
+    router.get('/fights/:fightId/combatants', async (req, res) => {
+        const { fightId } = req.params;
+        try {
+            const combatants = await db.collection('combatants').find({ fightId }).toArray();
+            res.status(200).json(combatants);
+        } catch (err) {
+            console.error('[Combat Routes] Error fetching combatants:', err);
+            res.status(500).json({ message: 'Failed to fetch combatants', error: err.message });
+        }
+    });
+
+    // PATCH a combatant (update initiative, HP, etc.)
     router.patch('/combatants/:id', async (req, res) => {
         const { id } = req.params;
-        const { id: bodyId, ...updateData } = req.body;
-        await db.collection('dm_toolkit_combatants').updateOne(getIdQuery(id), { $set: updateData });
-        const updatedCombatant = await db.collection('dm_toolkit_combatants').findOne(getIdQuery(id));
-        res.status(200).json(updatedCombatant);
+        const updates = req.body;
+        try {
+            const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
+            const result = await db.collection('combatants').updateOne(query, { $set: updates });
+            if (result.matchedCount === 0) {
+                return res.status(404).json({ message: 'Combatant not found' });
+            }
+            const updatedCombatant = await db.collection('combatants').findOne(query);
+            res.status(200).json(updatedCombatant);
+        } catch (err) {
+            console.error('[Combat Routes] Error updating combatant:', err);
+            res.status(500).json({ message: 'Failed to update combatant', error: err.message });
+        }
     });
 
+    // DELETE a combatant
     router.delete('/combatants/:id', async (req, res) => {
         const { id } = req.params;
-        await db.collection('dm_toolkit_combatants').deleteOne(getIdQuery(id));
-        res.sendStatus(204);
-    });
-
-    // --- Special Fight Actions ---
-    router.patch('/fights/:id/end-combat', async (req, res) => {
-        const { id } = req.params;
-        await db.collection('dm_toolkit_fights').updateOne(getIdQuery(id), { $set: { combatStartTime: null, roundCounter: 1, currentTurnIndex: 0 } });
-
-        const combatants = await db.collection('dm_toolkit_combatants').find({ fightId: id }).toArray();
-        for (const c of combatants) {
-            const permanentEffects = (c.effects || []).filter(e => e.unit === 'permanent');
-            await db.collection('dm_toolkit_combatants').updateOne(getIdQuery(c._id), { $set: { effects: permanentEffects, activeFeats: [] } });
-        }
-
-        const fight = await db.collection('dm_toolkit_fights').findOne(getIdQuery(id));
-        res.status(200).json(fight);
-    });
-
-    router.patch('/fights/:id/next-turn', async (req, res) => {
-        const { id } = req.params;
-        const fight = await db.collection('dm_toolkit_fights').findOne(getIdQuery(id));
-        if (!fight) return res.status(404).json({ error: 'Fight not found' });
-
-        const combatants = await db.collection('dm_toolkit_combatants').find({ fightId: id }).toArray();
-        if (combatants.length === 0) return res.status(200).json(fight);
-
-        let newIndex = (fight.currentTurnIndex || 0) + 1;
-        let newRound = fight.roundCounter || 1;
-
-        if (newIndex >= combatants.length) {
-            newIndex = 0;
-            newRound++;
-            // Update effect durations
-            for (const c of combatants) {
-                const updatedEffects = (c.effects || [])
-                    .map(e => (e.unit === 'rounds' && e.startRound < newRound) ? { ...e, remainingRounds: e.remainingRounds - 1 } : e)
-                    .filter(e => e.unit !== 'rounds' || e.remainingRounds > 0);
-                if (JSON.stringify(updatedEffects) !== JSON.stringify(c.effects)) {
-                    await db.collection('dm_toolkit_combatants').updateOne(getIdQuery(c._id), { $set: { effects: updatedEffects } });
-                }
+        try {
+            const query = ObjectId.isValid(id) ? { _id: new ObjectId(id) } : { _id: id };
+            const result = await db.collection('combatants').deleteOne(query);
+            if (result.deletedCount === 0) {
+                return res.status(404).json({ message: 'Combatant not found' });
             }
+            res.status(200).json({ message: 'Combatant deleted successfully' });
+        } catch (err) {
+            console.error('[Combat Routes] Error deleting combatant:', err);
+            res.status(500).json({ message: 'Failed to delete combatant', error: err.message });
         }
-
-        await db.collection('dm_toolkit_fights').updateOne(getIdQuery(id), { $set: { currentTurnIndex: newIndex, roundCounter: newRound } });
-        const updatedFight = await db.collection('dm_toolkit_fights').findOne(getIdQuery(id));
-        res.status(200).json(updatedFight);
     });
 
-    router.patch('/fights/:id/previous-turn', async (req, res) => {
-        const { id } = req.params;
-        const fight = await db.collection('dm_toolkit_fights').findOne(getIdQuery(id));
-        if (!fight) return res.status(404).json({ error: 'Fight not found' });
+    // GET all fights
+    router.get('/fights', async (req, res) => {
+        try {
+            const fights = await db.collection('fights').find({}).toArray();
+            res.status(200).json(fights);
+        } catch (err) {
+            console.error('[Combat Routes] Error fetching fights:', err);
+            res.status(500).json({ message: 'Failed to fetch fights', error: err.message });
+        }
+    });
 
-        const combatants = await db.collection('dm_toolkit_combatants').find({ fightId: id }).toArray();
-        if (combatants.length === 0) return res.status(200).json(fight);
+    // POST a new fight
+    router.post('/fights', async (req, res) => {
+        const { name } = req.body;
+        if (!name) {
+            return res.status(400).json({ message: 'Fight name is required' });
+        }
+        const newFight = {
+            name,
+            round: 0,
+            active: false,
+            createdAt: new Date()
+        };
+        try {
+            const result = await db.collection('fights').insertOne(newFight);
+            const createdFight = await db.collection('fights').findOne({ _id: result.insertedId });
+            res.status(201).json(createdFight);
+        } catch (err) {
+            console.error('[Combat Routes] Error creating fight:', err);
+            res.status(500).json({ message: 'Failed to create fight', error: err.message });
+        }
+    });
 
-        let newIndex = (fight.currentTurnIndex || 0) - 1;
-        let newRound = fight.roundCounter || 1;
-
-        if (newIndex < 0) {
-            newRound--;
-            if (newRound < 1) {
-                newRound = 1;
-                newIndex = 0;
-            } else {
-                newIndex = combatants.length - 1;
+    // DELETE a fight and all its combatants
+    router.delete('/fights/:fightId', async (req, res) => {
+        const { fightId } = req.params;
+        try {
+            const query = ObjectId.isValid(fightId) ? { _id: new ObjectId(fightId) } : { _id: fightId };
+            await db.collection('combatants').deleteMany({ fightId });
+            const result = await db.collection('fights').deleteOne(query);
+            if (result.deletedCount === 0) {
+                return res.status(404).json({ message: 'Fight not found' });
             }
+            res.status(200).json({ message: 'Fight and all combatants deleted successfully' });
+        } catch (err) {
+            console.error('[Combat Routes] Error deleting fight:', err);
+            res.status(500).json({ message: 'Failed to delete fight', error: err.message });
         }
-
-        await db.collection('dm_toolkit_fights').updateOne(getIdQuery(id), { $set: { currentTurnIndex: newIndex, roundCounter: newRound } });
-        const updatedFight = await db.collection('dm_toolkit_fights').findOne(getIdQuery(id));
-        res.status(200).json(updatedFight);
     });
 
-    router.post('/fights/:id/migrate', async (req, res) => {
-        const { id } = req.params;
-        const fight = await db.collection('dm_toolkit_fights').findOne(getIdQuery(id));
-        if (!fight) return res.status(404).json({ error: 'Fight not found' });
-
-        if (fight.initialCombatants && fight.initialCombatants.length > 0) {
-            console.log(`Migrating ${fight.initialCombatants.length} combatants for fight: ${fight.name}`);
-            const combatantsToInsert = fight.initialCombatants.map(c => ({
-                ...c,
-                fightId: id,
-                initiative: 10,
-                effects: [],
-                tempMods: {},
-                activeFeats: []
-            }));
-            await db.collection('dm_toolkit_combatants').insertMany(combatantsToInsert);
-            await db.collection('dm_toolkit_fights').updateOne(getIdQuery(id), { $unset: { initialCombatants: "" } });
-            console.log(`Migration successful for fight: ${fight.name}`);
-            res.status(200).json({ message: 'Migration successful' });
-        } else {
-            res.status(200).json({ message: 'No migration needed' });
+    // PATCH a fight (e.g., to advance rounds, toggle active status)
+    router.patch('/fights/:fightId', async (req, res) => {
+        const { fightId } = req.params;
+        const updates = req.body;
+        try {
+            const query = ObjectId.isValid(fightId) ? { _id: new ObjectId(fightId) } : { _id: fightId };
+            const result = await db.collection('fights').updateOne(query, { $set: updates });
+            if (result.matchedCount === 0) {
+                return res.status(404).json({ message: 'Fight not found' });
+            }
+            const updatedFight = await db.collection('fights').findOne(query);
+            res.status(200).json(updatedFight);
+        } catch (err) {
+            console.error('[Combat Routes] Error updating fight:', err);
+            res.status(500).json({ message: 'Failed to update fight', error: err.message });
         }
     });
 

@@ -5,13 +5,15 @@
     <p class="text-gray-400 mb-4">
       Generate and download a single `backup.json` file containing all data from your MongoDB collections.
     </p>
-    <button (click)="handleBackup()" [disabled]="isBackingUp()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed">
+    <button (click)="handleBackup()" [disabled]="isBackingUp()"
+      class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed">
       {{ isBackingUp() ? 'Generating...' : 'Download Backup' }}
     </button>
     @if (backupMessage()) {
-      <div class="mt-4 px-4 py-3 rounded-lg text-sm" [ngClass]="{'bg-green-900/50 border border-green-700 text-green-300': !isBackupError(), 'bg-red-900/50 border border-red-700 text-red-300': isBackupError()}">
-        <p>{{ backupMessage() }}</p>
-      </div>
+    <div class="mt-4 px-4 py-3 rounded-lg text-sm"
+      [ngClass]="{'bg-green-900/50 border border-green-700 text-green-300': !isBackupError(), 'bg-red-900/50 border border-red-700 text-red-300': isBackupError()}">
+      <p>{{ backupMessage() }}</p>
+    </div>
     }
   </div>
 
@@ -19,20 +21,37 @@
   <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6">
     <h3 class="text-2xl font-bold text-white mb-4">Restore from Backup</h3>
     <p class="text-gray-400 mb-4">
-      Upload a `backup.json` file to restore your database. This is a destructive action and will overwrite all existing data in the collections found within the backup file.
+      Upload a `backup.json` file to restore your database. Choose between a full restore (overwrites all data) or a
+      partial restore (merges/updates existing data).
     </p>
 
+    <!-- Partial Restore Checkbox -->
+    <div class="mb-4">
+      <label class="flex items-center space-x-3 cursor-pointer">
+        <input type="checkbox" [(ngModel)]="isPartialRestore"
+          class="w-4 h-4 text-yellow-500 bg-gray-700 border-gray-600 rounded focus:ring-yellow-500 focus:ring-2">
+        <div class="flex flex-col">
+          <span class="text-white font-semibold">Partial Restore (Merge Mode)</span>
+          <span class="text-sm text-gray-400">Update/add entries from backup without deleting existing data not in the
+            backup</span>
+        </div>
+      </label>
+    </div>
+
     <div class="flex items-center space-x-4">
-      <input type="file" #fileInput (change)="onFileSelected($event)" accept=".json" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-500/10 file:text-yellow-300 hover:file:bg-yellow-500/20 cursor-pointer">
-      <button (click)="handleRestore(fileInput)" [disabled]="!selectedFile() || isRestoring()" class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed whitespace-nowrap">
-        {{ isRestoring() ? 'Restoring...' : 'Restore' }}
+      <input type="file" #fileInput (change)="onFileSelected($event)" accept=".json"
+        class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-yellow-500/10 file:text-yellow-300 hover:file:bg-yellow-500/20 cursor-pointer">
+      <button (click)="handleRestore(fileInput)" [disabled]="!selectedFile() || isRestoring()"
+        class="bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed whitespace-nowrap">
+        {{ isRestoring() ? 'Restoring...' : (isPartialRestore ? 'Merge Data' : 'Restore') }}
       </button>
     </div>
 
     @if (restoreMessage()) {
-      <div class="mt-4 px-4 py-3 rounded-lg text-sm" [ngClass]="{'bg-green-900/50 border border-green-700 text-green-300': !isRestoreError(), 'bg-red-900/50 border border-red-700 text-red-300': isRestoreError()}">
-        <p>{{ restoreMessage() }}</p>
-      </div>
+    <div class="mt-4 px-4 py-3 rounded-lg text-sm"
+      [ngClass]="{'bg-green-900/50 border border-green-700 text-green-300': !isRestoreError(), 'bg-red-900/50 border border-red-700 text-red-300': isRestoreError()}">
+      <p>{{ restoreMessage() }}</p>
+    </div>
     }
   </div>
 </div>
