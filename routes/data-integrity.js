@@ -3,12 +3,12 @@ const { ObjectId } = require('mongodb');
 const router = express.Router();
 
 // This function allows us to pass the database connection (db) from server.js
-module.exports = function (db) {
-
+module.exports = function(db) {
+    
     // -----------------------------------------------------------
     // FIX: Robust Gemini Helper Functions for Reconciliation
     // -----------------------------------------------------------
-
+    
     /**
      * Retrieves the active Gemini API key from the settings collection.
      * @returns {Promise<string>} The active API key.
@@ -29,7 +29,7 @@ module.exports = function (db) {
     async function fetchReconciliationBatch(apiKey, itemType, existingNames, batchSize) {
         // FIX: Using the reliable Gemini 1.5 Flash model for production stability
         const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-
+        
         const prompt = `You are a Pathfinder 1st Edition rules expert. 
 Provide a list of up to ${batchSize} official ${itemType} objects (including ALL required keys like name, description, stats, etc., as appropriate for the type) that are NOT in the provided JSON array of names. 
 The response MUST be a single, clean JSON array of FULL objects. If no more items are found, return an empty JSON array: [].
@@ -52,7 +52,7 @@ ${JSON.stringify(existingNames)}`;
 
         const result = await response.json();
         const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-
+        
         // FIX: Robust JSON parsing (removing markdown fences and trimming)
         try {
             const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
@@ -68,8 +68,8 @@ ${JSON.stringify(existingNames)}`;
      * Core logic for iterative AI reconciliation of a collection (Items, Spells, Deities, Hazards).
      */
     async function reconcileCollection(collectionName, itemType, idPrefix, maxIterations, batchSize) {
-        if (!db) { throw new Error('Database not ready for reconciliation.'); }
-
+        if (!db) { throw new Error('Database not ready for reconciliation.'); } 
+        
         const apiKey = await getActiveApiKey();
         const existingDocs = await db.collection(collectionName).find({}).project({ name: 1 }).toArray();
         let knownNames = existingDocs.map(d => d.name).filter(Boolean);
@@ -77,7 +77,7 @@ ${JSON.stringify(existingNames)}`;
 
         for (let i = 0; i < maxIterations; i++) {
             console.log(`[RECONCILE ${collectionName}] Iteration ${i + 1}/${maxIterations}. Fetching ${batchSize} new items...`);
-
+            
             const newItemsBatch = await fetchReconciliationBatch(apiKey, itemType, knownNames, batchSize);
 
             if (!newItemsBatch || newItemsBatch.length === 0) {
@@ -91,7 +91,7 @@ ${JSON.stringify(existingNames)}`;
             for (const item of newItemsBatch) {
                 if (item.name) {
                     const itemId = `${idPrefix}${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
-
+                    
                     bulkOps.push({
                         updateOne: {
                             filter: { _id: itemId },
@@ -99,11 +99,11 @@ ${JSON.stringify(existingNames)}`;
                             upsert: true
                         }
                     });
-
+                    
                     newNames.push(item.name);
                 }
             }
-
+            
             if (bulkOps.length > 0) {
                 await db.collection(collectionName).bulkWrite(bulkOps, { ordered: false });
                 totalAdded += newNames.length;
@@ -114,460 +114,415 @@ ${JSON.stringify(existingNames)}`;
         return totalAdded;
     }
     // -----------------------------------------------------------
-
+    
     // --- PARSER LOGIC (Helper functions - original code starts here) ---
 
     // Helper function to escape special characters for use in a regular expression
     function escapeRegExp(string) {
         return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& = whole match
     }
-    // [NEW Helper Functions - Add these to routes/data-integrity.js]
-    const SIZE_MODIFIERS = {
-        'Fine': 8, 'Diminutive': 4, 'Tiny': 2, 'Small': 1, 'Medium': 0, 'Large': -1, 'Huge': -2, 'Gargantuan': -4, 'Colossal': -8
-    };
-    const SPECIAL_SIZE_MODIFIERS = {
-        'Fine': -8, 'Diminutive': -4, 'Tiny': -2, 'Small': -1, 'Medium': 0, 'Large': 1, 'Huge': 2, 'Gargantuan': 4, 'Colossal': 8
-    };
-    const CREATURE_TYPE_SAVES = {
-        'Aberration': { fort: 'poor', ref: 'poor', will: 'good' },
-        'Animal': { fort: 'good', ref: 'good', will: 'poor' },
-        'Construct': { fort: 'poor', ref: 'poor', will: 'poor' },
-        'Dragon': { fort: 'good', ref: 'good', will: 'good' },
-        'Fey': { fort: 'poor', ref: 'good', will: 'good' },
-        'Humanoid': { fort: 'poor', ref: 'poor', will: 'poor' },
-        'Magical Beast': { fort: 'good', ref: 'good', will: 'poor' },
-        'Monstrous Humanoid': { fort: 'poor', ref: 'good', will: 'good' },
-        'Ooze': { fort: 'poor', ref: 'poor', will: 'poor' },
-        'Outsider': { fort: 'good', ref: 'good', will: 'good' },
-        'Plant': { fort: 'good', ref: 'poor', will: 'poor' },
-        'Undead': { fort: 'poor', ref: 'poor', will: 'good' },
-        'Vermin': { fort: 'good', ref: 'poor', will: 'poor' }
-    };
+// [NEW Helper Functions - Add these to routes/data-integrity.js]
+const getAbilityModifierAsNumber = (score) => {
+    const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
+    if (isNaN(numScore)) return 0;
+    return Math.floor((numScore - 10) / 2);
+};
 
-    const getSizeModifier = (size) => SIZE_MODIFIERS[size] || 0;
-    const getSpecialSizeModifier = (size) => SPECIAL_SIZE_MODIFIERS[size] || 0;
+/* Canonicalise ability keys and default missing ones to 10  */
+const normaliseAbilityKeys = (stats) => {
+  const canon = {
+    strength: 'Str', str: 'Str',
+    dexterity: 'Dex', dex: 'Dex',
+    constitution: 'Con', con: 'Con',
+    intelligence: 'Int', int: 'Int',
+    wisdom: 'Wis', wis: 'Wis',
+    charisma: 'Cha', cha: 'Cha',
+  };
+  const out = {};
+  /* copy / rename abilities  */
+  for (const [k, v] of Object.entries(stats ?? {})) {
+    const key = canon[k.toLowerCase()] ?? k;
+    out[key] = v;
+  }
+  return out;
+};
 
-    const getAbilityModifierAsNumber = (score) => {
-        const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
-        if (isNaN(numScore)) return 0;
-        return Math.floor((numScore - 10) / 2);
-    };
-
-    /* Canonicalise ability keys and default missing ones to 10  */
-    const normaliseAbilityKeys = (stats) => {
-        const canon = {
-            strength: 'Str', str: 'Str',
-            dexterity: 'Dex', dex: 'Dex',
-            constitution: 'Con', con: 'Con',
-            intelligence: 'Int', int: 'Int',
-            wisdom: 'Wis', wis: 'Wis',
-            charisma: 'Cha', cha: 'Cha',
-        };
-        const out = {};
-        /* copy / rename abilities  */
-        for (const [k, v] of Object.entries(stats ?? {})) {
-            const key = canon[k.toLowerCase()] ?? k;
-            out[key] = v;
-        }
-        return out;
-    };
-
-    const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17];
-    const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
-    const cleanHeader = (h) => typeof h !== 'string' ? '' : h.replace(/[^a-zA-Z0-9]/g, '');
+const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17];
+const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
+const cleanHeader = (h) => typeof h !== 'string' ? '' : h.replace(/[^a-zA-Z0-9]/g, '');
 
 
-    // [NEW, FIXED FUNCTION]
-    function mergeBaseStats(
-        fresh,   // what the parser just found (may have bad defaults)
-        old    // what is already in Firestore (good data)
-    ) {
+// [NEW, FIXED FUNCTION]
+function mergeBaseStats(
+  fresh,   // what the parser just found (may have bad defaults)
+  old    // what is already in Firestore (good data)
+) {
+  
+  const out = { ...old }; // Start with the old, good data.
 
-        const out = { ...old }; // Start with the old, good data.
+  // --- Intelligently merge 'fresh' data ---
 
-        // --- Intelligently merge 'fresh' data ---
+  // 1. Abilities: Overwrite only if fresh data was explicitly found (not default 10).
+  const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+  let abilitiesFoundInFresh = false;
+  for (const ab of abilities) {
+      if (fresh[ab] !== undefined && fresh[ab] !== 10) {
+          out[ab] = fresh[ab];
+          abilitiesFoundInFresh = true;
+      }
+  }
 
-        // 1. Abilities: Overwrite only if fresh data was explicitly found (not default 10).
-        const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
-        let abilitiesFoundInFresh = false;
-        for (const ab of abilities) {
-            if (fresh[ab] !== undefined && fresh[ab] !== 10) {
-                out[ab] = fresh[ab];
-                abilitiesFoundInFresh = true;
-            }
-        }
+  // 2. Skills: Always take from fresh parser, as it's the source of truth from the codex.
+  if (fresh.skills) {
+      out.skills = fresh.skills;
+  }
 
-        // 2. Skills: Always take from fresh parser, as it's the source of truth from the codex.
-        if (fresh.skills) {
-            out.skills = fresh.skills;
-        }
+  // 3. HP: Only overwrite if fresh.hp was found (is not 0 or undefined).
+  if (fresh.hp) {
+      out.hp = fresh.hp;
+  }
 
-        // 3. HP: Only overwrite if fresh.hp was found (is not 0 or undefined).
-        if (fresh.hp) {
-            out.hp = fresh.hp;
-        }
+  // 4. AC: Only overwrite if fresh.armorClass was found (is not default 10).
+  if (fresh.armorClass && fresh.armorClass.total !== 10) {
+      out.armorClass = fresh.armorClass;
+  }
 
-        // 4. AC: Only overwrite if fresh.armorClass was found (is not default 10).
-        if (fresh.armorClass && fresh.armorClass.total !== 10) {
-            out.armorClass = fresh.armorClass;
-        }
+  // 5. Saves: Only overwrite if abilities were parsed (meaning saves are valid)
+  //    OR if saves were explicitly parsed (not default 0s).
+  if (abilitiesFoundInFresh || (fresh.saves && (fresh.saves.fortitude !== 0 || fresh.saves.reflex !== 0 || fresh.saves.will !== 0))) {
+    out.saves = fresh.saves;
+  }
 
-        // 5. Saves: Only overwrite if abilities were parsed (meaning saves are valid)
-        //    OR if saves were explicitly parsed (not default 0s).
-        if (abilitiesFoundInFresh || (fresh.saves && (fresh.saves.fortitude !== 0 || fresh.saves.reflex !== 0 || fresh.saves.will !== 0))) {
-            out.saves = fresh.saves;
-        }
+  // 6. Combat: Only overwrite if abilities were parsed (meaning combat stats are valid)
+  //    OR if BAB was explicitly parsed.
+  if (abilitiesFoundInFresh || (fresh.combat && fresh.combat.bab !== null && fresh.combat.bab !== 1)) {
+    out.combat = fresh.combat;
+  }
 
-        // 6. Combat: Only overwrite if abilities were parsed (meaning combat stats are valid)
-        //    OR if BAB was explicitly parsed.
-        if (abilitiesFoundInFresh || (fresh.combat && fresh.combat.bab !== null && fresh.combat.bab !== 1)) {
-            out.combat = fresh.combat;
-        }
+  // 7. Ensure core abilities exist (safety net)
+  for (const a of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']) {
+    if (out[a] === undefined) {
+      out[a] = 10;
+    }
+  }
 
-        // 7. Ensure core abilities exist (safety net)
-        for (const a of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']) {
-            if (out[a] === undefined) {
-                out[a] = 10;
-            }
-        }
+  return out;
+}
 
-        // 8. Size and Type
-        if (fresh.size && fresh.size !== 'Medium') out.size = fresh.size;
-        if (fresh.type && fresh.type !== 'Humanoid') out.type = fresh.type;
-
-        return out;
+// [REPLACE the old parseStatBlockToEntity with this one from admin.txt]
+async function parseStatBlockToEntity(statBlock, name, path, content) {
+    // FIX: We only need to check for existence, as some valid IDs are strings, not ObjectIds.
+    if (!statBlock.entityId) {
+        console.log(`[PROCESS CODEX] Skipping entry "${name}" due to missing entityId.`);
+        return null; // Skip this entry
     }
 
-    // [REPLACE the old parseStatBlockToEntity with this one from admin.txt]
-    async function parseStatBlockToEntity(statBlock, name, path, content) {
-        // FIX: We only need to check for existence, as some valid IDs are strings, not ObjectIds.
-        if (!statBlock.entityId) {
-            console.log(`[PROCESS CODEX] Skipping entry "${name}" due to missing entityId.`);
-            return null; // Skip this entry
-        }
-
-        // This helper function must be defined inside or available to parseStatBlockToEntity
-        const getAllStats = () => {
-            let all = [];
-            (content || []).filter(b => b.type === 'statblock' && b.stats).forEach(block => {
-                if (Array.isArray(block.stats)) {
-                    all.push(...block.stats);
-                } else if (typeof block.stats === 'object') {
-                    for (const key in block.stats) {
-                        all.push({ label: key, value: block.stats[key] });
-                    }
-                }
-            });
-            return all;
-        }
-
-        const allStats = getAllStats();
-        const statsMap = new Map();
-        allStats.forEach((stat) => {
-            if (stat.label) {
-                statsMap.set(stat.label.trim().toLowerCase(), String(stat.value));
-            }
-        });
-        const getStat = (key) => statsMap.get(key.trim().toLowerCase());
-
-        let baseStats = {};
-        const featNames = [];
-        const specialAbilityNames = [];
-        const equipmentNames = [];
-        const spellNames = [];
-        let deityName = null;
-
-        // [NEW] Size and Type Extraction
-        let size = 'Medium';
-        let creatureType = 'Humanoid'; // Default
-
-        const sizeString = getStat('Size');
-        if (sizeString) {
-            size = sizeString.trim();
-        }
-
-        const typeString = getStat('Type') || getStat('Creature Type');
-        if (typeString) {
-            const parts = typeString.split(',');
-            const mainTypePart = parts[0].trim();
-            if (!sizeString) {
-                const sizes = Object.keys(SIZE_MODIFIERS);
-                for (const s of sizes) {
-                    if (mainTypePart.toLowerCase().includes(s.toLowerCase())) {
-                        size = s;
-                        break;
-                    }
-                }
-            }
-            const types = Object.keys(CREATURE_TYPE_SAVES);
-            for (const t of types) {
-                if (mainTypePart.toLowerCase().includes(t.toLowerCase())) {
-                    creatureType = t;
-                    break;
-                }
-            }
-        }
-        baseStats.size = size;
-        baseStats.type = creatureType;
-
-        // --- Ability Scores ---
-        const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
-        const abilityVariations = {
-            'Str': ['str', 'strength'],
-            'Dex': ['dex', 'dexterity'],
-            'Con': ['con', 'constitution'],
-            'Int': ['int', 'intelligence'],
-            'Wis': ['wis', 'wisdom'],
-            'Cha': ['cha', 'charisma']
-        };
-
-        const abilityString = getStat('ability scores');
-        if (abilityString) {
-            abilities.forEach(ab => {
-                const variationsRegex = `(?:${abilityVariations[ab].join('|')})`;
-                const match = abilityString.match(new RegExp(`${variationsRegex}\\s*[:—-]?\\s*(-?\\d+)`, 'i'));
-                if (match) baseStats[ab] = parseInt(match[1], 10);
-            });
-        }
-
-        abilities.forEach(ab => {
-            if (baseStats[ab] === undefined) {
-                for (const variation of abilityVariations[ab]) {
-                    const individualStat = getStat(variation);
-                    if (individualStat) {
-                        const statValueMatch = String(individualStat).match(/-?\d+/);
-                        if (statValueMatch) {
-                            baseStats[ab] = parseInt(statValueMatch[0], 10);
-                            break;
-                        }
-                    }
+    // This helper function must be defined inside or available to parseStatBlockToEntity
+    const getAllStats = () => {
+        let all = [];
+        (content || []).filter(b => b.type === 'statblock' && b.stats).forEach(block => {
+            if (Array.isArray(block.stats)) {
+                all.push(...block.stats);
+            } else if (typeof block.stats === 'object') {
+                for (const key in block.stats) {
+                    all.push({ label: key, value: block.stats[key] });
                 }
             }
         });
+        return all;
+    }
 
-        abilities.forEach(ab => {
-            if (baseStats[ab] === undefined) {
-                const statValue = getStat(ab);
-                if (statValue) {
-                    const statValueMatch = String(statValue).match(/-?\d+/);
-                    if (statValueMatch) baseStats[ab] = parseInt(statValueMatch[0], 10);
-                }
-            }
-        });
-
-        // --- AC ---
-        const ac = {};
-        const acString = getStat('AC') || getStat('Armor Class') || '';
-        const totalACMatch = acString.match(/^(\d+)/);
-        ac.total = totalACMatch ? parseInt(totalACMatch[1], 10) : 10;
-        const touchACMatch = acString.match(/touch\s*(\d+)/);
-        ac.touch = touchACMatch ? parseInt(touchACMatch[1], 10) : ac.total;
-        const ffACMatch = acString.match(/flat-footed\s*(\d+)/);
-        ac.flatFooted = ffACMatch ? parseInt(ffACMatch[1], 10) : ac.total;
-        baseStats.armorClass = ac;
-
-        // HP
-        baseStats.hp = getStat('hp') || 0;
-
-        // --- Saves & Combat Stats ---
-        const saves = {};
-        const combat = { bab: null, cmb: null, cmd: null };
-        const saveString = getStat('Saves');
-        const babString = getStat('Base Atk');
-        const cmbString = getStat('CMB');
-        const cmdString = getStat('CMD');
-        if (saveString) {
-            saves.fortitude = parseInt(saveString.match(/Fort\s*([+-]?\d+)/)?.[1] || '0', 10);
-            saves.reflex = parseInt(saveString.match(/Ref\s*([+-]?\d+)/)?.[1] || '0', 10);
-            saves.will = parseInt(saveString.match(/Will\s*([+-]?\d+)/)?.[1] || '0', 10);
+    const allStats = getAllStats();
+    const statsMap = new Map();
+    allStats.forEach((stat) => {
+        if (stat.label) {
+            statsMap.set(stat.label.trim().toLowerCase(), String(stat.value));
         }
-        if (babString) combat.bab = parseInt(babString.match(/[+-]?\d+/)?.[0] || '0', 10);
-        if (cmbString) combat.cmb = cmbString;
-        if (cmdString) combat.cmd = cmdString;
+    });
+    const getStat = (key) => statsMap.get(key.trim().toLowerCase());
 
-        const strMod = getAbilityModifierAsNumber(baseStats.Str);
-        const dexMod = getAbilityModifierAsNumber(baseStats.Dex);
-        const conMod = getAbilityModifierAsNumber(baseStats.Con);
-        const wisMod = getAbilityModifierAsNumber(baseStats.Wis);
+    let baseStats = {};
+    const featNames = [];
+    const specialAbilityNames = [];
+    const equipmentNames = [];
+    const spellNames = [];
+    let deityName = null;
 
-        const crString = getStat('cr') || '1';
-        let level = 1;
-        if (crString.includes('/')) {
-            const parts = crString.split('/');
-            level = parseInt(parts[0], 10) / parseInt(parts[1], 10);
-        } else {
-            level = parseInt(crString, 10);
-        }
-        if (isNaN(level) || level < 1) level = 1;
-        const levelInt = Math.floor(level);
-
-        if (!saveString) {
-            const saveConfig = CREATURE_TYPE_SAVES[creatureType] || { fort: 'poor', ref: 'poor', will: 'poor' };
-            const safeLevelIndex = Math.max(0, Math.min(levelInt - 1, GOOD_SAVES.length - 1));
-            const getSaveValue = (quality, mod) => (quality === 'good' ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + mod;
-            saves.fortitude = getSaveValue(saveConfig.fort, conMod);
-            saves.reflex = getSaveValue(saveConfig.ref, dexMod);
-            saves.will = getSaveValue(saveConfig.will, wisMod);
-        }
-
-        if (combat.bab === null) combat.bab = levelInt;
-        const sizeMod = getSizeModifier(size);
-        const specialSizeMod = getSpecialSizeModifier(size);
-        if (combat.cmb === null && combat.bab !== null) combat.cmb = combat.bab + strMod + specialSizeMod;
-        if (combat.cmd === null && combat.bab !== null) combat.cmd = 10 + combat.bab + strMod + dexMod + specialSizeMod;
-
-        baseStats.saves = saves;
-        baseStats.combat = combat;
-
-        // --- Skills ---
-        const skills = {};
-        let skillsString = getStat('Skills');
-        const featsValueForSkills = getStat('Feats');
-        if (featsValueForSkills) {
-            const parts = featsValueForSkills.split(/\s*;\s*Skills|\s*Skills:/i);
-            if (parts.length > 1) {
-                const skillsPart = parts[1];
-                skillsString = skillsString ? `${skillsString}, ${skillsPart}` : skillsPart;
-            }
-        }
-        if (skillsString) {
-            const skillEntries = skillsString.split(',');
-            skillEntries.forEach(entry => {
-                const match = entry.trim().match(/^(.*?)\s*([+-]\d+)/);
-                if (match) {
-                    const skillName = match[1].trim();
-                    const skillValue = parseInt(match[2], 10);
-                    if (skillName && !isNaN(skillValue)) skills[skillName] = skillValue;
-                }
-            });
-        }
-        // (Table skills parsing follows...)
-        const skillTables = (content || []).filter((b) => {
-            if (b.type !== 'table' || !Array.isArray(b.headers)) return false;
-            const lowerCaseHeaders = b.headers.map((h) => (h || '').toLowerCase());
-            const hasSkillHeader = lowerCaseHeaders.includes('skill');
-            const hasBonusHeader = lowerCaseHeaders.includes('bonus') || lowerCaseHeaders.includes('total');
-            return hasSkillHeader && hasBonusHeader;
-        });
-        skillTables.forEach((table) => {
-            const skillHeader = table.headers.find((h) => (h || '').toLowerCase() === 'skill');
-            const bonusHeader = table.headers.find((h) => (h || '').toLowerCase() === 'bonus' || (h || '').toLowerCase() === 'total');
-
-            if (skillHeader && bonusHeader) {
-                const skillKey = cleanHeader(skillHeader);
-                const bonusKey = cleanHeader(bonusHeader);
-
-                (table.rows || []).forEach((row) => {
-                    const skillName = row[skillKey];
-                    const skillValueText = String(row[bonusKey] || '');
-                    const skillValueMatch = skillValueText.match(/[+-]?\d+/);
-                    if (skillName && skillValueMatch) {
-                        const skillValue = parseInt(skillValueMatch[0], 10);
-                        if (!isNaN(skillValue)) {
-                            skills[skillName.trim()] = skillValue;
-                        }
-                    }
-                });
-            }
-        });
-        baseStats.skills = skills;
-
-        // --- Feats ---
-        const allFeatStrings = [];
-        statsMap.forEach((value, key) => {
-            if (key.toLowerCase().includes('feat')) {
-                allFeatStrings.push(value);
-            }
-        });
-        const featsValue = allFeatStrings.join(', ');
-
-        if (featsValue) {
-            let featsOnlyString = featsValue.split(/\s*;\s*Skills|\s*Skills:/i)[0];
-            featsOnlyString = featsOnlyString.replace(/^Feats\s+/i, '').trim();
-            const potentialFeats = featsOnlyString.split(/[;,]/);
-            const actualFeats = potentialFeats
-                .map(f => f.replace(/\s*\([^)]+\)\s*$/, '').trim().replace(/[.,;]$/, '').trim())
-                .filter(f => f && !/\s+[+-]?\d+$/.test(f));
-            featNames.push(...actualFeats);
-        }
-
-        // --- Feats from Tables ---
-        const featTables = (content || []).filter((b) => {
-            if (b.type !== 'table') return false;
-            const lowerCaseHeaders = (b.headers || []).map((h) => (h || '').toLowerCase());
-            return lowerCaseHeaders.includes('feat');
-        });
-
-        featTables.forEach((table) => {
-            const featHeader = table.headers.find((h) => (h || '').toLowerCase() === 'feat');
-            if (featHeader) {
-                const featKey = cleanHeader(featHeader);
-                (table.rows || []).forEach((row) => {
-                    const featName = row[featKey];
-                    if (featName) {
-                        featNames.push(featName.trim());
-                    }
-                });
-            }
-        });
-
-        // --- Equipment ---
-        const equipmentString = getStat('Equipment') || getStat('Gear');
-        if (equipmentString) {
-            equipmentNames.push(...equipmentString.split(',').map(e => e.trim()));
-        }
-        // (Add Equipment from tables if needed from admin.txt sources 331-333)
-
-        // --- Special Abilities ---
-        const specialAbilityFields = ['Special Attacks', 'Special Qualities', 'Spell-Like Abilities'];
-        specialAbilityFields.forEach(field => {
-            const fieldValue = getStat(field);
-            if (fieldValue) {
-                const abilities = fieldValue.split(',').map(a => a.trim());
-                abilities.forEach(ability => {
-                    const cleanedAbility = ability.replace(/(\d+\/day—|\d+\/week—|\d+\/month—|at will—)/i, '').split('(')[0].trim();
-                    if (cleanedAbility) {
-                        specialAbilityNames.push(cleanedAbility);
-                    }
-                });
-            }
-        });
-
-        // --- Spells ---
-        const spellFields = ['spells prepared', 'spells known', 'spell-like abilities'];
-        spellFields.forEach(field => {
-            const spellString = getStat(field);
-            if (spellString) {
-                const spells = spellString.split(/[;,]/).map(s => s.replace(/\(.*\)/, '').trim());
-                spellNames.push(...spells.filter(Boolean));
-            }
-        });
-
-        // --- Deity ---
-        const deityString = getStat('deity') || getStat('religion');
-        if (deityString) {
-            deityName = deityString.trim();
-        }
-
-        /* ----  ALWAYS return canonical keys  ----  */
-        baseStats = normaliseAbilityKeys(baseStats);
-
-        // Find rule/equipment IDs
-        const ruleDocs = await db.collection('rules_pf1e').find({ name: { $in: [...featNames, ...specialAbilityNames].map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
-        const equipDocs = await db.collection('equipment_pf1e').find({ name: { $in: equipmentNames.map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
-
-        const entityId = ObjectId.isValid(statBlock.entityId) ? new ObjectId(statBlock.entityId) : statBlock.entityId;
-        return {
-            _id: entityId, // Use the ID from the statblock
-            name,
-            sourceCodexPath: path,
-            baseStats,
-            rules: [...new Set(ruleDocs.map(d => d._id.toString()))],
-            equipment: [...new Set(equipDocs.map(d => d._id.toString()))],
-            spellNames: [...new Set(spellNames)],
-            deityName
-        };
+    // --- Ability Scores ---
+    const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+    const abilityVariations = {
+      'Str': ['str', 'strength'],
+      'Dex': ['dex', 'dexterity'],
+      'Con': ['con', 'constitution'],
+      'Int': ['int', 'intelligence'],
+      'Wis': ['wis', 'wisdom'],
+      'Cha': ['cha', 'charisma']
     };
+    
+    const abilityString = getStat('ability scores');
+    if (abilityString) {
+      abilities.forEach(ab => {
+        const variationsRegex = `(?:${abilityVariations[ab].join('|')})`;
+        const match = abilityString.match(
+          new RegExp(`${variationsRegex}\s*[:—-]?\s*(-?\d+)`, 'i')
+        );
+        if (match) {
+          baseStats[ab] = parseInt(match[1], 10);
+        }
+      });
+    }
+
+    abilities.forEach(ab => {
+      if (baseStats[ab] === undefined) {
+        for (const variation of abilityVariations[ab]) {
+          const individualStat = getStat(variation);
+          if (individualStat) {
+            const statValueMatch = String(individualStat).match(/-?\d+/);
+            if (statValueMatch) {
+              baseStats[ab] = parseInt(statValueMatch[0], 10);
+              break;
+            }
+          }
+        }
+      }
+    });
+
+    abilities.forEach(ab => {
+      if (baseStats[ab] === undefined) {
+        const statValue = getStat(ab);
+        if (statValue) {
+          const statValueMatch = String(statValue).match(/-?\d+/);
+          if (statValueMatch) {
+            baseStats[ab] = parseInt(statValueMatch[0], 10);
+          }
+        }
+      }
+    });
+    
+    // (Parsing from tables - simplified, add back if needed from admin.txt sources 266-280)
+
+    // --- AC ---
+    const ac = {};
+    const acString = getStat('AC') || getStat('Armor Class') || '';
+    const totalACMatch = acString.match(/^(\d+)/);
+    ac.total = totalACMatch ? parseInt(totalACMatch[1], 10) : 10;
+    const touchACMatch = acString.match(/touch\s*(\d+)/);
+    ac.touch = touchACMatch ? parseInt(touchACMatch[1], 10) : ac.total;
+    const ffACMatch = acString.match(/flat-footed\s*(\d+)/);
+    ac.flatFooted = ffACMatch ? parseInt(ffACMatch[1], 10) : ac.total;
+    baseStats.armorClass = ac;
+
+    // HP
+    baseStats.hp = getStat('hp') || 0;
+
+    // --- Saves & Combat Stats (with calculation fallbacks) ---
+    const saves = {};
+    const combat = { bab: null, cmb: null, cmd: null };
+    const saveString = getStat('Saves');
+    const babString = getStat('Base Atk');
+    const cmbString = getStat('CMB');
+    const cmdString = getStat('CMD');
+    if (saveString) {
+        saves.fortitude = parseInt(saveString.match(/Fort\s*([+-]?\d+)/)?.[1] || '0', 10);
+        saves.reflex = parseInt(saveString.match(/Ref\s*([+-]?\d+)/)?.[1] || '0', 10);
+        saves.will = parseInt(saveString.match(/Will\s*([+-]?\d+)/)?.[1] || '0', 10);
+    }
+    if (babString) {
+        combat.bab = parseInt(babString.match(/[+-]?\d+/)?.[0] || '0', 10);
+    }
+    if (cmbString) {
+        combat.cmb = cmbString;
+    }
+    if (cmdString) {
+        combat.cmd = cmdString;
+    }
+    
+    const strMod = getAbilityModifierAsNumber(baseStats.Str);
+    const dexMod = getAbilityModifierAsNumber(baseStats.Dex);
+    const conMod = getAbilityModifierAsNumber(baseStats.Con);
+    const wisMod = getAbilityModifierAsNumber(baseStats.Wis);
+
+    const crString = getStat('cr') || '1';
+    let level = 1;
+    if (crString.includes('/')) {
+        const parts = crString.split('/');
+        level = parseInt(parts[0], 10) / parseInt(parts[1], 10);
+    } else {
+        level = parseInt(crString, 10);
+    }
+    if (isNaN(level) || level < 1) level = 1;
+    const levelInt = Math.floor(level);
+
+    if (!saveString) {
+        const isFortGood = baseStats.Con >= 14 || (baseStats.Con >= baseStats.Dex && baseStats.Con >= baseStats.Wis);
+        const isRefGood = baseStats.Dex >= 14 || (baseStats.Dex >= baseStats.Con && baseStats.Dex >= baseStats.Wis);
+        const isWillGood = baseStats.Wis >= 14 || (baseStats.Wis >= baseStats.Con && baseStats.Wis >= baseStats.Dex);
+        const safeLevelIndex = Math.max(0, Math.min(levelInt - 1, GOOD_SAVES.length - 1));
+        saves.fortitude = (isFortGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + conMod;
+        saves.reflex = (isRefGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + dexMod;
+        saves.will = (isWillGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex]) + wisMod;
+    }
+    
+    if (combat.bab === null) combat.bab = levelInt;
+    if (combat.cmb === null && combat.bab !== null) combat.cmb = combat.bab + strMod;
+    if (combat.cmd === null && combat.bab !== null) combat.cmd = 10 + combat.bab + strMod + dexMod;
+
+    baseStats.saves = saves;
+    baseStats.combat = combat;
+
+    // --- Skills (This is the improved part) ---
+    const skills = {};
+    let skillsString = getStat('Skills');
+    const featsValueForSkills = getStat('Feats');
+    if (featsValueForSkills) {
+        const parts = featsValueForSkills.split(/\s*;\s*Skills|\s*Skills:/i);
+        if (parts.length > 1) {
+            const skillsPart = parts[1];
+            skillsString = skillsString ? `${skillsString}, ${skillsPart}` : skillsPart;
+        }
+    }
+
+    if (skillsString) {
+        const skillEntries = skillsString.split(',');
+        skillEntries.forEach(entry => {
+            const match = entry.trim().match(/^(.*?)\s*([+-]\d+)/);
+            if (match) {
+                const skillName = match[1].trim();
+                const skillValue = parseInt(match[2], 10);
+                if (skillName && !isNaN(skillValue)) {
+                  skills[skillName] = skillValue;
+                }
+            }
+        });
+    }
+    
+    // --- Skills from Tables ---
+    const skillTables = (content || []).filter((b) => {
+        if (b.type !== 'table' || !Array.isArray(b.headers)) return false;
+        const lowerCaseHeaders = b.headers.map((h) => (h || '').toLowerCase());
+        const hasSkillHeader = lowerCaseHeaders.includes('skill');
+        const hasBonusHeader = lowerCaseHeaders.includes('bonus') || lowerCaseHeaders.includes('total');
+        return hasSkillHeader && hasBonusHeader;
+    });
+    skillTables.forEach((table) => {
+        const skillHeader = table.headers.find((h) => (h || '').toLowerCase() === 'skill');
+        const bonusHeader = table.headers.find((h) => (h || '').toLowerCase() === 'bonus' || (h || '').toLowerCase() === 'total');
+        
+        if (skillHeader && bonusHeader) {
+            const skillKey = cleanHeader(skillHeader);
+            const bonusKey = cleanHeader(bonusHeader);
+
+            (table.rows || []).forEach((row) => {
+                const skillName = row[skillKey];
+                const skillValueText = String(row[bonusKey] || '');
+                const skillValueMatch = skillValueText.match(/[+-]?\d+/);
+                if (skillName && skillValueMatch) {
+                    const skillValue = parseInt(skillValueMatch[0], 10);
+                    if (!isNaN(skillValue)) {
+                       skills[skillName.trim()] = skillValue;
+                    }
+                }
+            });
+        }
+    });
+    baseStats.skills = skills;
+    
+    // --- Feats ---
+    const allFeatStrings = [];
+    statsMap.forEach((value, key) => {
+        if (key.toLowerCase().includes('feat')) {
+            allFeatStrings.push(value);
+        }
+    });
+    const featsValue = allFeatStrings.join(', ');
+    
+    if (featsValue) {
+        let featsOnlyString = featsValue.split(/\s*;\s*Skills|\s*Skills:/i)[0];
+        featsOnlyString = featsOnlyString.replace(/^Feats\s+/i, '').trim();
+        const potentialFeats = featsOnlyString.split(/[;,]/);
+        const actualFeats = potentialFeats
+            .map(f => f.replace(/\s*\([^)]+\)\s*$/, '').trim().replace(/[.,;]$/, '').trim())
+            .filter(f => f && !/\s+[+-]?\d+$/.test(f));
+        featNames.push(...actualFeats);
+    }
+    
+    // --- Feats from Tables ---
+    const featTables = (content || []).filter((b) => {
+        if (b.type !== 'table') return false;
+        const lowerCaseHeaders = (b.headers || []).map((h) => (h || '').toLowerCase());
+        return lowerCaseHeaders.includes('feat');
+    });
+
+    featTables.forEach((table) => {
+        const featHeader = table.headers.find((h) => (h || '').toLowerCase() === 'feat');
+        if (featHeader) {
+            const featKey = cleanHeader(featHeader);
+            (table.rows || []).forEach((row) => {
+                const featName = row[featKey];
+                if (featName) {
+                    featNames.push(featName.trim());
+                }
+            });
+        }
+    });
+
+    // --- Equipment ---
+    const equipmentString = getStat('Equipment') || getStat('Gear');
+    if (equipmentString) {
+        equipmentNames.push(...equipmentString.split(',').map(e => e.trim()));
+    }
+    // (Add Equipment from tables if needed from admin.txt sources 331-333)
+
+    // --- Special Abilities ---
+    const specialAbilityFields = ['Special Attacks', 'Special Qualities', 'Spell-Like Abilities'];
+    specialAbilityFields.forEach(field => {
+        const fieldValue = getStat(field);
+        if (fieldValue) {
+            const abilities = fieldValue.split(',').map(a => a.trim());
+            abilities.forEach(ability => {
+                const cleanedAbility = ability.replace(/(\d+\/day—|\d+\/week—|\d+\/month—|at will—)/i, '').split('(')[0].trim();
+                if (cleanedAbility) {
+                     specialAbilityNames.push(cleanedAbility);
+                }
+            });
+        }
+    });
+    
+    // --- Spells ---
+    const spellFields = ['spells prepared', 'spells known', 'spell-like abilities'];
+    spellFields.forEach(field => {
+        const spellString = getStat(field);
+        if (spellString) {
+            const spells = spellString.split(/[;,]/).map(s => s.replace(/\(.*\)/, '').trim());
+            spellNames.push(...spells.filter(Boolean));
+        }
+    });
+
+    // --- Deity ---
+    const deityString = getStat('deity') || getStat('religion');
+    if (deityString) {
+        deityName = deityString.trim();
+    }
+
+    /* ----  ALWAYS return canonical keys  ----  */
+    baseStats = normaliseAbilityKeys(baseStats);
+    
+    // Find rule/equipment IDs
+    const ruleDocs = await db.collection('rules_pf1e').find({ name: { $in: [...featNames, ...specialAbilityNames].map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
+    const equipDocs = await db.collection('equipment_pf1e').find({ name: { $in: equipmentNames.map(n => new RegExp(`^${escapeRegExp(n)}$`, 'i')) } }).project({ _id: 1 }).toArray();
+
+    const entityId = ObjectId.isValid(statBlock.entityId) ? new ObjectId(statBlock.entityId) : statBlock.entityId;
+    return { 
+        _id: entityId, // Use the ID from the statblock
+        name, 
+        sourceCodexPath: path, 
+        baseStats, 
+        rules: [...new Set(ruleDocs.map(d => d._id.toString()))], 
+        equipment: [...new Set(equipDocs.map(d => d._id.toString()))], 
+        spellNames: [...new Set(spellNames)], 
+        deityName 
+    };
+};
 
     // --- DATA INTEGRITY ENDPOINTS ---
 
@@ -593,7 +548,7 @@ ${JSON.stringify(existingNames)}`;
                 let entityId;
 
                 // Handle both migrated (top-level entityId) and unmigrated (entityId in statblock) entries.
-                if (entry.entityId) {
+                if (entry.entityId) { 
                     entityId = entry.entityId;
                     statBlock = { entityId: entityId }; // Create a minimal statblock for parsing
                 } else if (entry.content && Array.isArray(entry.content)) {
@@ -603,7 +558,7 @@ ${JSON.stringify(existingNames)}`;
                 if (statBlock && statBlock.entityId) {
                     const name = entry.name.replace(/_/g, ' ');
                     const freshEntity = await parseStatBlockToEntity(statBlock, name, entry.path_components, entry.content);
-
+                    
                     if (freshEntity) {
                         // Only process entities if the parser found meaningful data.
                         const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
@@ -614,7 +569,7 @@ ${JSON.stringify(existingNames)}`;
                         if (hasStats || hasSkills || hasEquipment) {
                             const oldEntity = existingEntitiesMap.get(freshEntity._id.toString());
                             const oldBaseStats = oldEntity ? oldEntity.baseStats : {};
-
+                            
                             // The fresh parse is for links; merge with existing stats.
                             freshEntity.baseStats = mergeBaseStats(freshEntity.baseStats, oldBaseStats);
 
@@ -641,7 +596,7 @@ ${JSON.stringify(existingNames)}`;
                 const bulkOps = entities.map(entity => {
                     // We use the 'entityId' from the codex statblock (which parseStatBlockToEntity assigns to _id)
                     // as the unique key for the entity.
-                    const entityId = entity._id;
+                    const entityId = entity._id; 
                     delete entity._id; // Remove _id from the data payload
 
                     return {
@@ -676,12 +631,12 @@ ${JSON.stringify(existingNames)}`;
             // 1. Grab Gemini key
             // FIX: Uses robust helper function
             const apiKey = await getActiveApiKey();
-
+            
 
             // 2. Fetch entities and Codex data
             const entsToProcess = await db.collection('entities_pf1e')
-                .find({ equipment: { $size: 0 } })
-                .toArray();
+                                            .find({ equipment: { $size: 0 } })
+                                            .toArray();
             // Fetch all codex entries
             const codexEntries = await db.collection('codex_entries').find({}).toArray();
 
@@ -712,12 +667,12 @@ Constraints:
                         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
                         const body = { contents: [{ parts: [{ text: prompt }] }] };
 
-                        const r = await fetch(url, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(body)
+                        const r = await fetch(url, { 
+                            method: 'POST', 
+                            headers: { 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify(body) 
                         });
-
+                        
                         if (!r.ok) {
                             if (r.status === 429) {
                                 throw new Error('429 Rate Limit Hit');
@@ -727,7 +682,7 @@ Constraints:
 
                         const json = await r.json();
                         const raw = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
-
+                        
                         try {
                             // FIX: Robust JSON parsing (removing markdown fences and trimming)
                             const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/);
@@ -735,7 +690,7 @@ Constraints:
                             return JSON.parse(jsonString);
                         } catch (e) {
                             console.error(`[LINK EQUIPMENT] Failed to parse JSON from Gemini. Raw response: ${raw.substring(0, 100)}...`, e);
-                            return [];
+                            return []; 
                         }
 
                     } catch (error) {
@@ -749,16 +704,16 @@ Constraints:
                     }
                 }
             }
-
+            
             // 4. Batch Processing Loop (Rate Limit Fix)
-            const BATCH_SIZE = 5;
-            const THROTTLE_MS = 1000;
+            const BATCH_SIZE = 5; 
+            const THROTTLE_MS = 1000; 
 
             let linked = 0;
-
+            
             for (let i = 0; i < entsToProcess.length; i += BATCH_SIZE) {
                 const batch = entsToProcess.slice(i, i + BATCH_SIZE);
-
+                
                 const batchPromises = batch.map(async (ent) => {
                     try {
                         const entityName = ent.name || 'Unknown Entity';
@@ -773,29 +728,29 @@ Constraints:
                         if (!equipParagraph?.text) return;
 
                         console.log(`[LINK EQUIPMENT] Processing ${entityName}. Text: "${equipParagraph.text.substring(0, 50)}"...`);
-
+                        
                         // 4b. Ask Gemini for clean item names
                         const names = await extractItemNames(equipParagraph.text);
-
+                        
                         if (!names || names.length === 0) {
                             console.log(`[LINK EQUIPMENT] No item names extracted by Gemini for ${entityName}.`);
                             return;
                         }
-
+                        
                         // 4c. Match names -> equipment_pf1e
                         const escaped = names.map(n => escapeRegExp(n));
                         const regexes = escaped.map(n => new RegExp(`^${n}$`, 'i'));
-
+                        
                         const matches = await db.collection('equipment_pf1e')
-                            .find({ name: { $in: regexes } })
-                            .project({ _id: 1, name: 1 })
-                            .toArray();
-
+                                                    .find({ name: { $in: regexes } })
+                                                    .project({ _id: 1, name: 1 })
+                                                    .toArray();
+                        
                         if (matches.length === 0) {
                             console.log(`[LINK EQUIPMENT] No database matches found for ${entityName} with names: ${names.join(', ')}`);
                             return;
                         }
-
+                        
                         // 4d. Write the _id array back to the entity
                         const ids = matches.map(m => m._id.toString());
                         const updateResult = await db.collection('entities_pf1e').updateOne(
@@ -804,8 +759,8 @@ Constraints:
                         );
 
                         if (updateResult.modifiedCount > 0) {
-                            console.log(`[LINK EQUIPMENT] SUCCESS: ${entityName} updated with ${ids.length} item links: ${matches.map(m => m.name).join(', ')}`);
-                            linked++;
+                             console.log(`[LINK EQUIPMENT] SUCCESS: ${entityName} updated with ${ids.length} item links: ${matches.map(m => m.name).join(', ')}`);
+                             linked++; 
                         }
                     } catch (error) {
                         console.error(`[LINK EQUIPMENT] ERROR processing entity ${ent.name || 'Unknown'}: ${error.message}`);
@@ -838,8 +793,8 @@ Constraints:
 
         try {
             const entsToProcess = await db.collection('entities_pf1e')
-                .find({ rules: { $size: 0 } })
-                .toArray();
+                                            .find({ rules: { $size: 0 } })
+                                            .toArray();
             const codexEntries = await db.collection('codex_entries').find({}).toArray();
 
             if (entsToProcess.length === 0) {
@@ -870,9 +825,9 @@ Constraints:
                     const regexes = escaped.map(n => new RegExp(`^${n}$`, 'i'));
 
                     const matches = await db.collection('rules_pf1e')
-                        .find({ name: { $in: regexes } })
-                        .project({ _id: 1, name: 1 })
-                        .toArray();
+                                                .find({ name: { $in: regexes } })
+                                                .project({ _id: 1, name: 1 })
+                                                .toArray();
 
                     if (matches.length === 0) {
                         console.log(`[LINK RULES] No database matches found for ${entityName} with names: ${featNames.join(', ')}`);
@@ -1125,17 +1080,17 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 if (entityIdForThisCodex) {
                     // Clean up content: remove all statblocks
                     const newContent = entry.content.filter(block => block.type !== 'statblock');
-
+                    
                     // Check if update is needed
                     if (entry.entityId !== entityIdForThisCodex || JSON.stringify(entry.content) !== JSON.stringify(newContent)) {
                         bulkCodexUpdates.push({
                             updateOne: {
                                 filter: { _id: entry._id },
-                                update: {
-                                    $set: {
+                                update: { 
+                                    $set: { 
                                         entityId: entityIdForThisCodex,
-                                        content: newContent
-                                    }
+                                        content: newContent 
+                                    } 
                                 }
                             }
                         });
@@ -1173,7 +1128,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
             if (!codexEntries || codexEntries.length === 0) return res.status(404).json({ error: 'Codex entries not found.' });
 
             const allEntityIdsFromDb = new Set((await db.collection('entities_pf1e').find({}, { projection: { _id: 1 } }).toArray()).map(e => e._id.toString()));
-
+            
             // Get all valid entity IDs from the codex
             const validEntityIds = new Set();
             const statblocksInCodex = [];
@@ -1254,7 +1209,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 if (!r.ok) throw new Error(`Gemini request failed with status: ${r.status} ${r.statusText}`);
                 const json = await r.json();
                 const responseText = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
-
+                
                 // FIX: Robust JSON parsing
                 const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
                 const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
@@ -1355,8 +1310,8 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 const finalEquipmentList = Array.from(newItemIds);
                 const originalEquipmentList = entityDoc.equipment || [];
 
-                if (finalEquipmentList.length !== originalEquipmentList.length ||
-                    !finalEquipmentList.every(id => originalEquipmentList.includes(id)) ||
+                if (finalEquipmentList.length !== originalEquipmentList.length || 
+                    !finalEquipmentList.every(id => originalEquipmentList.includes(id)) || 
                     (entityDoc.magicItems && entityDoc.magicItems.length > 0)) {
                     changed = true;
                 }
@@ -1460,12 +1415,12 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
 
     router.post('/reconcile-items', async (req, res) => {
         // Use default batch parameters if not provided in the request body
-        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body;
+        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body; 
 
         try {
             const equipmentAdded = await reconcileCollection('equipment_pf1e', 'equipment', 'eq_', maxIterations, batchSize);
             const magicItemsAdded = await reconcileCollection('magic_items_pf1e', 'magic item', 'mi_', maxIterations, batchSize);
-
+            
             res.status(200).json({ message: `Item reconciliation complete. Added ${equipmentAdded} equipment and ${magicItemsAdded} magic items.` });
         } catch (e) {
             console.error('[RECONCILE ITEMS] Fatal error:', e);
@@ -1474,8 +1429,8 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
     });
 
     router.post('/reconcile-spells', async (req, res) => {
-        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body;
-
+        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body; 
+        
         try {
             const spellsAdded = await reconcileCollection('spells_pf1e', 'spell', 'sp_', maxIterations, batchSize);
             res.status(200).json({ message: `Spell reconciliation complete. Added ${spellsAdded} spells.` });
@@ -1486,8 +1441,8 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
     });
 
     router.post('/reconcile-deities', async (req, res) => {
-        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body;
-
+        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body; 
+        
         try {
             const deitiesAdded = await reconcileCollection('deities_pf1e', 'deity', 'de_', maxIterations, batchSize);
             res.status(200).json({ message: `Deity reconciliation complete. Added ${deitiesAdded} deities.` });
@@ -1499,7 +1454,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
 
     // FIX: This route was the original source of the error. It now uses the robust logic.
     router.post('/reconcile-hazards', async (req, res) => {
-        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body;
+        const { reconciliationIterations: maxIterations = 5, reconciliationBatchSize: batchSize = 20 } = req.body; 
 
         try {
             const hazardsAdded = await reconcileCollection('hazards_pf1e', 'hazard', 'hz_', maxIterations, batchSize);
@@ -1530,7 +1485,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 if (!r.ok) throw new Error(`Gemini request failed with status: ${r.status} ${r.statusText}`);
                 const json = await r.json();
                 const responseText = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
-
+                
                 // FIX: Robust JSON parsing
                 const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
                 const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
@@ -1561,7 +1516,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                     const detailPrompt = `You are a Pathfinder 1st Edition rules parser. Provide a JSON object representing the mechanical effects of the ${ruleType}: \"${name}\". The response must be a single, valid JSON object with the following keys: \"name\", \"type\" (which should be \"${ruleType}\"), \"description\", and \"effects\". The \"effects\" key must be an array of objects, where each object has \"target\" (e.g., \"attackRoll\"), \"value\" (a number or string), \"type\" (e.g., \"penalty\"), and an optional \"condition\" string.`;
                     const detailJsonString = await fetchFromGemini(detailPrompt);
                     const ruleData = JSON.parse(detailJsonString);
-
+                    
                     if (ruleData.name) {
                         ruleData._id = `${idPrefix}${ruleData.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
                         newRules.push(ruleData);
@@ -1712,7 +1667,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
             const allEntities = await db.collection('entities_pf1e').find({}).toArray();
             const entityBulkOps = [];
             let entitiesUpdatedCount = 0;
-
+            
             function getHdFromHpString(hp) {
                 if (!hp || typeof hp !== 'string') return null;
                 const match = hp.match(/\((\d+)d\d+/);
@@ -1753,7 +1708,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                     let calculatedBab = 0;
                     if (combat.bab === '-' || combat.bab === null || typeof combat.bab === 'undefined') {
                         // Assume 3/4 BAB as a generic baseline.
-                        calculatedBab = Math.floor(level * 0.75);
+                        calculatedBab = Math.floor(level * 0.75); 
                         combat.bab = calculatedBab;
                         needsUpdate = true;
                     } else {
@@ -1810,8 +1765,8 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         console.log(`[MIGRATE DM TOOLKIT] Job started.`);
 
         try {
-            const fightsToMigrate = await db.collection('dm_toolkit_fights').find({
-                initialCombatants: { $exists: true, $ne: [] }
+            const fightsToMigrate = await db.collection('dm_toolkit_fights').find({ 
+                initialCombatants: { $exists: true, $ne: [] } 
             }).toArray();
 
             if (fightsToMigrate.length === 0) {
@@ -1844,8 +1799,8 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 }
             }
 
-            res.status(200).json({
-                message: `DM Toolkit migration successful. Migrated ${migratedCombatantsCount} combatants across ${migratedFightsCount} fights.`
+            res.status(200).json({ 
+                message: `DM Toolkit migration successful. Migrated ${migratedCombatantsCount} combatants across ${migratedFightsCount} fights.` 
             });
 
         } catch (e) {
@@ -1887,11 +1842,11 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 const newEntryData = {};
                 const childNodes = {};
 
-                for (const key in node) {
-                    if (Object.prototype.hasOwnProperty.call(node, key)) {
+                for(const key in node) {
+                    if(Object.prototype.hasOwnProperty.call(node, key)) {
                         const value = node[key];
                         // Child nodes are identified as non-null, non-array objects, excluding the 'content' field itself.
-                        if (typeof value === 'object' && value !== null && !Array.isArray(value) && key !== 'content') {
+                        if(typeof value === 'object' && value !== null && !Array.isArray(value) && key !== 'content') {
                             childNodes[key] = value;
                         } else {
                             newEntryData[key] = value;
@@ -1919,7 +1874,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
             if (entries.length === 0) {
                 return res.status(500).json({ error: 'No entries were generated from the codex document.' });
             }
-
+            
             console.log(`[MIGRATE CODEX] Traversal complete. Generated ${entries.length} entries.`);
 
             // 4. Clear the new collection if forcing, and insert new data
@@ -1935,7 +1890,7 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
                 console.log(`[MIGRATE CODEX] Renamed old 'codex' collection to a backup.`);
             } catch (renameError) {
                 if (renameError.codeName === 'NamespaceNotFound') {
-                    console.log(`[MIGRATE CODEX] Old 'codex' collection not found, skipping rename.`);
+                     console.log(`[MIGRATE CODEX] Old 'codex' collection not found, skipping rename.`);
                 } else {
                     // ignore other errors, like collection already exists
                     console.warn(`[MIGRATE CODEX] Could not rename old 'codex' collection: ${renameError.message}`);

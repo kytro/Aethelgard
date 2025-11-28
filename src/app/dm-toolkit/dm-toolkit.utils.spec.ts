@@ -6,8 +6,6 @@ import {
     formatName,
     formatTime,
     calculateCompleteBaseStats,
-    getSizeModifier,
-    getSpecialSizeModifier,
     SKILL_ABILITY_MAP,
     GOOD_SAVES,
     POOR_SAVES
@@ -70,48 +68,6 @@ describe('DM Toolkit Utilities', () => {
 
         it('should handle string inputs', () => {
             expect(getAbilityModifier('16')).toBe('+3');
-        });
-    });
-
-    describe('Size Modifiers', () => {
-        describe('getSizeModifier', () => {
-            it('should return correct modifiers for standard sizes', () => {
-                expect(getSizeModifier('Small')).toBe(1);
-                expect(getSizeModifier('Medium')).toBe(0);
-                expect(getSizeModifier('Large')).toBe(-1);
-            });
-
-            it('should return correct modifiers for extreme sizes', () => {
-                expect(getSizeModifier('Fine')).toBe(8);
-                expect(getSizeModifier('Colossal')).toBe(-8);
-            });
-
-            it('should be case insensitive', () => {
-                expect(getSizeModifier('small')).toBe(1);
-                expect(getSizeModifier('LARGE')).toBe(-1);
-            });
-
-            it('should return 0 for invalid sizes', () => {
-                expect(getSizeModifier('Invalid')).toBe(0);
-            });
-        });
-
-        describe('getSpecialSizeModifier', () => {
-            it('should return correct special modifiers for standard sizes', () => {
-                expect(getSpecialSizeModifier('Small')).toBe(-1);
-                expect(getSpecialSizeModifier('Medium')).toBe(0);
-                expect(getSpecialSizeModifier('Large')).toBe(1);
-            });
-
-            it('should return correct special modifiers for extreme sizes', () => {
-                expect(getSpecialSizeModifier('Fine')).toBe(-8);
-                expect(getSpecialSizeModifier('Colossal')).toBe(8);
-            });
-
-            it('should be case insensitive', () => {
-                expect(getSpecialSizeModifier('small')).toBe(-1);
-                expect(getSpecialSizeModifier('LARGE')).toBe(1);
-            });
         });
     });
 
@@ -293,36 +249,6 @@ describe('DM Toolkit Utilities', () => {
         it('should calculate CMD based on BAB, Str, and Dex', () => {
             const stats = calculateCompleteBaseStats({ Str: 16, Dex: 14, BAB: 5 }); // Str +3, Dex +2
             expect(stats.CMD).toBe(20); // 10 + 5 + 3 + 2
-        });
-
-        it('should apply size modifiers to AC and Attack', () => {
-            const smallStats = calculateCompleteBaseStats({ Dex: 10, Size: 'Small' });
-            expect(smallStats.AC).toBe(11); // 10 + 1 (size)
-
-            const largeStats = calculateCompleteBaseStats({ Dex: 10, Size: 'Large' });
-            expect(largeStats.AC).toBe(9); // 10 - 1 (size)
-        });
-
-        it('should apply special size modifiers to CMB and CMD', () => {
-            // Small: -1 special size mod
-            const smallStats = calculateCompleteBaseStats({ Str: 10, Dex: 10, BAB: 0, Size: 'Small' });
-            expect(smallStats.CMB).toBe(-1); // 0 + 0 - 1
-            expect(smallStats.CMD).toBe(9); // 10 + 0 + 0 + 0 - 1
-
-            // Large: +1 special size mod
-            const largeStats = calculateCompleteBaseStats({ Str: 10, Dex: 10, BAB: 0, Size: 'Large' });
-            expect(largeStats.CMB).toBe(1); // 0 + 0 + 1
-            expect(largeStats.CMD).toBe(11); // 10 + 0 + 0 + 0 + 1
-        });
-
-        it('should handle size passed as an explicit argument if supported (future proofing)', () => {
-            // If calculateCompleteBaseStats signature changes to accept size separately, add test here.
-            // Currently it extracts from stats object.
-            const stats = calculateCompleteBaseStats({ Size: 'Colossal', Str: 10, Dex: 10, BAB: 0 });
-            // Colossal: AC -8, CMB +8, CMD +8
-            expect(stats.AC).toBe(2); // 10 - 8
-            expect(stats.CMB).toBe(8);
-            expect(stats.CMD).toBe(18);
         });
 
         it('should calculate maxHp from average HP notation', () => {
