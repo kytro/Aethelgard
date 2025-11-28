@@ -1,10 +1,15 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('DM Toolkit - Combat Manager', () => {
-    test('should load Combat Manager route', async ({ page }) => {
-        const response = await page.goto('/codex/dm-toolkit/combat-manager');
+    test('should navigate to Combat Manager', async ({ page }) => {
+        // Navigate to the main toolkit page
+        await page.goto('/codex/dm-toolkit');
 
-        // Verify the route loaded successfully
-        expect(response?.status()).toBeLessThan(400);
+        // Click the Combat Manager link in the sidebar
+        await page.click('text=Combat Manager');
+
+        // Verify the Combat Manager component is visible
+        // We only check for the ID because the specific header text might not be present
+        await expect(page.locator('#combat-manager')).toBeVisible();
     });
 });

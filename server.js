@@ -64,7 +64,8 @@ MongoClient.connect(DATABASE_URL)
     });
 
     /* ---------- Health Probe ---------- */
-    app.get('/health', (_, res) => res.json({ status: 'ok', db: !!db }));
+    // UPDATED: Now accessible via /codex/api/health
+    app.get(`${apiBase}/health`, (_, res) => res.json({ status: 'ok', db: !!db }));
 
     /* ---------- Start Listener ---------- */
     app.listen(PORT, () => {
@@ -79,7 +80,8 @@ MongoClient.connect(DATABASE_URL)
         ${apiBase}/ai-assistant/*
         ${apiBase}/spells/*
         ${apiBase}/dm-toolkit/story-planner/*
-        ${apiBase}/media/*`);
+        ${apiBase}/media/*
+        ${apiBase}/health`);
     });
   })
   .catch((err) => {
