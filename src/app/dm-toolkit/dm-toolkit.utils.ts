@@ -68,8 +68,8 @@ export const formatTime = (t: any): string => {
     return `${year}-${month}-${day} ${hours}:${minutes}`;
 };
 
-export const calculateCompleteBaseStats = (stats: any): any => {
-    const newStats: { [key: string]: any } = { ...(stats || {}) };
+export const calculateCompleteBaseStats = (baseStats: any): any => {
+    const newStats: { [key: string]: any } = { ...(baseStats || {}) };
     const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
     abilities.forEach(ability => {
         const val = getCaseInsensitiveProp(newStats, ability);

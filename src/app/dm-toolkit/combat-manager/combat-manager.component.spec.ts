@@ -60,7 +60,8 @@ describe('CombatManagerComponent', () => {
 
         it('should have METADATA_KEYS including baseStats, stats, and entityId', () => {
             expect(component.METADATA_KEYS).toContain('baseStats');
-            expect(component.METADATA_KEYS).toContain('stats');
+            expect(component.METADATA_KEYS).toContain('baseStats');
+            expect(component.METADATA_KEYS).not.toContain('stats');
             expect(component.METADATA_KEYS).toContain('entityId');
             expect(component.METADATA_KEYS).toContain('summary');
             expect(component.METADATA_KEYS).toContain('content');
@@ -118,7 +119,7 @@ describe('CombatManagerComponent', () => {
                 summary: 'Test summary',
                 content: [],
                 baseStats: { Str: 10 },
-                stats: { HP: 30 },
+                // stats: { HP: 30 }, // Removed stats
                 entityId: 'entity-001'
             };
             expect(component['_isNavigable'](nodeWithMetadata)).toBe(false);
@@ -127,8 +128,7 @@ describe('CombatManagerComponent', () => {
         it('should return false for leaf templates (entityId with no navigable children)', () => {
             const leafTemplate = {
                 entityId: 'npc-001',
-                baseStats: { Str: 14, Dex: 12 },
-                stats: { HP: 30 }
+                baseStats: { Str: 14, Dex: 12, HP: 30 },
             };
             expect(component['_isNavigable'](leafTemplate)).toBe(false);
         });
@@ -568,7 +568,7 @@ describe('CombatManagerComponent', () => {
             component.combatants.set([createMockCombatant({
                 _id: 'c1',
                 name: 'Test',
-                stats: { Str: 10, Dex: 10, Con: 10, skills: { 'Stealth': 5 } }
+                baseStats: { Str: 10, Dex: 10, Con: 10, skills: { 'Stealth': 5 } }
             })]);
             fixture.detectChanges();
             await fixture.whenStable();

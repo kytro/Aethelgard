@@ -9,7 +9,7 @@ import {
 } from '../dm-toolkit.utils';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
-interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; baseStats: any; stats?: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; }
+interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; }
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
@@ -89,7 +89,7 @@ export class CombatManagerComponent {
   METADATA_KEYS = [
     'summary', 'content', 'category', 'isCombatManagerSource',
     'enableCompletionTracking', 'isCompleted', 'path_components',
-    'baseStats', 'stats', 'entityId', 'id', 'rules', 'equipment',
+    'baseStats', 'entityId', 'id', 'rules', 'equipment',
     'magicItems', 'spells'
   ];
 
@@ -275,7 +275,7 @@ export class CombatManagerComponent {
           hp: +custom.hp,
           maxHp: +custom.hp,
           type: 'Custom',
-          stats: {}
+          baseStats: {}
         };
       } else {
         // Logic for Found/Bestiary/Templates
@@ -563,7 +563,7 @@ export class CombatManagerComponent {
   modifiedCombatants = computed<CombatantWithModifiers[]>(() => {
     return this.combatants().map(c => {
       const entity = c.entityId ? this.entitiesCache().find(e => e.id === c.entityId) : null;
-      const baseStats = calculateCompleteBaseStats(c.baseStats || c.stats);
+      const baseStats = calculateCompleteBaseStats(c.baseStats);
       // Saves parsing
       const savesStr = getCaseInsensitiveProp(baseStats, 'Saves');
       const resSaves = { Fort: 0, Ref: 0, Will: 0 };
