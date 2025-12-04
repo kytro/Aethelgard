@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { lastValueFrom } from 'rxjs';
 import {
   formatTime, getAbilityModifierAsNumber, calculateCompleteBaseStats, getCaseInsensitiveProp,
-  formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP
+  formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP, SIZE_DATA
 } from '../dm-toolkit.utils';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
@@ -723,7 +723,8 @@ export class CombatManagerComponent {
           powerAttackDamage = Math.abs(powerAttackPenalty) * 2;
         }
 
-        const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty + (finalBonuses['Attack'] || 0);
+        const sizeMod = SIZE_DATA[baseStats.size]?.mod || 0;
+        const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty + (finalBonuses['Attack'] || 0) + sizeMod;
         const formattedAttackBonus = totalAttackBonus >= 0 ? `+${totalAttackBonus}` : `${totalAttackBonus}`;
 
         let totalDamageBonus = damageAbilityMod + enhancementBonus + powerAttackDamage;
@@ -739,7 +740,8 @@ export class CombatManagerComponent {
         const strMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
         const bab = getCaseInsensitiveProp(modifiedStats, 'BAB') || 0;
         const hasImprovedUnarmedStrike = allFeats.some((f: any) => f.name === 'Improved Unarmed Strike');
-        const unarmedAttackBonus = bab + strMod + (finalBonuses['Attack'] || 0);
+        const sizeMod = SIZE_DATA[baseStats.size]?.mod || 0;
+        const unarmedAttackBonus = bab + strMod + (finalBonuses['Attack'] || 0) + sizeMod;
         const formattedBonus = unarmedAttackBonus >= 0 ? `+${unarmedAttackBonus}` : `${unarmedAttackBonus}`;
         const strDamageBonus = strMod > 0 ? `+${strMod}` : strMod !== 0 ? ` ${strMod}` : '';
         const unarmedDamage = `1d3${strDamageBonus}${hasImprovedUnarmedStrike ? '' : ' (nonlethal)'}`;
@@ -750,7 +752,22 @@ export class CombatManagerComponent {
       const skills: { [key: string]: number } = {};
       const skillsObject = getCaseInsensitiveProp(baseStats, 'skills');
       if (skillsObject && typeof skillsObject === 'object' && Object.keys(skillsObject).length > 0) {
-        Object.assign(skills, skillsObject);
+        // Apply size modifiers to skills from object
+        Object.entries(skillsObject).forEach(([skillName, baseValue]) => {
+          let finalValue = Number(baseValue) || 0;
+          const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
+
+          // Add Dex modifier for Dex-based skills
+          if (SKILL_ABILITY_MAP[skillName] === 'Dex') {
+            finalValue += dexMod;
+          }
+
+          // Apply size modifiers
+          if (skillName === 'Stealth') finalValue += SIZE_DATA[baseStats.size]?.stealth || 0;
+          if (skillName === 'Fly') finalValue += SIZE_DATA[baseStats.size]?.fly || 0;
+
+          skills[skillName] = finalValue;
+        });
       } else {
         const skillsString = getCaseInsensitiveProp(baseStats, 'Skills') || '';
         if (skillsString && typeof skillsString === 'string') {
@@ -775,7 +792,13 @@ export class CombatManagerComponent {
                 const ranksAndMisc = originalBonus - baseAbilityMod;
                 const modifiedAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, governingAbility));
                 const genericSkillPenalty = finalBonuses['Skill Checks'] || 0;
-                skills[skillName] = ranksAndMisc + modifiedAbilityMod + genericSkillPenalty;
+
+                // Size modifiers for skills
+                let sizeSkillMod = 0;
+                if (skillName === 'Stealth') sizeSkillMod = SIZE_DATA[baseStats.size]?.stealth || 0;
+                if (skillName === 'Fly') sizeSkillMod = SIZE_DATA[baseStats.size]?.fly || 0;
+
+                skills[skillName] = ranksAndMisc + modifiedAbilityMod + genericSkillPenalty + sizeSkillMod;
               } else {
                 skills[skillName] = originalBonus;
               }
@@ -783,6 +806,7 @@ export class CombatManagerComponent {
           });
         }
       }
+
 
       return { ...c, baseStats, modifiedStats, initiativeMod, attacks: allAttacks, allFeats, equipment, magicItems, spells, skills };
     }).sort((a, b) => {

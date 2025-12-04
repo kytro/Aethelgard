@@ -621,4 +621,63 @@ describe('CombatManagerComponent', () => {
             req.flush({});
         });
     });
+
+    describe('PF1e Compliance: Size & AC', () => {
+        it('should apply size modifiers to AC and Attacks', async () => {
+            component.combatants.set([createMockCombatant({
+                _id: 'c_large',
+                name: 'Ogre',
+                baseStats: { Str: 21, Dex: 8, size: 'Large', BAB: 3, AC: 17 }
+            })]);
+            fixture.detectChanges();
+            await fixture.whenStable();
+
+            const ogre = component.modifiedCombatants()[0];
+
+            // Check Attack Bonus
+            // BAB 3 + Str 5 + Size -1 = +7
+            const unarmed = ogre.attacks.find(a => a.name === 'Unarmed Strike');
+            expect(unarmed?.bonus).toBe('+7');
+        });
+
+        it('should apply size modifiers to Skills (Stealth/Fly)', async () => {
+            component.combatants.set([createMockCombatant({
+                _id: 'c_tiny',
+                name: 'Imp',
+                baseStats: { Dex: 17, size: 'Tiny', skills: { 'Stealth': 5, 'Fly': 5 } }
+            })]);
+            fixture.detectChanges();
+            await fixture.whenStable();
+
+            const imp = component.modifiedCombatants()[0];
+
+            // Tiny: +8 Stealth, +4 Fly
+            // Dex 17 (+3)
+            // Stealth: 5 (ranks) + 3 (Dex) + 8 (Size) = 16
+            // Fly: 5 (ranks) + 3 (Dex) + 4 (Size) = 12
+
+            expect(imp.skills['Stealth']).toBe(16);
+            expect(imp.skills['Fly']).toBe(12);
+        });
+
+        it('should calculate CMB and CMD with special size modifiers', async () => {
+            component.combatants.set([createMockCombatant({
+                _id: 'c_large_cmb',
+                name: 'Ogre',
+                baseStats: { Str: 21, Dex: 8, size: 'Large', BAB: 3 }
+            })]);
+            fixture.detectChanges();
+            await fixture.whenStable();
+
+            const ogre = component.modifiedCombatants()[0];
+
+            // Large: +1 Special Size Mod
+            // Str 21 (+5), Dex 8 (-1), BAB 3
+            // CMB = BAB + Str + SpecialSize = 3 + 5 + 1 = 9
+            // CMD = 10 + BAB + Str + Dex + SpecialSize = 10 + 3 + 5 - 1 + 1 = 18
+
+            expect(ogre.baseStats.CMB).toBe(9);
+            expect(ogre.baseStats.CMD).toBe(18);
+        });
+    });
 });

@@ -147,77 +147,7 @@ ${JSON.stringify(existingNames)}`;
         return out;
     };
 
-    // [NEW, FIXED FUNCTION]
-    function mergeBaseStats(
-        fresh,   // what the parser just found (may have bad defaults)
-        old    // what is already in Firestore (good data)
-    ) {
-
-        const out = { ...old }; // Start with the old, good data.
-
-        // --- Intelligently merge 'fresh' data ---
-
-        // 1. Abilities: Overwrite only if fresh data was explicitly found (not default 10).
-        const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
-        let abilitiesFoundInFresh = false;
-        for (const ab of abilities) {
-            if (fresh[ab] !== undefined && fresh[ab] !== 10) {
-                out[ab] = fresh[ab];
-                abilitiesFoundInFresh = true;
-            }
-        }
-
-        // 2. Skills: Always take from fresh parser, as it's the source of truth from the codex.
-        if (fresh.skills) {
-            out.skills = fresh.skills;
-        }
-
-        // 3. HP: Only overwrite if fresh.hp was found (is not 0 or undefined).
-        if (fresh.hp) {
-            out.hp = fresh.hp;
-        }
-
-        // 4. AC: Only overwrite if fresh.armorClass was found (is not default 10).
-        if (fresh.armorClass && fresh.armorClass.total !== 10) {
-            out.armorClass = fresh.armorClass;
-        }
-
-        // 5. Saves: Only overwrite if abilities were parsed (meaning saves are valid)
-        //    OR if saves were explicitly parsed (not default 0s).
-        if (abilitiesFoundInFresh || (fresh.saves && (fresh.saves.fortitude !== 0 || fresh.saves.reflex !== 0 || fresh.saves.will !== 0))) {
-            out.saves = fresh.saves;
-        }
-
-        // 6. Combat: Only overwrite if abilities were parsed (meaning combat stats are valid)
-        //    OR if BAB was explicitly parsed.
-        if (abilitiesFoundInFresh || (fresh.combat && fresh.combat.bab !== null && fresh.combat.bab !== 1)) {
-            out.combat = fresh.combat;
-        }
-
-        // 7. Normalize ability keys to capitalized form and remove lowercase duplicates
-        const abilityMap = {
-            'str': 'Str', 'dex': 'Dex', 'con': 'Con',
-            'int': 'Int', 'wis': 'Wis', 'cha': 'Cha'
-        };
-
-        // Copy lowercase to capitalized if capitalized doesn't exist
-        for (const [lower, upper] of Object.entries(abilityMap)) {
-            if (out[lower] !== undefined && out[upper] === undefined) {
-                out[upper] = out[lower];
-            }
-            // Remove lowercase version to avoid duplicates
-            delete out[lower];
-        }
-
-        // Ensure core abilities exist (safety net)
-        for (const a of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']) {
-            if (out[a] === undefined) {
-                out[a] = 10;
-            }
-        }
-
-        return out;
-    }
+    // [MOVED OUTSIDE]
 
     // [REPLACE the old parseStatBlockToEntity with this one from admin.txt]
     async function parseStatBlockToEntity(statBlock, name, path, content) {
@@ -362,6 +292,27 @@ ${JSON.stringify(existingNames)}`;
         }
         if (isNaN(level) || level < 1) level = 1;
         const levelInt = Math.floor(level);
+
+        // --- Size ---
+        // Try to find size in the type line (e.g., "Large humanoid")
+        // or explicit Size stat
+        let size = 'Medium'; // Default
+        const sizeStat = getStat('Size');
+        const typeStat = getStat('Type');
+
+        const SIZES = ['Fine', 'Diminutive', 'Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan', 'Colossal'];
+
+        if (sizeStat) {
+            const match = SIZES.find(s => sizeStat.toLowerCase().includes(s.toLowerCase()));
+            if (match) size = match;
+        } else if (typeStat) {
+            const match = SIZES.find(s => typeStat.toLowerCase().startsWith(s.toLowerCase()));
+            if (match) size = match;
+        } else {
+            // Fallback: Check the content for a type line usually at the top of statblock
+            // This is harder without the raw text structure, but often 'type' stat captures it.
+        }
+        baseStats.size = size;
 
         if (!saveString) {
             const isFortGood = baseStats.Con >= 14 || (baseStats.Con >= baseStats.Dex && baseStats.Con >= baseStats.Wis);
@@ -626,6 +577,133 @@ ${JSON.stringify(existingNames)}`;
         } catch (error) {
             console.error('[PROCESS CODEX] Error:', error);
             res.status(500).json({ error: `Codex processing failed: ${error.message}` });
+        }
+    });
+
+
+    // -------------------------------------------------------------
+    // ROUTE 1.5: NORMALIZE STATBLOCKS (PF1e Compliance - Safe Updates Only)
+    // Only updates fields that are MISSING or VIOLATE PF1e rules.
+    // Does NOT overwrite valid existing data.
+    // -------------------------------------------------------------
+    router.post('/normalize-statblocks', async (req, res) => {
+        if (!db) return res.status(503).json({ error: 'Database not ready' });
+        console.log(`[NORMALIZE STATBLOCKS] Job initiated.`);
+
+        const VALID_SIZES = ['Fine', 'Diminutive', 'Tiny', 'Small', 'Medium', 'Large', 'Huge', 'Gargantuan', 'Colossal'];
+        const SIZE_DATA = {
+            'Fine': { mod: 8, specialMod: -8 },
+            'Diminutive': { mod: 4, specialMod: -4 },
+            'Tiny': { mod: 2, specialMod: -2 },
+            'Small': { mod: 1, specialMod: -1 },
+            'Medium': { mod: 0, specialMod: 0 },
+            'Large': { mod: -1, specialMod: 1 },
+            'Huge': { mod: -2, specialMod: 2 },
+            'Gargantuan': { mod: -4, specialMod: 4 },
+            'Colossal': { mod: -8, specialMod: 8 }
+        };
+
+        try {
+            const entities = await db.collection('entities_pf1e').find({}).toArray();
+            let updated = 0;
+            let skipped = 0;
+
+            for (const entity of entities) {
+                const baseStats = entity.baseStats || {};
+                const updates = {};
+                let needsUpdate = false;
+
+                // --- 1. SIZE: Only set if missing or invalid ---
+                const currentSize = baseStats.size;
+                if (!currentSize || !VALID_SIZES.includes(currentSize)) {
+                    // Try to infer from type string (e.g., "Large humanoid")
+                    let inferredSize = 'Medium';
+                    const typeStr = baseStats.type || baseStats.Type || '';
+                    for (const size of VALID_SIZES) {
+                        if (typeStr.toLowerCase().startsWith(size.toLowerCase())) {
+                            inferredSize = size;
+                            break;
+                        }
+                    }
+                    updates['baseStats.size'] = inferredSize;
+                    needsUpdate = true;
+                    console.log(`[NORMALIZE] ${entity.name}: Setting missing/invalid size to '${inferredSize}'`);
+                }
+
+                // --- 2. AC STRUCTURE: Only set if missing or malformed ---
+                const ac = baseStats.armorClass || baseStats.AC || baseStats.ac;
+                if (typeof ac === 'number') {
+                    // AC is just a number, convert to proper structure
+                    updates['baseStats.armorClass'] = {
+                        total: ac,
+                        touch: ac,  // Can't infer, default to total
+                        flatFooted: ac
+                    };
+                    needsUpdate = true;
+                    console.log(`[NORMALIZE] ${entity.name}: Converting AC number to structure`);
+                } else if (!ac) {
+                    // No AC at all - this violates PF1e rules, set default
+                    updates['baseStats.armorClass'] = {
+                        total: 10,
+                        touch: 10,
+                        flatFooted: 10
+                    };
+                    needsUpdate = true;
+                    console.log(`[NORMALIZE] ${entity.name}: Adding missing AC structure`);
+                } else if (typeof ac === 'object') {
+                    // AC is an object, check if missing touch/flatFooted
+                    if (ac.total && (ac.touch === undefined || ac.flatFooted === undefined)) {
+                        updates['baseStats.armorClass'] = {
+                            total: ac.total,
+                            touch: ac.touch ?? ac.total,
+                            flatFooted: ac.flatFooted ?? ac.total
+                        };
+                        needsUpdate = true;
+                        console.log(`[NORMALIZE] ${entity.name}: Completing partial AC structure`);
+                    }
+                }
+
+                // --- 3. CMB/CMD: Only fix if missing and we have enough data ---
+                const combat = baseStats.combat || {};
+                const strMod = Math.floor(((baseStats.Str || baseStats.str || 10) - 10) / 2);
+                const dexMod = Math.floor(((baseStats.Dex || baseStats.dex || 10) - 10) / 2);
+                const bab = combat.bab ?? 0;
+                const size = updates['baseStats.size'] || currentSize || 'Medium';
+                const sizeSpecialMod = SIZE_DATA[size]?.specialMod || 0;
+
+                if (combat.cmb === undefined || combat.cmb === null) {
+                    const calculatedCMB = bab + strMod + sizeSpecialMod;
+                    updates['baseStats.combat.cmb'] = calculatedCMB;
+                    needsUpdate = true;
+                    console.log(`[NORMALIZE] ${entity.name}: Calculating missing CMB = ${calculatedCMB}`);
+                }
+
+                if (combat.cmd === undefined || combat.cmd === null) {
+                    const calculatedCMD = 10 + bab + strMod + dexMod + sizeSpecialMod;
+                    updates['baseStats.combat.cmd'] = calculatedCMD;
+                    needsUpdate = true;
+                    console.log(`[NORMALIZE] ${entity.name}: Calculating missing CMD = ${calculatedCMD}`);
+                }
+
+                // --- Apply updates ---
+                if (needsUpdate) {
+                    await db.collection('entities_pf1e').updateOne(
+                        { _id: entity._id },
+                        { $set: updates }
+                    );
+                    updated++;
+                } else {
+                    skipped++;
+                }
+            }
+
+            res.status(200).json({
+                message: `Normalization complete. Updated: ${updated}, Skipped (already valid): ${skipped}`
+            });
+
+        } catch (error) {
+            console.error('[NORMALIZE STATBLOCKS] Error:', error);
+            res.status(500).json({ error: `Normalization failed: ${error.message}` });
         }
     });
 
@@ -1917,3 +1995,82 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
 
     return router;
 };
+// [NEW, FIXED FUNCTION]
+function mergeBaseStats(
+    fresh,   // what the parser just found (may have bad defaults)
+    old    // what is already in Firestore (good data)
+) {
+
+    const out = { ...old }; // Start with the old, good data.
+
+    // --- Intelligently merge 'fresh' data ---
+
+    // 1. Abilities: Overwrite only if fresh data was explicitly found (not default 10).
+    const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+    let abilitiesFoundInFresh = false;
+    for (const ab of abilities) {
+        if (fresh[ab] !== undefined && fresh[ab] !== 10) {
+            out[ab] = fresh[ab];
+            abilitiesFoundInFresh = true;
+        }
+    }
+
+    // 2. Skills: Always take from fresh parser, as it's the source of truth from the codex.
+    if (fresh.skills) {
+        out.skills = fresh.skills;
+    }
+
+    // 3. HP: Only overwrite if fresh.hp was found (is not 0 or undefined).
+    if (fresh.hp) {
+        out.hp = fresh.hp;
+    }
+
+    // 4. AC: Only overwrite if fresh.armorClass was found (is not default 10).
+    if (fresh.armorClass && fresh.armorClass.total !== 10) {
+        out.armorClass = fresh.armorClass;
+    }
+
+    // 5. Saves: Only overwrite if abilities were parsed (meaning saves are valid)
+    //    OR if saves were explicitly parsed (not default 0s).
+    if (abilitiesFoundInFresh || (fresh.saves && (fresh.saves.fortitude !== 0 || fresh.saves.reflex !== 0 || fresh.saves.will !== 0))) {
+        out.saves = fresh.saves;
+    }
+
+    // 6. Combat: Only overwrite if abilities were parsed (meaning combat stats are valid)
+    //    OR if BAB was explicitly parsed.
+    if (abilitiesFoundInFresh || (fresh.combat && fresh.combat.bab !== null && fresh.combat.bab !== 1)) {
+        out.combat = fresh.combat;
+    }
+
+    // 7. Normalize ability keys to capitalized form and remove lowercase duplicates
+    const abilityMap = {
+        'str': 'Str', 'dex': 'Dex', 'con': 'Con',
+        'int': 'Int', 'wis': 'Wis', 'cha': 'Cha'
+    };
+
+    // Copy lowercase to capitalized if capitalized doesn't exist
+    for (const [lower, upper] of Object.entries(abilityMap)) {
+        if (out[lower] !== undefined && out[upper] === undefined) {
+            out[upper] = out[lower];
+        }
+        // Remove lowercase version to avoid duplicates
+        delete out[lower];
+    }
+
+    // Ensure core abilities exist (safety net)
+    for (const a of ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha']) {
+        if (out[a] === undefined) {
+            out[a] = 10;
+        }
+    }
+
+    // 8. Size: Only overwrite if fresh.size is valid
+    if (fresh.size) {
+        out.size = fresh.size;
+    }
+
+    return out;
+}
+
+module.exports.mergeBaseStats = mergeBaseStats;
+

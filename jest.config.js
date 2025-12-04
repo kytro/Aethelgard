@@ -4,7 +4,8 @@ module.exports = {
     testPathIgnorePatterns: [
         '<rootDir>/node_modules/',
         '<rootDir>/dist/',
-        '<rootDir>/tests/e2e/'
+        '<rootDir>/tests/e2e/',
+        '<rootDir>/tests/unit/'  // Plain Node.js tests, run separately with: node tests/unit/migration.test.js
     ],
     coverageDirectory: 'coverage',
     collectCoverageFrom: [

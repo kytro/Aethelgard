@@ -68,6 +68,18 @@ export const formatTime = (t: any): string => {
     return `${year}-${month}-${day} ${hours}:${minutes}`;
 };
 
+export const SIZE_DATA: { [key: string]: any } = {
+    'Fine': { mod: 8, specialMod: -8, stealth: 16, fly: 8 },
+    'Diminutive': { mod: 4, specialMod: -4, stealth: 12, fly: 6 },
+    'Tiny': { mod: 2, specialMod: -2, stealth: 8, fly: 4 },
+    'Small': { mod: 1, specialMod: -1, stealth: 4, fly: 2 },
+    'Medium': { mod: 0, specialMod: 0, stealth: 0, fly: 0 },
+    'Large': { mod: -1, specialMod: 1, stealth: -4, fly: -2 },
+    'Huge': { mod: -2, specialMod: 2, stealth: -8, fly: -4 },
+    'Gargantuan': { mod: -4, specialMod: 4, stealth: -12, fly: -6 },
+    'Colossal': { mod: -8, specialMod: 8, stealth: -16, fly: -8 }
+};
+
 export const calculateCompleteBaseStats = (baseStats: any): any => {
     const newStats: { [key: string]: any } = { ...(baseStats || {}) };
     const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
@@ -85,6 +97,20 @@ export const calculateCompleteBaseStats = (baseStats: any): any => {
     const conMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Con'));
     const wisMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Wis'));
 
+    // 1. Determine Size
+    let size = getCaseInsensitiveProp(newStats, 'size');
+    // Normalize size string (e.g. "Large (tall)" -> "Large")
+    if (size) {
+        const sizeMatch = size.match(/Fine|Diminutive|Tiny|Small|Medium|Large|Huge|Gargantuan|Colossal/i);
+        if (sizeMatch) {
+            // Capitalize first letter
+            size = sizeMatch[0].charAt(0).toUpperCase() + sizeMatch[0].slice(1).toLowerCase();
+        }
+    }
+    if (!size || !SIZE_DATA[size]) size = 'Medium';
+    newStats['size'] = size;
+    const sizeStats = SIZE_DATA[size];
+
     let acValue = getCaseInsensitiveProp(newStats, 'AC');
     if (typeof acValue === 'string') {
         const acMatch = acValue.match(/^(\d+)/);
@@ -95,8 +121,9 @@ export const calculateCompleteBaseStats = (baseStats: any): any => {
         if (ffMatch) newStats['Flat-Footed'] = parseInt(ffMatch[1], 10);
     }
 
-    if (typeof getCaseInsensitiveProp(newStats, 'AC') !== 'number') newStats['AC'] = 10 + dexMod;
-    if (typeof getCaseInsensitiveProp(newStats, 'Touch') !== 'number') newStats['Touch'] = 10 + dexMod;
+    // Apply defaults with Size modifiers if not present
+    if (typeof getCaseInsensitiveProp(newStats, 'AC') !== 'number') newStats['AC'] = 10 + dexMod + sizeStats.mod;
+    if (typeof getCaseInsensitiveProp(newStats, 'Touch') !== 'number') newStats['Touch'] = 10 + dexMod + sizeStats.mod;
     if (typeof getCaseInsensitiveProp(newStats, 'Flat-Footed') !== 'number') newStats['Flat-Footed'] = (newStats['AC'] || 10) - dexMod;
 
     if (!getCaseInsensitiveProp(newStats, 'Saves')) {
@@ -126,8 +153,8 @@ export const calculateCompleteBaseStats = (baseStats: any): any => {
         newStats['BAB'] = parseInt(String(getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || getCaseInsensitiveProp(newStats, 'BAB') || 0).match(/-?\d+/)?.[0] || '0', 10);
     }
 
-    if (typeof getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + strMod;
-    if (typeof getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + newStats['BAB'] + strMod + dexMod;
+    if (typeof getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + strMod + sizeStats.specialMod;
+    if (typeof getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + newStats['BAB'] + strMod + dexMod + sizeStats.specialMod;
 
     const hpValue = getCaseInsensitiveProp(newStats, 'hp') || getCaseInsensitiveProp(newStats, 'HP') || '1d8';
     const isDiceNotation = /^\d+d\d+/.test(String(hpValue));
