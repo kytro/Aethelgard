@@ -2,38 +2,38 @@
   <nav class="w-64 flex-shrink-0 bg-gray-800 p-4 flex flex-col border-r border-gray-700">
     <ul class="space-y-2">
       <li>
-        <a (click)="activeTool.set('assistant')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'assistant', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'assistant'}">
-           Codex Assistant
+        <a (click)="activeTool.set('assistant')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'assistant', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'assistant'}">
+          Codex Assistant
         </a>
       </li>
       <li>
-        <a (click)="activeTool.set('combat-manager')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'combat-manager', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'combat-manager'}">
-           Combat Manager ({{fightCount()}})
+        <a (click)="activeTool.set('combat-manager')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'combat-manager', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'combat-manager'}">
+          Combat Manager ({{fightCount()}})
         </a>
       </li>
       <li>
-        <a (click)="activeTool.set('npc-generator')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'npc-generator', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'npc-generator'}">
-           NPC Generator
+        <a (click)="activeTool.set('npc-generator')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'npc-generator', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'npc-generator'}">
+          NPC Generator
         </a>
       </li>
       <li>
-        <a (click)="activeTool.set('session')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'session', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'session'}">
-           Session Logger ({{sessionCount()}})
+        <a (click)="activeTool.set('session')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'session', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'session'}">
+          Session Logger ({{sessionCount()}})
         </a>
       </li>
       <li>
-        <a (click)="activeTool.set('story-planner')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'story-planner', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'story-planner'}">
-           Story Planner
+        <a (click)="activeTool.set('story-planner')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeTool() === 'story-planner', 'text-gray-300 hover:bg-gray-700': activeTool() !== 'story-planner'}">
+          Story Planner
         </a>
       </li>
     </ul>
@@ -41,45 +41,27 @@
 
   <main class="flex-1 overflow-y-auto p-8 bg-gray-900">
     @switch (activeTool()) {
-      @case ('assistant') {
-        <app-codex-assistant [codex]="codex()"></app-codex-assistant>
-      }
-      @case ('npc-generator') {
-        <app-npc-generator 
-          [codex]="codex()" 
-          [existingEntityNames]="entityNames()"
-          [rulesCache]="rulesCache()"
-          [equipmentCache]="equipmentCache()"
-          [magicItemsCache]="magicItemsCache()"
-          [spellsCache]="spellsCache()"
-        ></app-npc-generator>
-      }
-      @case ('session') {
-        <app-session-logger 
-          [sessions]="sessions()"
-          (sessionAdded)="onSessionAdded($event)"
-          (sessionUpdated)="onSessionUpdated($event)"
-          (sessionDeleted)="onSessionDeleted($event)"
-        ></app-session-logger>
-      }
-      @case ('combat-manager') {
-        <app-combat-manager 
-          [fights]="fights()"
-          (fightAdded)="onFightAdded($event)"
-          (fightDeleted)="onFightDeleted($event)"
-          [codex]="codex()"
-          [rulesCache]="rulesCache()"
-          [equipmentCache]="equipmentCache()"
-          [magicItemsCache]="magicItemsCache()"
-          [spellsCache]="spellsCache()"
-          [effectsCache]="effectsCache()"
-          [entitiesCache]="entitiesCache()"
-          [foundCreatures]="foundCreatures()"
-        ></app-combat-manager>
-      }
-      @case ('story-planner') {
-        <app-story-planner></app-story-planner>
-      }
+    @case ('assistant') {
+    <app-codex-assistant [codex]="codex()"></app-codex-assistant>
+    }
+    @case ('npc-generator') {
+    <app-npc-generator [codex]="codex()" [existingEntityNames]="entityNames()" [rulesCache]="rulesCache()"
+      [equipmentCache]="equipmentCache()" [magicItemsCache]="magicItemsCache()"
+      [spellsCache]="spellsCache()"></app-npc-generator>
+    }
+    @case ('session') {
+    <app-session-logger [sessions]="sessions()" (sessionAdded)="onSessionAdded($event)"
+      (sessionUpdated)="onSessionUpdated($event)" (sessionDeleted)="onSessionDeleted($event)"></app-session-logger>
+    }
+    @case ('combat-manager') {
+    <app-combat-manager [fights]="fights()" (fightAdded)="onFightAdded($event)" (fightDeleted)="onFightDeleted($event)"
+      [codex]="codex()" [rulesCache]="rulesCache()" [equipmentCache]="equipmentCache()"
+      [magicItemsCache]="magicItemsCache()" [spellsCache]="spellsCache()" [effectsCache]="effectsCache()"
+      [entitiesCache]="entitiesCache()" [foundCreatures]="foundCreatures()"></app-combat-manager>
+    }
+    @case ('story-planner') {
+    <app-story-planner [codex]="codex()" [sessions]="sessions()"></app-story-planner>
+    }
     }
   </main>
 </div>
