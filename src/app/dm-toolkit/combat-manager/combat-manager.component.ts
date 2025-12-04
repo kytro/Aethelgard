@@ -237,6 +237,25 @@ export class CombatManagerComponent {
     this.customCombatant.update(c => ({ ...c, [field]: val }));
   }
 
+  // --- NEW HELPER: Roll Initiative ---
+  private rollInitiative(baseStats: any, rules: string[] = []): number {
+    const dex = getCaseInsensitiveProp(baseStats, 'Dex') || 10;
+    const dexMod = getAbilityModifierAsNumber(dex);
+
+    let miscMod = 0;
+    // Check for Improved Initiative in cached rules
+    if (rules && rules.length > 0) {
+      const hasImprovedInit = rules.some(ruleId => {
+        const rule = this.rulesCache().get(ruleId);
+        return rule && rule.name && rule.name.toLowerCase() === 'improved initiative';
+      });
+      if (hasImprovedInit) miscMod += 4;
+    }
+
+    const roll = Math.floor(Math.random() * 20) + 1;
+    return roll + dexMod + miscMod;
+  }
+
   async handleAddCombatant(event: Event) {
     event.preventDefault();
     const fight = this.currentFight();
@@ -246,58 +265,95 @@ export class CombatManagerComponent {
 
     try {
       const source = this.addFormSource();
+
       if (source === 'Custom') {
         const custom = this.customCombatant();
         if (!custom.name) throw new Error("Name required.");
-        combatantData = { name: custom.name, initiative: +custom.initiative, hp: +custom.hp, maxHp: +custom.hp, type: 'Custom', stats: {} };
-      } else if (source === 'Found') {
-        const entityId = this.selectedFoundCreatureId();
-        if (!entityId) throw new Error("Select a creature.");
-        const found = this.foundCreatures().find(f => f.id === entityId);
-        let hpVal = 10;
-        if (found && found.hp) hpVal = this.computeHpFromString(String(found.hp), this.monsterHpOption);
-        combatantData = { type: 'Bestiary', entityId: entityId, hp: hpVal, maxHp: hpVal };
+        combatantData = {
+          name: custom.name,
+          initiative: +custom.initiative,
+          hp: +custom.hp,
+          maxHp: +custom.hp,
+          type: 'Custom',
+          stats: {}
+        };
       } else {
-        const templateName = this.selectedTemplate();
-        if (!templateName) throw new Error("Select a template.");
-
-        // Resolve Codex Node
-        const fullPath = [source, ...this.selectedCodexPath(), templateName].filter(Boolean);
-        const node = this.getNodeFromCodex(fullPath);
-        let resolvedEntityId: string | undefined;
+        // Logic for Found/Bestiary/Templates
+        let entityId: string | null = null;
         let hpVal = 10;
+        let baseStats = {};
+        let rules: string[] = [];
 
-        if (node) {
-          if ((node as any).entityId) resolvedEntityId = (node as any).entityId;
-          else if ((node as any).id) resolvedEntityId = (node as any).id;
+        if (source === 'Found') {
+          entityId = this.selectedFoundCreatureId();
+          if (!entityId) throw new Error("Select a creature.");
+          const found = this.foundCreatures().find(f => f.id === entityId);
+          if (found && found.hp) hpVal = this.computeHpFromString(String(found.hp), this.monsterHpOption);
 
-          const hpField = getCaseInsensitiveProp((node as any).baseStats || node, 'hp') || getCaseInsensitiveProp((node as any).baseStats || node, 'HP');
-          if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
-        }
+          // Try to find cached entity for stats
+          const cached = this.entitiesCache().find(e => e.id === entityId);
+          if (cached) {
+            baseStats = cached.baseStats || {};
+            rules = cached.rules || [];
+          }
+        } else {
+          const templateName = this.selectedTemplate();
+          if (!templateName) throw new Error("Select a template.");
 
-        if (!resolvedEntityId) {
-          const entities = this.entitiesCache();
-          const resolvedEntity = entities.find((e: any) => e.name === templateName || e.name === formatName(templateName));
-          resolvedEntityId = resolvedEntity?.id;
-          if (resolvedEntity && hpVal === 10) {
-            const hpField = getCaseInsensitiveProp(resolvedEntity.baseStats || {}, 'hp') || getCaseInsensitiveProp(resolvedEntity.baseStats || {}, 'HP');
+          // Resolve Codex Node
+          const fullPath = [source, ...this.selectedCodexPath(), templateName].filter(Boolean);
+          const node = this.getNodeFromCodex(fullPath);
+
+          if (node) {
+            if ((node as any).entityId) entityId = (node as any).entityId;
+            else if ((node as any).id) entityId = (node as any).id;
+
+            const hpField = getCaseInsensitiveProp((node as any).baseStats || node, 'hp') || getCaseInsensitiveProp((node as any).baseStats || node, 'HP');
             if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
+
+            baseStats = (node as any).baseStats || node;
+          }
+
+          if (!entityId) {
+            // Fallback to cache search by name
+            const entities = this.entitiesCache();
+            const resolvedEntity = entities.find((e: any) => e.name === templateName || e.name === formatName(templateName));
+            if (resolvedEntity) {
+              entityId = resolvedEntity.id;
+              baseStats = resolvedEntity.baseStats || {};
+              rules = resolvedEntity.rules || [];
+              if (hpVal === 10) { // Only recalc HP if we didn't find it in the node
+                const hpField = getCaseInsensitiveProp(baseStats, 'hp');
+                if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
+              }
+            }
           }
         }
 
-        if (!resolvedEntityId) throw new Error(`Template '${templateName}' not found.`);
-        combatantData = { type: source, entityId: resolvedEntityId, hp: hpVal, maxHp: hpVal };
+        if (!entityId && source !== 'Found') throw new Error(`Template not found.`);
+
+        // Calculate Initiative
+        const initRoll = this.rollInitiative(baseStats, rules);
+
+        combatantData = {
+          type: source,
+          entityId: entityId || undefined,
+          hp: hpVal,
+          maxHp: hpVal,
+          initiative: initRoll // Explicitly set initiative
+        };
       }
 
       const newCombatant = await lastValueFrom(this.http.post<Combatant>(`/codex/api/dm-toolkit/fights/${fight._id}/combatants`, combatantData));
+
+      // Update local state immediately
       this.combatants.update(c => [...c, newCombatant].sort((a, b) => (b.initiative || 0) - (a.initiative || 0) || a.name.localeCompare(b.name)));
       this.logAction(`${newCombatant.name} added. HP: ${newCombatant.hp}, Init: ${newCombatant.initiative}`);
 
       this.customCombatant.set({ name: '', initiative: 10, hp: 10 });
-      this.selectedCodexPath.set([]);
+      // Don't clear source to allow rapid adding of same type
       this.selectedTemplate.set('');
       this.selectedFoundCreatureId.set(null);
-      this.addFormSource.set('Custom');
 
     } catch (e: any) {
       console.error(e);
@@ -377,15 +433,26 @@ export class CombatManagerComponent {
     }
   }
 
+  // --- UPDATED: Swap Logic for cleaner integers ---
   async moveCombatant(combatantId: string, direction: 'up' | 'down') {
-    const combatants = this.modifiedCombatants();
+    const combatants = this.modifiedCombatants(); // Uses current sorted view
     const currentIndex = combatants.findIndex(c => c._id === combatantId);
     if (currentIndex === -1) return;
+
     const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
     if (targetIndex < 0 || targetIndex >= combatants.length) return;
-    const targetInitiative = combatants[targetIndex].initiative || 0;
-    const newInit = direction === 'up' ? targetInitiative + 0.5 : targetInitiative - 0.5;
-    await this.handleUpdateCombatant(combatantId, 'initiative', newInit);
+
+    const current = combatants[currentIndex];
+    const target = combatants[targetIndex];
+
+    const currentInit = current.initiative || 0;
+    const targetInit = target.initiative || 0;
+
+    // Swap initiatives
+    await Promise.all([
+      this.handleUpdateCombatant(current._id, 'initiative', targetInit),
+      this.handleUpdateCombatant(target._id, 'initiative', currentInit)
+    ]);
   }
 
   async handleFindCreature() {

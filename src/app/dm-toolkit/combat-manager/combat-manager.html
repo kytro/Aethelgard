@@ -166,42 +166,42 @@
             [ngClass]="{'bg-yellow-800/50 border-yellow-600': isCombatActive() && currentTurnIndex() === i, 'bg-gray-800/50 border-gray-700': !isCombatActive() || currentTurnIndex() !== i }"
             (mouseenter)="showSkillsTooltip($event, c)" (mouseleave)="hideTooltip()">
             <div class="grid grid-cols-12 gap-2 items-center">
-              <div class="col-span-1 flex flex-col items-center justify-center">
-                <button (click)="moveCombatant(c._id, 'up')" class="text-gray-400 hover:text-white text-xs"
-                  [disabled]="i === 0">&#9650;</button>
-                <button (click)="moveCombatant(c._id, 'down')" class="text-gray-400 hover:text-white text-xs"
-                  [disabled]="i === modifiedCombatants().length - 1">&#9660;</button>
-              </div>
-              <div class="col-span-1 text-center font-bold text-xl flex items-center justify-center gap-1">
-                <input type="number" [ngModel]="c.initiative"
-                  (ngModelChange)="handleUpdateCombatant(c._id, 'initiative', $event)"
-                  class="w-12 bg-gray-900 border border-gray-600 rounded-md p-1 text-center" />
-                <span class="text-sm text-gray-400 font-normal">({{ c.initiativeMod >= 0 ? '+' : '' }}{{ c.initiativeMod
-                  }})</span>
-              </div>
-              <div class="col-span-4 font-semibold flex items-center">
-                <span class="truncate" title="{{c.name}}">{{c.name}}</span>
-                <span class="text-xs text-gray-400 font-normal ml-2 whitespace-nowrap">({{ (c.type === 'PC' || c.type
-                  === 'NPC') ? 'Lvl' : 'CR' }} {{ getCaseInsensitiveProp(c.baseStats, 'Level') ||
-                  getCaseInsensitiveProp(c.baseStats, 'CR') || '?' }})</span>
-              </div>
-              <div class="col-span-3 flex items-center">
-                <input type="number" [ngModel]="c.hp" (ngModelChange)="handleUpdateCombatant(c._id, 'hp', $event)"
-                  class="w-16 bg-gray-900 border border-gray-600 rounded-md px-2 py-1 text-white" />
-                <span class="ml-2 text-gray-400">/ {{c.modifiedStats.maxHp}}</span>
-              </div>
-              <div class="col-span-1 text-sm text-gray-300">
-                <strong>Spd:</strong> {{ c.modifiedStats?.Speed || 'N/A' }}
-              </div>
-              <div class="col-span-1 text-center">
-                <a (mouseenter)="showSkillsTooltip($event, c)" (mouseleave)="hideTooltip()"
-                  class="text-gray-400 hover:text-white cursor-pointer">Skills</a>
-                <button (click)="toggleDetails(c._id)" class="text-gray-400 hover:text-white ml-2">Details</button>
-              </div>
-              <div class="col-span-1 text-right">
-                <button type="button" (click)="handleRemoveCombatant(c._id)"
-                  class="text-red-500 hover:text-red-400 font-bold px-2 text-lg">X</button>
-              </div>
+                <div class="col-span-1 flex flex-col items-center justify-center">
+                    <button (click)="moveCombatant(c._id, 'up')" class="text-gray-400 hover:text-white text-xs" [disabled]="i === 0">&#9650;</button>
+                    <button (click)="moveCombatant(c._id, 'down')" class="text-gray-400 hover:text-white text-xs" [disabled]="i === modifiedCombatants().length - 1">&#9660;</button>
+                </div>
+                
+                <div class="col-span-1 text-center font-bold text-xl flex items-center justify-center gap-1">
+                    <input type="number" [ngModel]="c.initiative"
+                        (ngModelChange)="handleUpdateCombatant(c._id, 'initiative', $event)"
+                        class="w-12 bg-gray-900 border border-gray-600 rounded-md p-1 text-center" />
+                    <span class="text-sm text-gray-400 font-normal">({{ c.initiativeMod >= 0 ? '+' : '' }}{{ c.initiativeMod }})</span>
+                </div>
+                <div class="col-span-4 font-semibold flex items-center">
+                    <span class="truncate" title="{{c.name}}">{{c.name}}</span>
+                    <span class="text-xs text-gray-400 font-normal ml-2 whitespace-nowrap">({{ (c.type === 'PC' || c.type === 'NPC') ? 'Lvl' : 'CR' }} {{ getCaseInsensitiveProp(c.baseStats, 'Level') || getCaseInsensitiveProp(c.baseStats, 'CR') || '?' }})</span>
+                </div>
+                <div class="col-span-3 flex items-center">
+                    <input type="number" [ngModel]="c.hp" (ngModelChange)="handleUpdateCombatant(c._id, 'hp', $event)"
+                        class="w-16 bg-gray-900 border border-gray-600 rounded-md px-2 py-1 text-white" />
+                    <span class="ml-2 text-gray-400">/ {{c.modifiedStats.maxHp}}</span>
+                </div>
+                <div class="col-span-1 text-sm text-gray-300">
+                    <strong>Spd:</strong> {{ c.modifiedStats?.Speed || 'N/A' }}
+                </div>
+                <div class="col-span-1 text-center">
+                    <a (mouseenter)="showSkillsTooltip($event, c)" (mouseleave)="hideTooltip()" class="text-gray-400 hover:text-white cursor-pointer">Skills</a>
+                    <button (click)="toggleDetails(c._id)" class="text-gray-400 hover:text-white ml-2">Details</button>
+                </div>
+                
+                <div class="col-span-1 text-right flex items-center justify-end gap-1">
+                    <div class="flex flex-col items-center justify-center mr-2">
+                        <button (click)="moveCombatant(c._id, 'up')" class="text-gray-500 hover:text-white text-[10px]" [disabled]="i === 0">&#9650;</button>
+                        <button (click)="moveCombatant(c._id, 'down')" class="text-gray-500 hover:text-white text-[10px]" [disabled]="i === modifiedCombatants().length - 1">&#9660;</button>
+                    </div>
+                    <button type="button" (click)="handleRemoveCombatant(c._id)"
+                        class="text-red-500 hover:text-red-400 font-bold px-2 text-lg">X</button>
+                </div>
             </div>
 
             <div class="mt-2 text-xs flex justify-between items-start">
