@@ -106,6 +106,63 @@ interface GeneratedNpc {
                             }
                         </div>
                     }
+
+                    @if (npc.hp || npc.ac) {
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2 mt-2 mb-2 text-sm">
+                            @if (npc.hp) {
+                                <div class="bg-red-900/30 p-2 rounded text-center">
+                                    <span class="block text-xs text-gray-400">HP</span>
+                                    <span class="font-bold text-red-400">{{npc.hp}}</span>
+                                </div>
+                            }
+                            @if (npc.ac) {
+                                <div class="bg-blue-900/30 p-2 rounded text-center">
+                                    <span class="block text-xs text-gray-400">AC</span>
+                                    <span class="font-bold text-blue-400">{{npc.ac}}</span>
+                                    <span class="text-xs text-gray-500"> (T{{npc.acTouch}}, FF{{npc.acFlatFooted}})</span>
+                                </div>
+                            }
+                            @if (npc.bab !== undefined) {
+                                <div class="bg-orange-900/30 p-2 rounded text-center">
+                                    <span class="block text-xs text-gray-400">BAB</span>
+                                    <span class="font-bold text-orange-400">+{{npc.bab}}</span>
+                                </div>
+                            }
+                            @if (npc.cmb !== undefined || npc.cmd !== undefined) {
+                                <div class="bg-purple-900/30 p-2 rounded text-center">
+                                    <span class="block text-xs text-gray-400">CMB/CMD</span>
+                                    <span class="font-bold text-purple-400">+{{npc.cmb}}/{{npc.cmd}}</span>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @if (npc.fortSave !== undefined || npc.refSave !== undefined || npc.willSave !== undefined) {
+                        <div class="flex gap-4 mt-2 text-sm">
+                            <span class="text-gray-400">Saves: 
+                                <span class="text-green-400">Fort +{{npc.fortSave}}</span>,
+                                <span class="text-blue-400">Ref +{{npc.refSave}}</span>,
+                                <span class="text-purple-400">Will +{{npc.willSave}}</span>
+                            </span>
+                        </div>
+                    }
+
+                    @if ((npc.dr && npc.dr !== '-') || npc.sr || (npc.resist && npc.resist !== '-') || (npc.immune && npc.immune !== '-')) {
+                        <div class="mt-2 text-sm space-y-1">
+                            @if (npc.dr && npc.dr !== '-') {
+                                <p class="text-gray-400"><span class="text-yellow-500 font-semibold">DR:</span> {{npc.dr}}</p>
+                            }
+                            @if (npc.sr) {
+                                <p class="text-gray-400"><span class="text-cyan-500 font-semibold">SR:</span> {{npc.sr}}</p>
+                            }
+                            @if (npc.resist && npc.resist !== '-') {
+                                <p class="text-gray-400"><span class="text-orange-500 font-semibold">Resist:</span> {{npc.resist}}</p>
+                            }
+                            @if (npc.immune && npc.immune !== '-') {
+                                <p class="text-gray-400"><span class="text-red-500 font-semibold">Immune:</span> {{npc.immune}}</p>
+                            }
+                        </div>
+                    }
             
                     <div class="space-y-3 mt-3 text-sm">
                         @if (npc.backstory) {
