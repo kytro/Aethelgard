@@ -1,8 +1,107 @@
 const express = require('express');
 const { ObjectId } = require('mongodb');
 const router = express.Router();
+const { generateContent } = require('../services/geminiService');
 
 module.exports = function (db) {
+
+  /**
+   * Fetches PF1e data for a missing item from AI and inserts it into the database.
+   * @param {string} itemName - The name of the item (e.g., "Magic Missile")
+   * @param {string} itemType - 'spell', 'equipment', or 'feat'
+   * @returns {Promise<string|null>} - The _id of the inserted item, or null if failed
+   */
+  async function fetchAndInsertMissingItem(itemName, itemType) {
+    try {
+      const collectionName = itemType === 'spell' ? 'spells_pf1e'
+        : itemType === 'equipment' ? 'equipment_pf1e'
+          : 'rules_pf1e';
+
+      const idPrefix = itemType === 'spell' ? 'spell-'
+        : itemType === 'equipment' ? 'eq-'
+          : 'feat-';
+
+      // Check if it already exists (case-insensitive)
+      const existing = await db.collection(collectionName).findOne({
+        name: { $regex: new RegExp(`^${itemName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+      });
+      if (existing) return existing._id;
+
+      // Build prompt for AI to get full PF1e data
+      let prompt;
+      if (itemType === 'spell') {
+        prompt = `You are a Pathfinder 1e rules expert. Provide complete data for this spell:
+"${itemName}"
+
+Return ONLY a valid JSON object with these fields:
+{
+  "name": "Spell Name",
+  "school": "evocation/transmutation/etc",
+  "level": { "sorcerer/wizard": 1, "cleric": 2 },
+  "casting_time": "1 standard action",
+  "components": "V, S, M",
+  "range": "medium (100 ft. + 10 ft./level)",
+  "duration": "instantaneous",
+  "saving_throw": "none",
+  "spell_resistance": "yes",
+  "description": "Full spell description from PF1e rules"
+}`;
+      } else if (itemType === 'equipment') {
+        prompt = `You are a Pathfinder 1e rules expert. Provide complete data for this equipment:
+"${itemName}"
+
+Return ONLY a valid JSON object with these fields:
+{
+  "name": "Item Name",
+  "type": "weapon/armor/adventuring gear/etc",
+  "cost": "15 gp",
+  "weight": "4 lbs",
+  "description": "Full item description from PF1e rules"
+}`;
+      } else {
+        prompt = `You are a Pathfinder 1e rules expert. Provide complete data for this feat:
+"${itemName}"
+
+Return ONLY a valid JSON object with these fields:
+{
+  "name": "Feat Name",
+  "type": "Feat",
+  "prerequisites": "Str 13, Power Attack",
+  "benefit": "Full feat benefit description",
+  "description": "Complete feat description from PF1e rules"
+}`;
+      }
+
+      const itemData = await generateContent(db, prompt, { jsonMode: true });
+
+      if (!itemData || !itemData.name) {
+        console.log(`[Auto-Populate] Failed to get data for ${itemType}: ${itemName}`);
+        return null;
+      }
+
+      // Generate ID
+      const itemId = idPrefix + itemData.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      itemData._id = itemId;
+
+      if (itemType === 'feat') {
+        itemData.type = 'Feat';
+      }
+
+      // Insert into database
+      await db.collection(collectionName).updateOne(
+        { _id: itemId },
+        { $set: itemData },
+        { upsert: true }
+      );
+
+      console.log(`[Auto-Populate] Added ${itemType} to ${collectionName}: ${itemData.name} (${itemId})`);
+      return itemId;
+
+    } catch (error) {
+      console.error(`[Auto-Populate] Error fetching ${itemType} "${itemName}":`, error.message);
+      return null;
+    }
+  }
 
   // This endpoint fetches all codex entries.
   router.get('/data', async (req, res) => {
@@ -587,23 +686,53 @@ Only include sections where you are adding NEW items. Verify everything against 
         if (Object.keys(additions.skills).length === 0) delete additions.skills;
       }
 
-      // Equipment - map names to IDs
+      // Equipment - map names to IDs, auto-populate missing items
       if (aiSuggestions.equipment?.length > 0) {
         const equipMap = new Map(availableEquipment.map(e => [e.name.toLowerCase(), e._id]));
-        additions.equipment = aiSuggestions.equipment
-          .map(name => equipMap.get(name.toLowerCase()))
-          .filter(id => id && !existingEquipment.includes(id));
+        const equipmentIds = [];
+
+        for (const name of aiSuggestions.equipment) {
+          let id = equipMap.get(name.toLowerCase());
+
+          // If not found, try to auto-populate from AI
+          if (!id) {
+            console.log(`[AI Complete] Equipment "${name}" not in DB, attempting auto-populate...`);
+            id = await fetchAndInsertMissingItem(name, 'equipment');
+          }
+
+          if (id && !existingEquipment.includes(id)) {
+            equipmentIds.push(id);
+          }
+        }
+
+        if (equipmentIds.length > 0) {
+          additions.equipment = equipmentIds;
+        }
       }
 
-      // Spells - map names to IDs
+      // Spells - map names to IDs, auto-populate missing spells
       if (aiSuggestions.spells && Object.keys(aiSuggestions.spells).length > 0) {
         const spellMap = new Map(availableSpells.map(s => [s.name.toLowerCase(), s._id]));
         additions.spells = {};
+
         for (const [level, spellList] of Object.entries(aiSuggestions.spells)) {
           const existingAtLevel = existingSpells[level] || [];
-          const newSpellIds = spellList
-            .map(name => spellMap.get(name.toLowerCase()))
-            .filter(id => id && !existingAtLevel.includes(id));
+          const newSpellIds = [];
+
+          for (const name of spellList) {
+            let id = spellMap.get(name.toLowerCase());
+
+            // If not found, try to auto-populate from AI
+            if (!id) {
+              console.log(`[AI Complete] Spell "${name}" not in DB, attempting auto-populate...`);
+              id = await fetchAndInsertMissingItem(name, 'spell');
+            }
+
+            if (id && !existingAtLevel.includes(id)) {
+              newSpellIds.push(id);
+            }
+          }
+
           if (newSpellIds.length > 0) {
             additions.spells[level] = newSpellIds;
           }
@@ -616,9 +745,33 @@ Only include sections where you are adding NEW items. Verify everything against 
         additions.spellSlots = aiSuggestions.spellSlots;
       }
 
-      // Feats
+      // Feats - auto-populate missing feats (stored in rules_pf1e)
       if (aiSuggestions.feats?.length > 0) {
-        additions.feats = aiSuggestions.feats;
+        const featIds = [];
+
+        for (const name of aiSuggestions.feats) {
+          // Check if feat exists in rules_pf1e
+          const existingFeat = await db.collection('rules_pf1e').findOne({
+            type: 'Feat',
+            name: { $regex: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+          });
+
+          let featId = existingFeat?._id;
+
+          // If not found, auto-populate from AI
+          if (!featId) {
+            console.log(`[AI Complete] Feat "${name}" not in DB, attempting auto-populate...`);
+            featId = await fetchAndInsertMissingItem(name, 'feat');
+          }
+
+          if (featId) {
+            featIds.push(featId);
+          }
+        }
+
+        if (featIds.length > 0) {
+          additions.feats = featIds;
+        }
       }
 
       // Special abilities
