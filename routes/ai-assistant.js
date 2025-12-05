@@ -3,7 +3,7 @@ const { ObjectId } = require('mongodb');
 const router = express.Router();
 const { generateContent } = require('../services/geminiService');
 
-module.exports = function(db) {
+module.exports = function (db) {
 
     // List available models
     router.get('/models', async (req, res) => {
@@ -11,18 +11,18 @@ module.exports = function(db) {
         try {
             const apiKeysDoc = await db.collection('settings').findOne({ _id: 'api_keys' });
             const activeKey = apiKeysDoc?.keys?.find(k => k.id === apiKeysDoc.active_key_id);
-            
+
             if (!activeKey?.key) return res.status(500).json({ error: 'Gemini API key not found.' });
 
             const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${activeKey.key}`);
             const data = await response.json();
-            
+
             const filteredModels = (data.models || [])
                 .filter(m => m.supportedGenerationMethods.includes('generateContent'))
                 .map(m => m.name);
 
             const generalSettings = await db.collection('settings').findOne({ _id: 'general' });
-            
+
             res.json({
                 models: filteredModels,
                 defaultModel: generalSettings?.default_ai_model || 'models/gemini-1.5-flash'
@@ -150,6 +150,32 @@ ${existingStructurePrompt}
         const newIdMap = new Map();
         const results = [];
 
+        // Helper to ensure parent paths exist for codex_entries
+        async function ensureCodexParents(pathComponents) {
+            if (!Array.isArray(pathComponents) || pathComponents.length <= 1) return;
+
+            const parentOps = [];
+            for (let i = 1; i < pathComponents.length; i++) {
+                const parentPath = pathComponents.slice(0, i);
+                parentOps.push({
+                    updateOne: {
+                        filter: { path_components: parentPath },
+                        update: {
+                            $setOnInsert: {
+                                name: parentPath[parentPath.length - 1],
+                                path_components: parentPath
+                            }
+                        },
+                        upsert: true
+                    }
+                });
+            }
+            if (parentOps.length > 0) {
+                await db.collection('codex_entries').bulkWrite(parentOps, { ordered: false });
+                console.log(`[AI Execute] Created ${parentOps.length} parent entries for path: ${pathComponents.join('/')}`);
+            }
+        }
+
         try {
             for (const op of operations) {
                 // Replace placeholders
@@ -173,22 +199,32 @@ ${existingStructurePrompt}
                 if (op.insert) {
                     if (op.collection === 'codex_entries' && typeof op.insert.content === 'undefined') op.insert.content = [];
                     if (op.insert.createdAt === '$NOW') op.insert.createdAt = new Date();
-                    
+
+                    // Auto-create parent entries for codex_entries
+                    if (op.collection === 'codex_entries' && op.insert.path_components) {
+                        await ensureCodexParents(op.insert.path_components);
+                    }
+
                     const placeholderId = op.insert._id && typeof op.insert._id === 'string' && op.insert._id.startsWith('$NEW_ID') ? op.insert._id : null;
                     if (placeholderId) delete op.insert._id;
 
                     const result = await targetCollection.insertOne(op.insert);
                     if (placeholderId) newIdMap.set(placeholderId, result.insertedId);
-                    
+
                     results.push({ status: 'inserted', collection: op.collection, insertedId: result.insertedId });
                 }
 
                 if (op.update) {
                     if (!op.filter) continue;
                     if (op.filter._id && ObjectId.isValid(op.filter._id)) op.filter._id = new ObjectId(op.filter._id);
-                    
-                    const result = await targetCollection.updateOne(op.filter, op.update);
-                    results.push({ status: 'updated', collection: op.collection, matchedCount: result.matchedCount });
+
+                    // Auto-create parent entries for codex_entries updates with path_components in filter
+                    if (op.collection === 'codex_entries' && op.filter.path_components) {
+                        await ensureCodexParents(op.filter.path_components);
+                    }
+
+                    const result = await targetCollection.updateOne(op.filter, op.update, { upsert: true });
+                    results.push({ status: 'updated', collection: op.collection, matchedCount: result.matchedCount, upsertedId: result.upsertedId });
                 }
             }
             res.status(200).json({ message: `Executed ${operations.length} operations.`, details: results });
