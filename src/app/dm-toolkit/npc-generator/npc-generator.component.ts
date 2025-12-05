@@ -21,18 +21,26 @@ interface GeneratedNpc {
     alignment?: string;
     deity?: string;
     hitDice?: string;
-    baseAttackBonus?: number;
     feats?: string[];
     specialAbilities?: string[];
     spellSlots?: { [level: string]: number };
+    type?: string;
     size?: string;
+    hp?: string;
+    ac?: number;
+    acTouch?: number;
+    acFlatFooted?: number;
     bab?: number;
     cmb?: number;
     cmd?: number;
+    fortSave?: number;
+    refSave?: number;
+    willSave?: number;
     dr?: string;
     sr?: number;
     resist?: string;
     immune?: string;
+    spellSaveDc?: number;
 }
 
 @Component({
@@ -329,27 +337,43 @@ export class NpcGeneratorComponent {
                     deity: npc.deity || '',
                 };
 
+                if (npc.type) entity.baseStats.type = npc.type;
                 if (npc.class) entity.baseStats.Class = npc.class;
                 if (npc.level) entity.baseStats.Level = npc.level;
                 if (npc.gender) entity.baseStats.Gender = npc.gender;
                 if (npc.alignment) entity.baseStats.Alignment = npc.alignment;
                 if (npc.size) entity.baseStats.size = npc.size;
+                if (npc.hp) entity.baseStats.HP = npc.hp;
                 if (npc.hitDice) entity.baseStats.HitDice = npc.hitDice;
-                if (npc.bab !== undefined) entity.baseStats.combat = entity.baseStats.combat || {};
+
+                // AC values
+                if (npc.ac !== undefined) {
+                    entity.baseStats.armorClass = entity.baseStats.armorClass || {};
+                    entity.baseStats.armorClass.total = npc.ac;
+                    entity.baseStats.armorClass.touch = npc.acTouch ?? npc.ac;
+                    entity.baseStats.armorClass.flatFooted = npc.acFlatFooted ?? npc.ac;
+                }
+
+                // Combat stats
+                entity.baseStats.combat = entity.baseStats.combat || {};
                 if (npc.bab !== undefined) entity.baseStats.combat.bab = npc.bab;
+                if (npc.cmb !== undefined) entity.baseStats.combat.cmb = npc.cmb;
+                if (npc.cmd !== undefined) entity.baseStats.combat.cmd = npc.cmd;
+
+                // Saves
+                entity.baseStats.saves = entity.baseStats.saves || {};
+                if (npc.fortSave !== undefined) entity.baseStats.saves.fortitude = npc.fortSave;
+                if (npc.refSave !== undefined) entity.baseStats.saves.reflex = npc.refSave;
+                if (npc.willSave !== undefined) entity.baseStats.saves.will = npc.willSave;
+
                 if (npc.spellSlots) entity.spellSlots = npc.spellSlots;
-                if (npc.cmb !== undefined) {
-                    entity.baseStats.combat = entity.baseStats.combat || {};
-                    entity.baseStats.combat.cmb = npc.cmb;
-                }
-                if (npc.cmd !== undefined) {
-                    entity.baseStats.combat = entity.baseStats.combat || {};
-                    entity.baseStats.combat.cmd = npc.cmd;
-                }
-                if (npc.dr) entity.baseStats.DR = npc.dr;
+                if (npc.spellSaveDc !== undefined) entity.baseStats.spellSaveDc = npc.spellSaveDc;
+
+                // Defenses
+                if (npc.dr && npc.dr !== '-') entity.baseStats.DR = npc.dr;
                 if (npc.sr) entity.baseStats.SR = npc.sr;
-                if (npc.resist) entity.baseStats.Resist = npc.resist;
-                if (npc.immune) entity.baseStats.Immune = npc.immune;
+                if (npc.resist && npc.resist !== '-') entity.baseStats.Resist = npc.resist;
+                if (npc.immune && npc.immune !== '-') entity.baseStats.Immune = npc.immune;
                 if (npc.skills) entity.baseStats.skills = npc.skills;
 
                 const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));

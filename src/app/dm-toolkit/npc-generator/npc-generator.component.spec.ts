@@ -167,5 +167,66 @@ describe('NpcGeneratorComponent', () => {
             await fixture.whenStable();
             expect(component.npcSaveSuccessMessage()).toContain('1 NPCs saved');
         });
+
+        it('should save dragon/monster stats including HP, AC, saves, DR, SR, resist, immune', async () => {
+            // Set up a dragon with full monster stats
+            component.lastGeneratedNpcs.set([
+                createMockGeneratedNpc({
+                    name: 'Young Red Dragon',
+                    type: 'Dragon',
+                    race: 'Dragon',
+                    size: 'Large',
+                    class: 'Dragon',
+                    level: 10,
+                    hp: '115 (11d12+44)',
+                    ac: 22,
+                    acTouch: 9,
+                    acFlatFooted: 22,
+                    bab: 11,
+                    cmb: 19,
+                    cmd: 28,
+                    fortSave: 11,
+                    refSave: 7,
+                    willSave: 9,
+                    dr: '5/magic',
+                    sr: 21,
+                    resist: 'fire 30',
+                    immune: 'fire, sleep, paralysis'
+                })
+            ]);
+            component.lastGeneratedGroupName.set('Creatures/Dragons');
+            await fixture.whenStable();
+
+            component.handleSaveNpcsToCodex();
+
+            const entityReq = httpMock.expectOne('/codex/api/admin/collections/entities_pf1e');
+            const body = entityReq.request.body;
+
+            // Verify HP and AC
+            expect(body.baseStats.HP).toBe('115 (11d12+44)');
+            expect(body.baseStats.armorClass.total).toBe(22);
+            expect(body.baseStats.armorClass.touch).toBe(9);
+            expect(body.baseStats.armorClass.flatFooted).toBe(22);
+
+            // Verify saves
+            expect(body.baseStats.saves.fortitude).toBe(11);
+            expect(body.baseStats.saves.reflex).toBe(7);
+            expect(body.baseStats.saves.will).toBe(9);
+
+            // Verify defenses
+            expect(body.baseStats.DR).toBe('5/magic');
+            expect(body.baseStats.SR).toBe(21);
+            expect(body.baseStats.Resist).toBe('fire 30');
+            expect(body.baseStats.Immune).toBe('fire, sleep, paralysis');
+
+            entityReq.flush({ insertedId: 'dragon-entity' });
+            await fixture.whenStable();
+
+            const codexReq = httpMock.expectOne('/codex/api/codex/data');
+            codexReq.flush({});
+            await fixture.whenStable();
+
+            expect(component.npcSaveSuccessMessage()).toContain('1 NPCs saved');
+        });
     });
 });

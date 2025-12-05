@@ -63,29 +63,65 @@ For example: {"description": "The creature is blinded...", "modifiers": {"AC": {
                     }
                 }
 
-                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Generate NPCs that fit naturally within the established world lore and the specified location. ${nameConstraint}
+                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Generate NPCs and creatures that fit naturally within the established world lore and the specified location. ${nameConstraint}
 
-Use the WORLD CONTEXT below to ensure NPCs have appropriate:
+Use the WORLD CONTEXT below to ensure characters have appropriate:
 - Names that fit the local culture/region
 - Alignments and deities that match local religions
 - Affiliations with relevant factions or organizations  
 - Backstories that reference world events or locations
 
-Respond ONLY with a valid JSON array of objects. Each object must have:
+Respond ONLY with a valid JSON array of objects. Each object must have ALL of the following fields:
 
-"name", "race", "gender", "size" (e.g., "Small", "Medium", "Large" - based on race), "alignment" (e.g., "Chaotic Neutral"), "deity" (optional, from world religions if appropriate), "description", "backstory" (reference world lore where appropriate), "class" (e.g., "Fighter"), "level" (number).
-"hitDice" (e.g., "d10" - appropriate for their class).
-"bab" (Base Attack Bonus - number, calculate based on class and level: full BAB classes like Fighter get level, 3/4 BAB like Cleric get level*0.75, 1/2 BAB like Wizard get level*0.5).
-"cmb" (Combat Maneuver Bonus - number, calculate as BAB + Str modifier + size modifier).
-"cmd" (Combat Maneuver Defense - number, calculate as 10 + BAB + Str modifier + Dex modifier + size modifier).
-"baseStats": object with Str, Dex, Con, Int, Wis, Cha (values 3-18).
-"skills": object where keys are skill names and values are total bonuses (number).
-"feats": array of strings (standard PF1e feat names).
-"specialAbilities": array of strings (class features or racial traits).
-"equipment": array of strings (mundane gear).
-"magicItems": array of strings (magic gear).
-"spells": object where keys are spell levels ("0", "1", etc.) and values are arrays of spell names. ONLY include this field if the character's class grants spellcasting. ONLY include spell levels the character can currently cast based on their class and level.
-"spellSlots": object where keys are spell levels ("1", "2", etc.) and values are the number of slots per day. ONLY include this field if the character's class grants spellcasting.
+IDENTITY:
+"name", "race", "gender", "type" (e.g., "NPC", "Monster", "Dragon", "Outsider"), "size" (e.g., "Small", "Medium", "Large", "Huge" - based on race/type), "alignment" (e.g., "Chaotic Neutral"), "deity" (optional, from world religions if appropriate), "description", "backstory" (reference world lore where appropriate).
+
+CLASS & LEVEL:
+"class" (e.g., "Fighter", "Dragon", "Outsider" - for monsters use their type), "level" (number - for monsters this is their CR/HD).
+
+ABILITY SCORES:
+"baseStats": object with Str, Dex, Con, Int, Wis, Cha (values 3-30, higher for powerful creatures like dragons).
+
+COMBAT STATS (calculate accurately based on class/level/HD):
+"hp" (string like "45 (6d10+12)" - format: total (HDdX+Con bonus), calculate properly based on HD and Con modifier).
+"ac" (number - base 10 + Dex mod + natural armor for monsters + size modifier).
+"acTouch" (number - AC without armor/natural armor).
+"acFlatFooted" (number - AC without Dex).
+"bab" (Base Attack Bonus - number, full BAB for fighters/dragons, 3/4 for clerics, 1/2 for wizards).
+"cmb" (Combat Maneuver Bonus - number: BAB + Str modifier + size modifier).
+"cmd" (Combat Maneuver Defense - number: 10 + BAB + Str + Dex + size modifier).
+"hitDice" (e.g., "d10" - die type for the class/creature type).
+
+SAVES (calculate as base save + ability modifier):
+"fortSave" (number - Con based).
+"refSave" (number - Dex based).
+"willSave" (number - Wis based).
+
+DEFENSES (include if applicable, use "-" or null if none):
+"dr" (string like "10/magic" or "5/cold iron" or "-" if none).
+"sr" (number - spell resistance, or null if none).
+"resist" (string like "fire 10, cold 10" or "-" if none).
+"immune" (string like "fire, poison, sleep" or "-" if none).
+
+SKILLS & ABILITIES:
+"skills": object where keys are skill names and values are total bonuses (number). Include racial skills for creatures.
+"feats": array of strings (standard PF1e feat names appropriate for level/HD).
+"specialAbilities": array of strings (class features, racial traits, or monster abilities like "Breath Weapon", "Frightful Presence").
+
+GEAR (appropriate for the creature type and level):
+"equipment": array of strings (mundane gear - dragons/monsters may have treasure instead).
+"magicItems": array of strings (magic gear/treasure).
+
+SPELLCASTING (ONLY if applicable):
+"spells": object where keys are spell levels ("0", "1", etc.) and values are arrays of spell names. Only include if the character/creature can cast spells.
+"spellSlots": object where keys are spell levels and values are slots per day. Only include if applicable.
+"spellSaveDc" (number - base spell save DC, typically 10 + spell level + casting stat modifier).
+
+IMPORTANT RULES:
+- Dragons have d12 HD, natural armor, breath weapons, DR, SR based on age category
+- Outsiders have d10 HD, often have DR and elemental resistances
+- Calculate HP as: HD × (die average + Con modifier). Example: 6d10 with +2 Con = 6 × (5.5 + 2) = 45
+- Include ALL fields even if value is "-" or null for defenses
 
 --- USER REQUEST ---
 "${query}"
