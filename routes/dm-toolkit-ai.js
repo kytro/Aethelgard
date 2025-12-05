@@ -36,97 +36,173 @@ For example: {"description": "The creature is blinded...", "modifiers": {"AC": {
                 jsonMode = true;
                 let nameConstraint = '';
                 if (options.existingEntityNames && options.existingEntityNames.length > 0) {
-                    nameConstraint = `The generated NPCs must have unique first names. Do not use a first name that is part of any of the following existing names: ${options.existingEntityNames.join(', ')}.`;
+                    nameConstraint = `Avoid these existing names: ${options.existingEntityNames.slice(0, 20).join(', ')}.`;
                 }
 
-                // Build world context summary for the prompt
-                let worldContextSection = '';
+                // Build condensed world context
+                let worldContext = '';
                 if (options.codex) {
                     const ctx = options.codex;
-                    if (ctx.targetPath) {
-                        worldContextSection += `\n--- TARGET LOCATION ---\nThese NPCs will be placed at: "${ctx.targetPath}". Make them appropriate for this location.\n`;
-                    }
-                    if (ctx.userContext) {
-                        worldContextSection += `\n--- USER CONTEXT ---\n${ctx.userContext}\n`;
-                    }
-                    if (ctx.places) {
-                        worldContextSection += `\n--- WORLD PLACES ---\n${JSON.stringify(ctx.places, null, 2)}\n`;
-                    }
-                    if (ctx.factions || ctx.organizations) {
-                        worldContextSection += `\n--- FACTIONS & ORGANIZATIONS ---\n${JSON.stringify(ctx.factions || ctx.organizations, null, 2)}\n`;
-                    }
-                    if (ctx.religions || ctx.deities) {
-                        worldContextSection += `\n--- RELIGIONS & DEITIES ---\n${JSON.stringify(ctx.religions || ctx.deities, null, 2)}\n`;
-                    }
-                    if (ctx.history || ctx.lore) {
-                        worldContextSection += `\n--- WORLD HISTORY & LORE ---\n${JSON.stringify(ctx.history || ctx.lore, null, 2)}\n`;
-                    }
+                    if (ctx.targetPath) worldContext += `Location: ${ctx.targetPath}. `;
+                    if (ctx.userContext) worldContext += `Context: ${ctx.userContext}. `;
                 }
 
-                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Generate NPCs and creatures that fit naturally within the established world lore and the specified location. ${nameConstraint}
+                // PHASE 1: Generate basic identity for each NPC
+                const phase1Prompt = `You are a Pathfinder 1e NPC generator. ${nameConstraint}
 
-Use the WORLD CONTEXT below to ensure characters have appropriate:
-- Names that fit the local culture/region
-- Alignments and deities that match local religions
-- Affiliations with relevant factions or organizations  
-- Backstories that reference world events or locations
+${worldContext}
 
-Respond ONLY with a valid JSON array of objects. Each object must have ALL of the following fields:
+Based on this request: "${query}"
 
-IDENTITY:
-"name", "race", "gender", "type" (e.g., "NPC", "Monster", "Dragon", "Outsider"), "size" (e.g., "Small", "Medium", "Large", "Huge" - based on race/type), "alignment" (e.g., "Chaotic Neutral"), "deity" (optional, from world religions if appropriate), "description", "backstory" (reference world lore where appropriate).
+Generate a JSON array of NPCs with ONLY these identity fields:
+[{
+  "name": "string",
+  "race": "string (Human, Elf, Dragon, etc.)",
+  "type": "string (NPC, Monster, Dragon, Outsider, Undead, etc.)",
+  "gender": "string",
+  "size": "string (Fine, Diminutive, Tiny, Small, Medium, Large, Huge, Gargantuan, Colossal)",
+  "class": "string (Fighter, Wizard, Dragon, etc. - for monsters use type)",
+  "level": "number (HD/CR for monsters)",
+  "alignment": "string (Lawful Good, Chaotic Evil, etc.)",
+  "description": "string (brief physical description)",
+  "backstory": "string (brief background)"
+}]
 
-CLASS & LEVEL:
-"class" (e.g., "Fighter", "Dragon", "Outsider" - for monsters use their type), "level" (number - for monsters this is their CR/HD).
+Respond with ONLY a valid JSON array.`;
 
-ABILITY SCORES:
-"baseStats": object with Str, Dex, Con, Int, Wis, Cha (values 3-30, higher for powerful creatures like dragons).
+                let phase1Result;
+                try {
+                    phase1Result = await generateContent(db, phase1Prompt, { model, jsonMode: true });
+                    if (!Array.isArray(phase1Result)) phase1Result = [phase1Result];
+                    console.log('[NPC Gen] Phase 1 complete:', phase1Result.length, 'NPCs');
+                } catch (e) {
+                    console.error('[NPC Gen] Phase 1 failed:', e);
+                    throw new Error('Failed to generate NPC identities: ' + e.message);
+                }
 
-COMBAT STATS (calculate accurately based on class/level/HD):
-"hp" (string like "45 (6d10+12)" - format: total (HDdX+Con bonus), calculate properly based on HD and Con modifier).
-"ac" (number - base 10 + Dex mod + natural armor for monsters + size modifier).
-"acTouch" (number - AC without armor/natural armor).
-"acFlatFooted" (number - AC without Dex).
-"bab" (Base Attack Bonus - number, full BAB for fighters/dragons, 3/4 for clerics, 1/2 for wizards).
-"cmb" (Combat Maneuver Bonus - number: BAB + Str modifier + size modifier).
-"cmd" (Combat Maneuver Defense - number: 10 + BAB + Str + Dex + size modifier).
-"hitDice" (e.g., "d10" - die type for the class/creature type).
+                // Short delay between phases
+                await new Promise(resolve => setTimeout(resolve, 500));
 
-SAVES (calculate as base save + ability modifier):
-"fortSave" (number - Con based).
-"refSave" (number - Dex based).
-"willSave" (number - Wis based).
+                // PHASE 2: Generate ability scores and combat stats for each NPC
+                const phase2Prompt = `You are a Pathfinder 1e stat calculator. For these NPCs, generate their ability scores and combat statistics:
 
-DEFENSES (include if applicable, use "-" or null if none):
-"dr" (string like "10/magic" or "5/cold iron" or "-" if none).
-"sr" (number - spell resistance, or null if none).
-"resist" (string like "fire 10, cold 10" or "-" if none).
-"immune" (string like "fire, poison, sleep" or "-" if none).
+${JSON.stringify(phase1Result.map(n => ({ name: n.name, race: n.race, type: n.type, class: n.class, level: n.level, size: n.size })))}
 
-SKILLS & ABILITIES:
-"skills": object where keys are skill names and values are total bonuses (number). Include racial skills for creatures.
-"feats": array of strings (standard PF1e feat names appropriate for level/HD).
-"specialAbilities": array of strings (class features, racial traits, or monster abilities like "Breath Weapon", "Frightful Presence").
+For EACH NPC, calculate accurate PF1e stats:
+[{
+  "name": "string (must match above)",
+  "baseStats": { "Str": number, "Dex": number, "Con": number, "Int": number, "Wis": number, "Cha": number },
+  "hp": "string like '45 (6d10+12)' - calculate: HD × (die avg + Con mod)",
+  "ac": number,
+  "acTouch": number,
+  "acFlatFooted": number,
+  "bab": number,
+  "cmb": number,
+  "cmd": number,
+  "hitDice": "string like 'd10'",
+  "fortSave": number,
+  "refSave": number,
+  "willSave": number,
+  "dr": "string like '10/magic' or '-'",
+  "sr": "number or null",
+  "resist": "string like 'fire 10' or '-'",
+  "immune": "string like 'fire, sleep' or '-'"
+}]
 
-GEAR (appropriate for the creature type and level):
-"equipment": array of strings (mundane gear - dragons/monsters may have treasure instead).
-"magicItems": array of strings (magic gear/treasure).
+Rules: Dragons get high Str/Con/Cha, d12 HD, natural armor, often DR/SR. Fighters get full BAB. Wizards get 1/2 BAB.
+Respond with ONLY a valid JSON array.`;
 
-SPELLCASTING (ONLY if applicable):
-"spells": object where keys are spell levels ("0", "1", etc.) and values are arrays of spell names. Only include if the character/creature can cast spells.
-"spellSlots": object where keys are spell levels and values are slots per day. Only include if applicable.
-"spellSaveDc" (number - base spell save DC, typically 10 + spell level + casting stat modifier).
+                let phase2Result;
+                try {
+                    phase2Result = await generateContent(db, phase2Prompt, { model, jsonMode: true });
+                    if (!Array.isArray(phase2Result)) phase2Result = [phase2Result];
+                    console.log('[NPC Gen] Phase 2 complete');
+                } catch (e) {
+                    console.error('[NPC Gen] Phase 2 failed:', e);
+                    // Continue with defaults if phase 2 fails
+                    phase2Result = [];
+                }
 
-IMPORTANT RULES:
-- Dragons have d12 HD, natural armor, breath weapons, DR, SR based on age category
-- Outsiders have d10 HD, often have DR and elemental resistances
-- Calculate HP as: HD × (die average + Con modifier). Example: 6d10 with +2 Con = 6 × (5.5 + 2) = 45
-- Include ALL fields even if value is "-" or null for defenses
+                await new Promise(resolve => setTimeout(resolve, 500));
 
---- USER REQUEST ---
-"${query}"
-${worldContextSection}`;
-                break;
+                // PHASE 3: Generate skills, feats, abilities, and gear
+                const phase3Prompt = `You are a Pathfinder 1e ability/gear expert. For these NPCs, generate their skills, feats, abilities, and equipment:
+
+${JSON.stringify(phase1Result.map(n => ({ name: n.name, class: n.class, level: n.level, type: n.type })))}
+
+For EACH NPC:
+[{
+  "name": "string (must match above)",
+  "skills": { "Perception": number, "Stealth": number, etc. - include class skills with proper bonuses },
+  "feats": ["Feat Name", "Another Feat"],
+  "specialAbilities": ["Breath Weapon", "Darkvision 60 ft.", etc.],
+  "equipment": ["Longsword", "Chain mail", etc.],
+  "magicItems": ["Ring of Protection +1", etc.],
+  "spells": { "0": ["Detect Magic"], "1": ["Magic Missile"] } OR null if non-caster,
+  "spellSlots": { "0": 4, "1": 3 } OR null if non-caster
+}]
+
+Respond with ONLY a valid JSON array.`;
+
+                let phase3Result;
+                try {
+                    phase3Result = await generateContent(db, phase3Prompt, { model, jsonMode: true });
+                    if (!Array.isArray(phase3Result)) phase3Result = [phase3Result];
+                    console.log('[NPC Gen] Phase 3 complete');
+                } catch (e) {
+                    console.error('[NPC Gen] Phase 3 failed:', e);
+                    phase3Result = [];
+                }
+
+                // SYNTHESIZE: Merge all phases into complete NPCs
+                const synthesizedNpcs = phase1Result.map(npc => {
+                    const stats = phase2Result.find(s => s.name === npc.name) || {};
+                    const abilities = phase3Result.find(a => a.name === npc.name) || {};
+
+                    return {
+                        // Phase 1: Identity
+                        name: npc.name,
+                        race: npc.race,
+                        type: npc.type,
+                        gender: npc.gender,
+                        size: npc.size,
+                        class: npc.class,
+                        level: npc.level,
+                        alignment: npc.alignment,
+                        description: npc.description,
+                        backstory: npc.backstory,
+
+                        // Phase 2: Stats
+                        baseStats: stats.baseStats || { Str: 10, Dex: 10, Con: 10, Int: 10, Wis: 10, Cha: 10 },
+                        hp: stats.hp || `${npc.level || 1} (${npc.level || 1}d8)`,
+                        ac: stats.ac || 10,
+                        acTouch: stats.acTouch || 10,
+                        acFlatFooted: stats.acFlatFooted || 10,
+                        bab: stats.bab || 0,
+                        cmb: stats.cmb || 0,
+                        cmd: stats.cmd || 10,
+                        hitDice: stats.hitDice || 'd8',
+                        fortSave: stats.fortSave || 0,
+                        refSave: stats.refSave || 0,
+                        willSave: stats.willSave || 0,
+                        dr: stats.dr || '-',
+                        sr: stats.sr || null,
+                        resist: stats.resist || '-',
+                        immune: stats.immune || '-',
+
+                        // Phase 3: Abilities & Gear
+                        skills: abilities.skills || {},
+                        feats: abilities.feats || [],
+                        specialAbilities: abilities.specialAbilities || [],
+                        equipment: abilities.equipment || [],
+                        magicItems: abilities.magicItems || [],
+                        spells: abilities.spells || null,
+                        spellSlots: abilities.spellSlots || null
+                    };
+                });
+
+                console.log('[NPC Gen] Synthesis complete:', synthesizedNpcs.length, 'NPCs');
+                return res.json(synthesizedNpcs);
 
             default:
                 return res.status(404).json({ error: 'Invalid route parameter.' });
