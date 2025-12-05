@@ -212,12 +212,19 @@
                     entity['baseStats']?.['Flat-Footed'] ?? '10'}})</span>
                 </p>
                 <p><strong class="font-semibold text-gray-400">HP:</strong> <span [attr.contenteditable]="isEditMode()"
-                    (blur)="handleNumericEntityUpdate(entity, 'baseStats.hp', $event)">{{entity['baseStats']?.hp ??
-                    '1d8'}}</span></p>
-                <p><strong class="font-semibold text-gray-400">Saves:</strong> <span
-                    [attr.contenteditable]="isEditMode()"
-                    (blur)="handleEntityUpdate(entity, 'baseStats.saves', $event)">{{entity['baseStats']?.saves ?? 'Fort
-                    +0, Ref +0, Will +0'}}</span></p>
+                    (blur)="handleEntityUpdate(entity, 'baseStats.HP', $event)">{{entity['baseStats']?.HP ??
+                    entity['baseStats']?.hp ?? 'N/A'}}</span></p>
+                <p><strong class="font-semibold text-gray-400">Saves:</strong>
+                  @if (entity['baseStats']?.saves) {
+                  <span class="text-green-400">Fort +{{entity['baseStats']?.saves?.fortitude ??
+                    entity['baseStats']?.saves?.fort ?? 0}}</span>,
+                  <span class="text-blue-400">Ref +{{entity['baseStats']?.saves?.reflex ??
+                    entity['baseStats']?.saves?.ref ?? 0}}</span>,
+                  <span class="text-purple-400">Will +{{entity['baseStats']?.saves?.will ?? 0}}</span>
+                  } @else {
+                  <span class="text-gray-500">Fort +0, Ref +0, Will +0</span>
+                  }
+                </p>
                 <div class="flex gap-4">
                   <p><strong class="font-semibold text-gray-400">BAB:</strong> <span
                       [attr.contenteditable]="isEditMode()"
