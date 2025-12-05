@@ -31,11 +31,40 @@ module.exports = function (db) {
       const entries = req.body;
       if (!Array.isArray(entries)) return res.status(400).json({ error: 'Request body must be an array of codex entries.' });
 
-      // Build bulk ops that replace entries by their path_components (unique hierarchical key).
-      const bulkOps = entries.map(entry => {
-        // Ensure path_components exists and is an array
+      // First, collect all paths and their required parent paths
+      const allPaths = new Set();
+      const parentOps = [];
+
+      for (const entry of entries) {
         const path = Array.isArray(entry.path_components) ? entry.path_components : [];
-        // Clone the entry and remove any _id to avoid accidental ObjectId mismatches on insert
+        allPaths.add(JSON.stringify(path));
+
+        // Generate parent paths that need to exist
+        for (let i = 1; i < path.length; i++) {
+          const parentPath = path.slice(0, i);
+          const parentKey = JSON.stringify(parentPath);
+          if (!allPaths.has(parentKey)) {
+            allPaths.add(parentKey);
+            // Create an upsert for parent that only creates if missing (doesn't overwrite existing)
+            parentOps.push({
+              updateOne: {
+                filter: { path_components: parentPath },
+                update: {
+                  $setOnInsert: {
+                    name: parentPath[parentPath.length - 1],
+                    path_components: parentPath
+                  }
+                },
+                upsert: true
+              }
+            });
+          }
+        }
+      }
+
+      // Build bulk ops for the actual entries that replace by their path_components
+      const bulkOps = entries.map(entry => {
+        const path = Array.isArray(entry.path_components) ? entry.path_components : [];
         const entryClone = { ...entry };
         delete entryClone._id;
         return {
@@ -49,7 +78,12 @@ module.exports = function (db) {
 
       if (bulkOps.length === 0) return res.status(400).json({ error: 'No codex entries provided.' });
 
+      // First ensure parent paths exist, then save the entries
+      if (parentOps.length > 0) {
+        await db.collection('codex_entries').bulkWrite(parentOps, { ordered: false });
+      }
       await db.collection('codex_entries').bulkWrite(bulkOps, { ordered: false });
+
       res.status(200).json({ message: 'Codex entries saved successfully.' });
     } catch (error) {
       console.error('Failed to save codex entries:', error);
