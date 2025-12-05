@@ -39,9 +39,41 @@ For example: {"description": "The creature is blinded...", "modifiers": {"AC": {
                     nameConstraint = `The generated NPCs must have unique first names. Do not use a first name that is part of any of the following existing names: ${options.existingEntityNames.join(', ')}.`;
                 }
 
-                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Based on the following context, generate NPCs for the user's request. ${nameConstraint} Respond ONLY with a valid JSON array of objects. Each object must have:
+                // Build world context summary for the prompt
+                let worldContextSection = '';
+                if (options.codex) {
+                    const ctx = options.codex;
+                    if (ctx.targetPath) {
+                        worldContextSection += `\n--- TARGET LOCATION ---\nThese NPCs will be placed at: "${ctx.targetPath}". Make them appropriate for this location.\n`;
+                    }
+                    if (ctx.userContext) {
+                        worldContextSection += `\n--- USER CONTEXT ---\n${ctx.userContext}\n`;
+                    }
+                    if (ctx.places) {
+                        worldContextSection += `\n--- WORLD PLACES ---\n${JSON.stringify(ctx.places, null, 2)}\n`;
+                    }
+                    if (ctx.factions || ctx.organizations) {
+                        worldContextSection += `\n--- FACTIONS & ORGANIZATIONS ---\n${JSON.stringify(ctx.factions || ctx.organizations, null, 2)}\n`;
+                    }
+                    if (ctx.religions || ctx.deities) {
+                        worldContextSection += `\n--- RELIGIONS & DEITIES ---\n${JSON.stringify(ctx.religions || ctx.deities, null, 2)}\n`;
+                    }
+                    if (ctx.history || ctx.lore) {
+                        worldContextSection += `\n--- WORLD HISTORY & LORE ---\n${JSON.stringify(ctx.history || ctx.lore, null, 2)}\n`;
+                    }
+                }
 
-"name", "race", "gender", "alignment" (e.g., "Chaotic Neutral"), "deity" (optional), "description", "backstory", "class" (e.g., "Fighter"), "level" (number).
+                prompt = `You are a fantasy world generator for a Pathfinder 1st Edition campaign. Generate NPCs that fit naturally within the established world lore and the specified location. ${nameConstraint}
+
+Use the WORLD CONTEXT below to ensure NPCs have appropriate:
+- Names that fit the local culture/region
+- Alignments and deities that match local religions
+- Affiliations with relevant factions or organizations  
+- Backstories that reference world events or locations
+
+Respond ONLY with a valid JSON array of objects. Each object must have:
+
+"name", "race", "gender", "alignment" (e.g., "Chaotic Neutral"), "deity" (optional, from world religions if appropriate), "description", "backstory" (reference world lore where appropriate), "class" (e.g., "Fighter"), "level" (number).
 "hitDice" (e.g., "d10" - appropriate for their class).
 "baseAttackBonus" (number - appropriate for their class/level).
 "baseStats": object with Str, Dex, Con, Int, Wis, Cha (values 3-18).
@@ -52,7 +84,10 @@ For example: {"description": "The creature is blinded...", "modifiers": {"AC": {
 "magicItems": array of strings (magic gear).
 "spells": object where keys are spell levels ("0", "1", etc.) and values are arrays of spell names. ONLY include this field if the character's class grants spellcasting. ONLY include spell levels the character can currently cast based on their class and level.
 "spellSlots": object where keys are spell levels ("1", "2", etc.) and values are the number of slots per day. ONLY include this field if the character's class grants spellcasting.
-\n\nUser Request: "${query}"\n\nContext:\n${JSON.stringify(options.codex)}`;
+
+--- USER REQUEST ---
+"${query}"
+${worldContextSection}`;
                 break;
 
             default:

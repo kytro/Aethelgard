@@ -213,15 +213,29 @@ export class NpcGeneratorComponent {
 
         try {
             const codexData = this.codex();
-            const places = codexData ? codexData['Places'] : null;
+
+            // Build broader world context from multiple codex sections
+            const worldContext: any = {
+                userContext: this.npcGenContext,
+                targetPath: this.npcGenGroupName // Where the NPCs will be placed
+            };
+
+            // Include key world-building sections if they exist
+            if (codexData) {
+                if (codexData['Places']) worldContext.places = codexData['Places'];
+                if (codexData['Factions']) worldContext.factions = codexData['Factions'];
+                if (codexData['Organizations']) worldContext.organizations = codexData['Organizations'];
+                if (codexData['History']) worldContext.history = codexData['History'];
+                if (codexData['Lore']) worldContext.lore = codexData['Lore'];
+                if (codexData['Religions']) worldContext.religions = codexData['Religions'];
+                if (codexData['Deities']) worldContext.deities = codexData['Deities'];
+                if (codexData['People']) worldContext.existingPeople = codexData['People'];
+            }
 
             const npcs = await lastValueFrom(this.http.post<GeneratedNpc[]>('/codex/api/dm-toolkit-ai/generate-npcs', {
                 query: this.npcGenQuery,
                 options: {
-                    codex: {
-                        userContext: this.npcGenContext,
-                        worldPlaces: places
-                    },
+                    codex: worldContext,
                     existingEntityNames: this.existingEntityNames()
                 }
             }));
