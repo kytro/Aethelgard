@@ -249,4 +249,175 @@ describe('CodexComponent', () => {
             req.flush({});
         });
     });
+
+    describe('AI Complete Feature', () => {
+        const MOCK_AI_PREVIEW = {
+            entityId: 'ent-goblin-001',
+            entityName: 'Goblin Grunt',
+            additions: {
+                skills: { 'Perception': 4, 'Acrobatics': 2 },
+                equipment: ['eq-dagger'],
+                spells: { '0': ['sp-light'] },
+                spellSlots: { '0': 3 },
+                feats: ['Weapon Finesse'],
+                notes: 'Added basic class skills for a warrior.'
+            },
+            original: {
+                skills: { 'Stealth': 6 },
+                equipment: ['eq-shortsword'],
+                spells: { '0': ['sp-daze'] },
+                spellSlots: {}
+            }
+        };
+
+        beforeEach(async () => {
+            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
+            httpMock.expectOne('api/admin/collections/rules_pf1e').flush(MOCK_RULES_CACHE);
+            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([
+                ...MOCK_EQUIPMENT_CACHE,
+                { _id: 'eq-dagger', name: 'Dagger', description: 'A small blade.', cost: '2gp', weight: '1lb' }
+            ]);
+            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([
+                ...MOCK_SPELLS_CACHE,
+                { _id: 'sp-light', name: 'Light', description: 'Creates light.' }
+            ]);
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            // Set up linked entity - this triggers an effect that fetches linked details
+            component.linkedEntities.set([JSON.parse(JSON.stringify(MOCK_ENTITY))]);
+            fixture.detectChanges();
+
+            // Handle the get-linked-details request triggered by the linkedEntities effect
+            const detailsReq = httpMock.expectOne('api/codex/get-linked-details');
+            detailsReq.flush({
+                rules: MOCK_RULES_CACHE,
+                equipment: MOCK_EQUIPMENT_CACHE,
+                spells: MOCK_SPELLS_CACHE
+            });
+            await fixture.whenStable();
+        });
+
+        it('should request AI complete and set loading state', async () => {
+            const entity = component.linkedEntities()[0];
+
+            // Start the request (don't await yet)
+            const requestPromise = component.requestAiComplete(entity);
+
+            // Check loading state is set immediately
+            expect(component.aiCompleteLoading()).toBe(true);
+            expect(component.aiCompletingEntityId()).toBe(entity._id);
+
+            // Handle the API request
+            const req = httpMock.expectOne('api/codex/ai-complete');
+            expect(req.request.method).toBe('POST');
+            expect(req.request.body.entityId).toBe(entity._id);
+            req.flush(MOCK_AI_PREVIEW);
+
+            await requestPromise;
+            await fixture.whenStable();
+
+            // Verify loading is complete and preview is set
+            expect(component.aiCompleteLoading()).toBe(false);
+            expect(component.aiCompletePreview()).toEqual(MOCK_AI_PREVIEW);
+        });
+
+        it('should handle AI complete API errors gracefully', async () => {
+            const entity = component.linkedEntities()[0];
+
+            const requestPromise = component.requestAiComplete(entity);
+
+            const req = httpMock.expectOne('api/codex/ai-complete');
+            req.flush({ error: 'AI service unavailable' }, { status: 500, statusText: 'Server Error' });
+
+            await requestPromise;
+            await fixture.whenStable();
+
+            expect(component.aiCompleteLoading()).toBe(false);
+            expect(component.aiCompletePreview()).toBeNull();
+            // The error message could be the API error or the fallback
+            expect(component.error()).toBeTruthy();
+        });
+
+        it('should apply AI suggestions to entity', async () => {
+            const entity = component.linkedEntities()[0];
+            component.aiCompletePreview.set(MOCK_AI_PREVIEW);
+            component.aiCompletingEntityId.set(entity._id);
+
+            component.applyAiComplete();
+
+            // Check skills were added
+            expect(entity['baseStats'].skills['Perception']).toBe(4);
+            expect(entity['baseStats'].skills['Acrobatics']).toBe(2);
+            // Original skill should still exist
+            expect(entity['baseStats'].skills['Stealth']).toBe(6);
+
+            // Check equipment was added
+            expect(entity.equipment).toContain('eq-dagger');
+            expect(entity.equipment).toContain('eq-shortsword'); // Original
+
+            // Check spells were added
+            expect(entity.spells!['0']).toContain('sp-light');
+            expect(entity.spells!['0']).toContain('sp-daze'); // Original
+
+            // Check spell slots were added
+            expect(entity['spell_slots']['0']).toBe(3);
+
+            // Check entity is marked as modified
+            expect(component.modifiedEntities().has(entity._id)).toBe(true);
+
+            // Check preview was cleared
+            expect(component.aiCompletePreview()).toBeNull();
+            expect(component.aiCompletingEntityId()).toBeNull();
+        });
+
+        it('should cancel AI complete and clear preview', () => {
+            component.aiCompletePreview.set(MOCK_AI_PREVIEW);
+            component.aiCompletingEntityId.set('ent-goblin-001');
+
+            component.cancelAiComplete();
+
+            expect(component.aiCompletePreview()).toBeNull();
+            expect(component.aiCompletingEntityId()).toBeNull();
+        });
+
+        it('should return typed preview skills', () => {
+            component.aiCompletePreview.set(MOCK_AI_PREVIEW);
+
+            const skills = component.getPreviewSkills();
+
+            expect(skills).toEqual([
+                { name: 'Perception', value: 4 },
+                { name: 'Acrobatics', value: 2 }
+            ]);
+        });
+
+        it('should return empty array when no preview', () => {
+            component.aiCompletePreview.set(null);
+
+            expect(component.getPreviewSkills()).toEqual([]);
+            expect(component.getPreviewSpellLevels()).toEqual([]);
+            expect(component.getPreviewSpellSlots()).toEqual([]);
+        });
+
+        it('should return typed preview spell levels', () => {
+            component.aiCompletePreview.set(MOCK_AI_PREVIEW);
+
+            const spellLevels = component.getPreviewSpellLevels();
+
+            expect(spellLevels).toEqual([
+                { level: '0', spellIds: ['sp-light'] }
+            ]);
+        });
+
+        it('should return typed preview spell slots', () => {
+            component.aiCompletePreview.set(MOCK_AI_PREVIEW);
+
+            const spellSlots = component.getPreviewSpellSlots();
+
+            expect(spellSlots).toEqual([
+                { level: '0', slots: 3 }
+            ]);
+        });
+    });
 });

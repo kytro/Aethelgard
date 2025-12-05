@@ -171,8 +171,25 @@
           @for(entity of linkedEntities(); track entity._id) {
           <div class="mb-6 bg-gray-900/50 p-4 rounded-xl border-2 border-yellow-500/50 shadow-2xl shadow-yellow-500/10">
             <div class="bg-black/20 p-4 rounded-lg">
-              <h4 class="font-bold text-lg mb-3 text-white" [attr.contenteditable]="isEditMode()"
-                (blur)="handleEntityUpdate(entity, 'name', $event)">{{ entity.name }}</h4>
+              <div class="flex items-center justify-between mb-3">
+                <h4 class="font-bold text-lg text-white" [attr.contenteditable]="isEditMode()"
+                  (blur)="handleEntityUpdate(entity, 'name', $event)">{{ entity.name }}</h4>
+                <button (click)="requestAiComplete(entity)"
+                  [disabled]="aiCompleteLoading() && aiCompletingEntityId() === entity._id"
+                  class="bg-purple-600 hover:bg-purple-700 disabled:bg-purple-800 disabled:cursor-wait text-white text-sm font-bold py-1.5 px-3 rounded-lg transition-colors flex items-center gap-2">
+                  @if(aiCompleteLoading() && aiCompletingEntityId() === entity._id) {
+                  <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                    </path>
+                  </svg>
+                  <span>Analyzing...</span>
+                  } @else {
+                  <span>🤖 AI Complete</span>
+                  }
+                </button>
+              </div>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 <p><strong class="font-semibold text-gray-400">Class:</strong> <span
                     [attr.contenteditable]="isEditMode()"
@@ -432,6 +449,133 @@
                   </div>
                 </div>
               </div>
+
+              @if(aiCompletePreview() && aiCompletingEntityId() === entity._id) {
+              <div class="mt-4 bg-purple-900/30 border border-purple-500/50 rounded-lg p-4">
+                <div class="flex items-center justify-between mb-3">
+                  <h5 class="text-purple-400 font-bold flex items-center gap-2">
+                    <span>🤖</span> AI Suggestions Preview
+                  </h5>
+                  <div class="flex gap-2">
+                    <button (click)="applyAiComplete()"
+                      class="bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-1.5 px-4 rounded-lg transition-colors">
+                      ✓ Apply All
+                    </button>
+                    <button (click)="cancelAiComplete()"
+                      class="bg-gray-600 hover:bg-gray-700 text-white text-sm font-bold py-1.5 px-4 rounded-lg transition-colors">
+                      ✕ Cancel
+                    </button>
+                  </div>
+                </div>
+
+                @if(aiCompletePreview().additions.notes) {
+                <p class="text-gray-400 text-sm mb-4 italic">{{ aiCompletePreview().additions.notes }}</p>
+                }
+
+                <div class="space-y-3">
+                  @if(aiCompletePreview().additions.baseStats) {
+                  <div class="bg-black/20 p-3 rounded-lg">
+                    <h6 class="text-yellow-400 font-semibold text-sm mb-2">+ Core Stats Determined</h6>
+                    <div class="grid grid-cols-2 gap-2">
+                      @if(aiCompletePreview().additions.baseStats.class) {
+                      <span class="text-yellow-300 text-sm bg-yellow-900/30 px-2 py-1 rounded">
+                        <strong>Class:</strong> {{ aiCompletePreview().additions.baseStats.class }}
+                      </span>
+                      }
+                      @if(aiCompletePreview().additions.baseStats.level) {
+                      <span class="text-yellow-300 text-sm bg-yellow-900/30 px-2 py-1 rounded">
+                        <strong>Level:</strong> {{ aiCompletePreview().additions.baseStats.level }}
+                      </span>
+                      }
+                      @if(aiCompletePreview().additions.baseStats.alignment) {
+                      <span class="text-yellow-300 text-sm bg-yellow-900/30 px-2 py-1 rounded">
+                        <strong>Alignment:</strong> {{ aiCompletePreview().additions.baseStats.alignment }}
+                      </span>
+                      }
+                      @if(aiCompletePreview().additions.baseStats.race) {
+                      <span class="text-yellow-300 text-sm bg-yellow-900/30 px-2 py-1 rounded">
+                        <strong>Race:</strong> {{ aiCompletePreview().additions.baseStats.race }}
+                      </span>
+                      }
+                    </div>
+                    @if(aiCompletePreview().additions.baseStatsReasoning) {
+                    <p class="text-gray-500 text-xs mt-2 italic">{{ aiCompletePreview().additions.baseStatsReasoning }}
+                    </p>
+                    }
+                  </div>
+                  }
+                  @if(getPreviewSkills().length > 0) {
+                  <div class="bg-black/20 p-3 rounded-lg">
+                    <h6 class="text-cyan-400 font-semibold text-sm mb-2">+ Skills to Add</h6>
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      @for(skill of getPreviewSkills(); track skill.name) {
+                      <span class="text-cyan-300 text-sm bg-cyan-900/30 px-2 py-1 rounded">
+                        {{ skill.name }}: {{ skill.value >= 0 ? '+' : '' }}{{ skill.value }}
+                      </span>
+                      }
+                    </div>
+                  </div>
+                  }
+
+                  @if(aiCompletePreview().additions.equipment?.length > 0) {
+                  <div class="bg-black/20 p-3 rounded-lg">
+                    <h6 class="text-green-400 font-semibold text-sm mb-2">+ Equipment to Add</h6>
+                    <div class="flex flex-wrap gap-2">
+                      @for(equipId of aiCompletePreview().additions.equipment; track equipId) {
+                      <span class="text-green-300 text-sm bg-green-900/30 px-2 py-1 rounded">
+                        {{ equipmentCache().get(equipId)?.name || equipId }}
+                      </span>
+                      }
+                    </div>
+                  </div>
+                  }
+
+                  @if(getPreviewSpellLevels().length > 0) {
+                  <div class="bg-black/20 p-3 rounded-lg">
+                    <h6 class="text-purple-400 font-semibold text-sm mb-2">+ Spells to Add</h6>
+                    @for(level of getPreviewSpellLevels(); track level.level) {
+                    <div class="mb-2">
+                      <span class="text-gray-400 text-xs">Level {{ level.level }}:</span>
+                      <div class="flex flex-wrap gap-1 mt-1">
+                        @for(spellId of level.spellIds; track spellId) {
+                        <span class="text-purple-300 text-sm bg-purple-900/30 px-2 py-1 rounded">
+                          {{ spellsCache().get(spellId)?.name || spellId }}
+                        </span>
+                        }
+                      </div>
+                    </div>
+                    }
+                  </div>
+                  }
+
+                  @if(getPreviewSpellSlots().length > 0) {
+                  <div class="bg-black/20 p-3 rounded-lg">
+                    <h6 class="text-amber-400 font-semibold text-sm mb-2">+ Spell Slots to Add</h6>
+                    <div class="flex flex-wrap gap-2">
+                      @for(slot of getPreviewSpellSlots(); track slot.level) {
+                      <span class="text-amber-300 text-sm bg-amber-900/30 px-2 py-1 rounded">
+                        Level {{ slot.level }}: {{ slot.slots }}/day
+                      </span>
+                      }
+                    </div>
+                  </div>
+                  }
+
+                  @if(aiCompletePreview().additions.feats?.length > 0) {
+                  <div class="bg-black/20 p-3 rounded-lg">
+                    <h6 class="text-indigo-400 font-semibold text-sm mb-2">+ Feats Suggested</h6>
+                    <div class="flex flex-wrap gap-2">
+                      @for(feat of aiCompletePreview().additions.feats; track feat) {
+                      <span class="text-indigo-300 text-sm bg-indigo-900/30 px-2 py-1 rounded">{{ feat }}</span>
+                      }
+                    </div>
+                    <p class="text-gray-500 text-xs mt-2 italic">Note: Feats need to be manually linked to Rules
+                      collection</p>
+                  </div>
+                  }
+                </div>
+              </div>
+              }
             </div>
           </div>
           }

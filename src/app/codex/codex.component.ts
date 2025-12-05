@@ -1,5 +1,5 @@
 import { Component, signal, inject, computed, effect, OnInit, ViewChild, ElementRef } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { CommonModule, KeyValuePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
 import { MapViewerComponent } from './map-viewer/map-viewer.component';
@@ -28,7 +28,7 @@ interface TooltipContent { title: string; description: string; }
 @Component({
   selector: 'app-codex',
   standalone: true,
-  imports: [CommonModule, MapViewerComponent],
+  imports: [CommonModule, MapViewerComponent, KeyValuePipe],
   templateUrl: './codex.component.html',
   styleUrls: ['./codex.component.css'],
   styles: [`
@@ -133,6 +133,11 @@ export class CodexComponent implements OnInit {
   spellsCache = signal<Map<string, Pf1eSpell>>(new Map());
   tooltipContent = signal<TooltipContent | null>(null);
   tooltipPosition = signal({ top: '0px', left: '0px' });
+
+  // AI Complete state
+  aiCompleteLoading = signal<boolean>(false);
+  aiCompletePreview = signal<any>(null);
+  aiCompletingEntityId = signal<string | null>(null);
 
   currentView = computed(() => {
     const data = this.codexData();
@@ -949,5 +954,122 @@ export class CodexComponent implements OnInit {
 
   hideTooltip() {
     this.tooltipContent.set(null);
+  }
+
+  // --- AI Complete Methods ---
+  async requestAiComplete(entity: Pf1eEntity) {
+    this.aiCompleteLoading.set(true);
+    this.aiCompletingEntityId.set(entity._id);
+    this.aiCompletePreview.set(null);
+
+    try {
+      const response = await lastValueFrom(
+        this.http.post<any>('api/codex/ai-complete', { entityId: entity._id })
+      );
+      this.aiCompletePreview.set(response);
+    } catch (err: any) {
+      console.error('AI Complete failed:', err);
+      this.error.set(err.error?.error || 'AI Complete failed. Please try again.');
+      this.aiCompletingEntityId.set(null);
+    } finally {
+      this.aiCompleteLoading.set(false);
+    }
+  }
+
+  async applyAiComplete() {
+    const preview = this.aiCompletePreview();
+    if (!preview) return;
+
+    const entity = this.linkedEntities().find(e => e._id === preview.entityId);
+    if (!entity) return;
+
+    const additions = preview.additions;
+
+    // Apply baseStats (class, level, alignment, race)
+    if (additions.baseStats) {
+      if (!entity['baseStats']) entity['baseStats'] = {};
+      if (additions.baseStats.class) {
+        entity['baseStats']['class'] = additions.baseStats.class;
+      }
+      if (additions.baseStats.level) {
+        entity['baseStats']['level'] = additions.baseStats.level;
+      }
+      if (additions.baseStats.alignment) {
+        entity['baseStats']['alignment'] = additions.baseStats.alignment;
+      }
+      if (additions.baseStats.race) {
+        entity['baseStats']['race'] = additions.baseStats.race;
+      }
+    }
+
+    // Apply skill additions
+    if (additions.skills) {
+      if (!entity['baseStats']) entity['baseStats'] = {};
+      if (!entity['baseStats']['skills']) entity['baseStats']['skills'] = {};
+      for (const [name, value] of Object.entries(additions.skills)) {
+        entity['baseStats']['skills'][name] = value;
+      }
+    }
+
+    // Apply equipment additions
+    if (additions.equipment?.length > 0) {
+      if (!entity.equipment) entity.equipment = [];
+      entity.equipment.push(...additions.equipment);
+    }
+
+    // Apply spell additions
+    if (additions.spells) {
+      if (!entity.spells) entity.spells = {};
+      for (const [level, spellIds] of Object.entries(additions.spells)) {
+        if (!entity.spells[level]) entity.spells[level] = [];
+        entity.spells[level].push(...(spellIds as string[]));
+      }
+    }
+
+    // Apply spell slots
+    if (additions.spellSlots) {
+      if (!entity['spell_slots']) entity['spell_slots'] = {};
+      for (const [level, slots] of Object.entries(additions.spellSlots)) {
+        entity['spell_slots'][level] = slots as number;
+      }
+    }
+
+    // Update view immediately
+    this.linkedEntities.set([...this.linkedEntities()]);
+
+    // Save directly to database
+    try {
+      await lastValueFrom(this.http.put(`api/codex/entities/${entity._id}`, entity));
+      console.log('[AI Complete] Entity saved successfully');
+    } catch (err) {
+      console.error('[AI Complete] Failed to save entity', err);
+      this.error.set('Failed to save AI suggestions.');
+    }
+
+    // Clear preview
+    this.cancelAiComplete();
+  }
+
+  cancelAiComplete() {
+    this.aiCompletePreview.set(null);
+    this.aiCompletingEntityId.set(null);
+  }
+
+  getPreviewSkills(): { name: string, value: number }[] {
+    const preview = this.aiCompletePreview();
+    if (!preview?.additions?.skills) return [];
+    return Object.entries(preview.additions.skills).map(([name, value]) => ({ name, value: value as number }));
+  }
+
+  getPreviewSpellLevels(): { level: string, spellIds: string[] }[] {
+    const preview = this.aiCompletePreview();
+    if (!preview?.additions?.spells) return [];
+    return Object.entries(preview.additions.spells).map(([level, spellIds]) => ({ level, spellIds: spellIds as string[] }));
+  }
+
+  getPreviewSpellSlots(): { level: string, slots: number }[] {
+    const preview = this.aiCompletePreview();
+    if (!preview?.additions?.spellSlots) return [];
+    return Object.entries(preview.additions.spellSlots).map(([level, slots]) => ({ level, slots: slots as number }));
   }
 }
