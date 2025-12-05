@@ -488,43 +488,51 @@ ${spellNames.slice(0, 100).join(', ')}${spellNames.length > 100 ? '... and more'
 AVAILABLE EQUIPMENT IN DATABASE (use these exact names):
 ${equipmentNames.slice(0, 100).join(', ')}${equipmentNames.length > 100 ? '... and more' : ''}
 
-PATHFINDER 1E RULES - BE CONSERVATIVE:
-1. SKILLS: Only add essential class skills that are MISSING. Don't add every possible skill.
-   - Calculate bonus as: ranks + ability modifier + 3 (class skill)
-   - Only add 3-5 key skills maximum
+PATHFINDER 1E RULES - COMPREHENSIVE BUT ACCURATE:
 
-2. FEATS: Only suggest feats the entity is MISSING and QUALIFIES for.
-   - Characters get 1 feat at level 1, then 1 every odd level (3, 5, 7...).
-   - Fighters get bonus combat feats. Dragons get feats by HD.
-   - Don't suggest feats the entity already has (Existing Feats above).
-   - Maximum 2-3 new feats unless entity has none.
+FIRST, examine what this entity ALREADY HAS:
+- Existing Skills: ${JSON.stringify(existingSkills)}
+- Existing Feats: ${existingFeats.length} feat(s)
+- Existing Spells: ${Object.keys(existingSpells).length > 0 ? JSON.stringify(existingSpells) : 'None'}
+- Existing Equipment: ${existingEquipment.length} item(s)
 
-3. SPELLS: Only add if ${entityClass} is a spellcaster AND entity is missing spells.
-   - If entity already has many spells, don't add more.
-   - Only use spells from the AVAILABLE SPELLS list.
+CREATURE TYPE RULES:
+- If ${race} is a Dragon, Outsider, Aberration, or Monster: They do NOT use equipment. They have natural weapons, innate abilities, and possibly spell-like abilities.
+- If ${race} is Humanoid (Human, Elf, Dwarf, etc.): They DO use equipment appropriate for their class/level.
+- Dragons get feats based on Hit Dice (1 at 1 HD, then every 3 HD).
+- Humanoid NPCs get feats at level 1, then every odd level.
 
-4. EQUIPMENT: Be very minimal. Dragons and monsters DON'T NEED equipment.
-   - Only suggest for humanoid NPCs who need gear.
-   - Maximum 2-3 essential items, not a full loadout.
+SKILL RULES FOR ${entityClass}:
+- Calculate bonus = ranks (up to ${level || 1}) + ability mod + 3 (class skill)
+- Add ALL appropriate class skills the entity is MISSING
+- Include racial skill bonuses where applicable
 
-5. SPELL SLOTS: Only add if explicitly needed. Follow PF1e spell progression.
+FEAT RULES:
+- Only add feats the entity QUALIFIES for (check prerequisites)
+- Add ALL feats the entity should have for their HD/level that are MISSING
+- Don't duplicate existing feats
 
-6. SPECIAL ABILITIES: Only if the entity is clearly missing core racial/class abilities.
+SPELL RULES (if ${entityClass} is a caster):
+- Add spells appropriate for the casting class and level
+- Use spells from AVAILABLE SPELLS list
+- Include proper spell slots for the class/level
 
-IMPORTANT: This dragon/creature likely already has most of what it needs. BE MINIMAL.
+EQUIPMENT RULES (only for humanoids):
+- Suggest level-appropriate gear from AVAILABLE EQUIPMENT
+- Include weapons, armor, and adventuring gear as appropriate
 
-RETURN FORMAT - Respond with ONLY a valid JSON object, no markdown:
+RETURN FORMAT - Respond with ONLY a valid JSON object:
 {
-  "skills": { "SkillName": bonusValue },
-  "equipment": ["item1"],
-  "spells": { "0": ["spell1"] },
-  "spellSlots": { "1": 3 },
+  "skills": { "SkillName": bonusValue, ... },
+  "equipment": ["equipment_name"],
+  "spells": { "0": ["cantrip"], "1": ["spell1", "spell2"] },
+  "spellSlots": { "1": 3, "2": 2 },
   "feats": ["Feat Name"],
   "specialAbilities": ["Ability"],
-  "notes": "Brief explanation"
+  "notes": "Explanation of what was added and why, verifying against PF1e rules"
 }
 
-Only include sections with NEW additions. Prefer fewer suggestions over comprehensive ones.`;
+Only include sections where you are adding NEW items. Verify everything against PF1e rules.`;
 
       // 6. Call Phase 2 Gemini API
       let aiSuggestions = {};
