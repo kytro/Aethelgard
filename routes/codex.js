@@ -488,27 +488,43 @@ ${spellNames.slice(0, 100).join(', ')}${spellNames.length > 100 ? '... and more'
 AVAILABLE EQUIPMENT IN DATABASE (use these exact names):
 ${equipmentNames.slice(0, 100).join(', ')}${equipmentNames.length > 100 ? '... and more' : ''}
 
-PATHFINDER 1E RULES TO FOLLOW:
-1. Class Skills: Add appropriate class skills for ${entityClass} with bonuses based on level ${level || 1} + ability modifier + 3 (class skill bonus)
-2. Skill Points: Calculate based on class (Fighter 2+Int, Rogue 8+Int, Wizard 2+Int, Cleric 2+Int, etc.) per level
-3. Feats: Characters get 1 feat at level 1, then 1 every odd level (3, 5, 7, etc.). Fighters get bonus combat feats.
-4. Spells: Only add if ${entityClass} is a spellcaster. Use spells from the AVAILABLE SPELLS list only.
-5. Spell Slots: Follow PF1e spell progression tables for ${entityClass}.
-6. Equipment: Suggest level-appropriate gear from the AVAILABLE EQUIPMENT list.
+PATHFINDER 1E RULES - BE CONSERVATIVE:
+1. SKILLS: Only add essential class skills that are MISSING. Don't add every possible skill.
+   - Calculate bonus as: ranks + ability modifier + 3 (class skill)
+   - Only add 3-5 key skills maximum
+
+2. FEATS: Only suggest feats the entity is MISSING and QUALIFIES for.
+   - Characters get 1 feat at level 1, then 1 every odd level (3, 5, 7...).
+   - Fighters get bonus combat feats. Dragons get feats by HD.
+   - Don't suggest feats the entity already has (Existing Feats above).
+   - Maximum 2-3 new feats unless entity has none.
+
+3. SPELLS: Only add if ${entityClass} is a spellcaster AND entity is missing spells.
+   - If entity already has many spells, don't add more.
+   - Only use spells from the AVAILABLE SPELLS list.
+
+4. EQUIPMENT: Be very minimal. Dragons and monsters DON'T NEED equipment.
+   - Only suggest for humanoid NPCs who need gear.
+   - Maximum 2-3 essential items, not a full loadout.
+
+5. SPELL SLOTS: Only add if explicitly needed. Follow PF1e spell progression.
+
+6. SPECIAL ABILITIES: Only if the entity is clearly missing core racial/class abilities.
+
+IMPORTANT: This dragon/creature likely already has most of what it needs. BE MINIMAL.
 
 RETURN FORMAT - Respond with ONLY a valid JSON object, no markdown:
 {
-  "skills": { "SkillName": bonusValue, ... },
-  "equipment": ["equipment_name_1", "equipment_name_2"],
-  "spells": { "0": ["cantrip1"], "1": ["spell1", "spell2"] },
-  "spellSlots": { "1": 3, "2": 2 },
-  "feats": ["Feat Name 1", "Feat Name 2"],
-  "specialAbilities": ["Ability 1"],
-  "notes": "Brief explanation of what was added and why"
+  "skills": { "SkillName": bonusValue },
+  "equipment": ["item1"],
+  "spells": { "0": ["spell1"] },
+  "spellSlots": { "1": 3 },
+  "feats": ["Feat Name"],
+  "specialAbilities": ["Ability"],
+  "notes": "Brief explanation"
 }
 
-Only include non-empty sections. For skills, only add skills that are NOT already in the entity.
-For equipment/spells, only suggest from the AVAILABLE lists provided.`;
+Only include sections with NEW additions. Prefer fewer suggestions over comprehensive ones.`;
 
       // 6. Call Phase 2 Gemini API
       let aiSuggestions = {};
