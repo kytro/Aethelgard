@@ -22,12 +22,18 @@
         class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors">
         Save Changes
       </button>
-      }
-      <button (click)="isEditMode.set(!isEditMode())"
-        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
-        {{ isEditMode() ? 'Cancel' : 'Edit Mode' }}
+      <button (click)="cancelEditMode()"
+        class="bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded transition-colors">
+        Cancel
       </button>
+      } @else {
+      <button (click)="enterEditMode()"
+        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors">
+        Edit Mode
+      </button>
+      }
     </div>
+
   </div>
 
   <div class="flex flex-1 overflow-hidden">
@@ -117,11 +123,19 @@
           }
           }
           @if(isEditMode()) {
-          <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+          <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+            <button (click)="moveBlock(block, 'up')" [disabled]="$index === 0"
+              class="bg-gray-600 hover:bg-gray-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+              title="Move up">&#9650;</button>
+            <button (click)="moveBlock(block, 'down')" [disabled]="$index === content.length - 1"
+              class="bg-gray-600 hover:bg-gray-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
+              title="Move down">&#9660;</button>
             <button (click)="removeBlock(block)"
-              class="bg-red-600 text-white rounded-full w-6 h-6 flex items-center justify-center">&times;</button>
+              class="bg-red-600 hover:bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center"
+              title="Remove">&times;</button>
           </div>
           }
+
         </div>
         }
 

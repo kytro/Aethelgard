@@ -117,14 +117,17 @@ export class CodexComponent implements OnInit {
   http = inject(HttpClient);
 
   private codexData = signal<CodexEntry[] | null>(null);
+  private codexDataBackup = signal<CodexEntry[] | null>(null);  // Backup for cancel
   currentPath = signal<string[]>([]);
   isLoading = signal<boolean>(true);
-error = signal<string | null>(null);
+  error = signal<string | null>(null);
   isEditMode = signal<boolean>(false);
   @ViewChild('mapUpload') mapUploadInput!: ElementRef<HTMLInputElement>;
-  
+
   linkedEntities = signal<Pf1eEntity[]>([]);
+  private linkedEntitiesBackup = signal<Pf1eEntity[]>([]);  // Backup for cancel
   modifiedEntities = signal<Set<string>>(new Set());
+
   rulesCache = signal<Map<string, Pf1eRule>>(new Map());
   equipmentCache = signal<Map<string, Pf1eEquipment>>(new Map());
   spellsCache = signal<Map<string, Pf1eSpell>>(new Map());
@@ -141,9 +144,9 @@ error = signal<string | null>(null);
     const content = currentNode?.content || null;
 
     // Find child entries
-    const children = data.filter((entry: CodexEntry) => 
-        entry.path_components.length === path.length + 1 &&
-        path.every((p, i) => entry.path_components[i] === p)
+    const children = data.filter((entry: CodexEntry) =>
+      entry.path_components.length === path.length + 1 &&
+      path.every((p, i) => entry.path_components[i] === p)
     );
 
     // Determine the active entry if the current node is a leaf
@@ -166,12 +169,12 @@ error = signal<string | null>(null);
       // At the root, the codexData itself is the category node
       return this.codexData();
     }
-  
+
     const currentNode = this.getNode(path);
-  
+
     // Check if the current node is a leaf (has content). If so, the parent is the category.
     const isLeafNode = currentNode && Array.isArray(currentNode.content);
-  
+
     if (isLeafNode) {
       return this.getNode(path.slice(0, -1));
     } else {
@@ -187,15 +190,15 @@ error = signal<string | null>(null);
 
     // Check from current node up to the root
     for (let i = checkPath.length; i >= 0; i--) {
-        const node = this.getNode(checkPath.slice(0, i));
-        if (typeof node?.enableCompletionTracking === 'boolean') {
-            return node.enableCompletionTracking;
-        }
+      const node = this.getNode(checkPath.slice(0, i));
+      if (typeof node?.enableCompletionTracking === 'boolean') {
+        return node.enableCompletionTracking;
+      }
     }
 
     return false; // Default to false if not set anywhere
   });
-  
+
   // --- NEW ---
   isCombatManagerSourceActive = computed(() => {
     const path = this.currentPath();
@@ -204,10 +207,10 @@ error = signal<string | null>(null);
 
     // Check from current node up to the root
     for (let i = checkPath.length; i >= 0; i--) {
-        const node = this.getNode(checkPath.slice(0, i));
-        if (typeof node?.isCombatManagerSource === 'boolean') {
-            return node.isCombatManagerSource;
-        }
+      const node = this.getNode(checkPath.slice(0, i));
+      if (typeof node?.isCombatManagerSource === 'boolean') {
+        return node.isCombatManagerSource;
+      }
     }
     return false; // Default to false if not set anywhere
   });
@@ -216,7 +219,7 @@ error = signal<string | null>(null);
     effect(async () => {
       const path = this.currentPath();
       const currentNode = this.getNode(path);
-      
+
       // Always reset when the current node changes.
       this.linkedEntities.set([]);
 
@@ -245,21 +248,21 @@ error = signal<string | null>(null);
         await this.fetchLinkedEntities(Array.from(entityIds));
       }
     });
-    
+
     effect(async () => {
-        const entities = this.linkedEntities();
-        if (entities.length > 0) {
-            const ruleIds = entities.flatMap(e => e.rules || []);
-            const equipmentIds = entities.flatMap(e => e.equipment || []);
-            const spellIds = entities.flatMap(e => {
-              if (!e.spells || typeof e.spells !== 'object') return [];
-              return Object.values(e.spells).flat();
-            }).filter(id => id); // Get all spell IDs from all levels
-            
-            if (ruleIds.length > 0 || equipmentIds.length > 0 || spellIds.length > 0) {
-                await this.fetchLinkedDetails(ruleIds, equipmentIds, spellIds);
-            }
+      const entities = this.linkedEntities();
+      if (entities.length > 0) {
+        const ruleIds = entities.flatMap(e => e.rules || []);
+        const equipmentIds = entities.flatMap(e => e.equipment || []);
+        const spellIds = entities.flatMap(e => {
+          if (!e.spells || typeof e.spells !== 'object') return [];
+          return Object.values(e.spells).flat();
+        }).filter(id => id); // Get all spell IDs from all levels
+
+        if (ruleIds.length > 0 || equipmentIds.length > 0 || spellIds.length > 0) {
+          await this.fetchLinkedDetails(ruleIds, equipmentIds, spellIds);
         }
+      }
     });
   }
 
@@ -284,25 +287,25 @@ error = signal<string | null>(null);
 
   async loadCaches() {
     try {
-        const [rules, equipment, spells] = await Promise.all([
-            lastValueFrom(this.http.get<any[]>('api/admin/collections/rules_pf1e')),
-            lastValueFrom(this.http.get<any[]>('api/admin/collections/equipment_pf1e')),
-            lastValueFrom(this.http.get<any[]>('api/admin/collections/spells_pf1e'))
-        ]);
-        this.rulesCache.set(new Map(rules.map(item => [item._id, item])));
-        this.equipmentCache.set(new Map(equipment.map(item => [item._id, item])));
-        this.spellsCache.set(new Map(spells.map(item => [item._id, item])));
+      const [rules, equipment, spells] = await Promise.all([
+        lastValueFrom(this.http.get<any[]>('api/admin/collections/rules_pf1e')),
+        lastValueFrom(this.http.get<any[]>('api/admin/collections/equipment_pf1e')),
+        lastValueFrom(this.http.get<any[]>('api/admin/collections/spells_pf1e'))
+      ]);
+      this.rulesCache.set(new Map(rules.map(item => [item._id, item])));
+      this.equipmentCache.set(new Map(equipment.map(item => [item._id, item])));
+      this.spellsCache.set(new Map(spells.map(item => [item._id, item])));
     } catch (err: any) {
-        console.error("Failed to load caches for tooltips", err);
-        this.error.set('Failed to load reference data (rules/equipment/spells). Tooltips may not work correctly.');
+      console.error("Failed to load caches for tooltips", err);
+      this.error.set('Failed to load reference data (rules/equipment/spells). Tooltips may not work correctly.');
     }
   }
-  
+
   async fetchLinkedEntities(entityIds: string[]) {
     try {
       const entities = await lastValueFrom(this.http.post<any[]>('api/codex/get-entities', { entityIds }));
       this.linkedEntities.set(entities);
-    } catch(err) {
+    } catch (err) {
       console.error("Failed to fetch linked entities", err);
       this.linkedEntities.set([]);
     }
@@ -310,14 +313,14 @@ error = signal<string | null>(null);
 
   async fetchLinkedDetails(ruleIds: string[], equipmentIds: string[], spellIds: string[]) {
     try {
-        const details = await lastValueFrom(this.http.post<any>('api/codex/get-linked-details', { ruleIds, equipmentIds, spellIds }));
-        this.rulesCache.update(cache => new Map([...cache, ...details.rules.map((item: any) => [item._id, item])]));
-        this.equipmentCache.update(cache => new Map([...cache, ...details.equipment.map((item: any) => [item._id, item])]));
-        if (details.spells) {
-            this.spellsCache.update(cache => new Map([...cache, ...details.spells.map((item: any) => [item._id, item])]));
-        }
+      const details = await lastValueFrom(this.http.post<any>('api/codex/get-linked-details', { ruleIds, equipmentIds, spellIds }));
+      this.rulesCache.update(cache => new Map([...cache, ...details.rules.map((item: any) => [item._id, item])]));
+      this.equipmentCache.update(cache => new Map([...cache, ...details.equipment.map((item: any) => [item._id, item])]));
+      if (details.spells) {
+        this.spellsCache.update(cache => new Map([...cache, ...details.spells.map((item: any) => [item._id, item])]));
+      }
     } catch (err) {
-        console.error("Failed to fetch linked details", err);
+      console.error("Failed to fetch linked details", err);
     }
   }
 
@@ -329,11 +332,32 @@ error = signal<string | null>(null);
   goHome() { this.currentPath.set([]); }
 
   // --- Editing ---
+  enterEditMode() {
+    // Create deep copy backups before entering edit mode
+    this.codexDataBackup.set(JSON.parse(JSON.stringify(this.codexData())));
+    this.linkedEntitiesBackup.set(JSON.parse(JSON.stringify(this.linkedEntities())));
+    this.isEditMode.set(true);
+  }
+
+  cancelEditMode() {
+    // Restore from backups
+    const backup = this.codexDataBackup();
+    if (backup) {
+      this.codexData.set(backup);
+    }
+    const entitiesBackup = this.linkedEntitiesBackup();
+    if (entitiesBackup) {
+      this.linkedEntities.set(entitiesBackup);
+    }
+    this.modifiedEntities.set(new Set());
+    this.isEditMode.set(false);
+  }
+
   async saveChanges() {
     if (!this.isEditMode()) return;
     try {
       await lastValueFrom(this.http.put('api/codex/data', this.codexData()));
-      
+
       const modifiedEntityIds = this.modifiedEntities();
       if (modifiedEntityIds.size > 0) {
         const entitiesToSave = this.linkedEntities().filter(e => modifiedEntityIds.has(e._id));
@@ -343,6 +367,9 @@ error = signal<string | null>(null);
         this.modifiedEntities.set(new Set());
       }
 
+      // Clear backups after successful save
+      this.codexDataBackup.set(null);
+      this.linkedEntitiesBackup.set([]);
       this.isEditMode.set(false);
     } catch (err) {
       console.error("Failed to save data", err);
@@ -353,7 +380,7 @@ error = signal<string | null>(null);
   handleContentUpdate(block: any, field: string, event: any) {
     if (!this.isEditMode()) return;
     const newText = event.target.innerText;
-    
+
     const data = this.codexData();
     const path = this.currentPath();
     const node = this.getNode(path);
@@ -396,9 +423,9 @@ error = signal<string | null>(null);
     const path = this.currentPath();
     const node = this.getNode(path);
     if (node && node.content) {
-        // This is not efficient, but it's the simplest way to ensure the change is detected.
-        row[header] = newText;
-        this.codexData.set(JSON.parse(JSON.stringify(data))); // Deep copy to trigger change detection
+      // This is not efficient, but it's the simplest way to ensure the change is detected.
+      row[header] = newText;
+      this.codexData.set(JSON.parse(JSON.stringify(data))); // Deep copy to trigger change detection
     }
   }
 
@@ -411,10 +438,10 @@ error = signal<string | null>(null);
     for (let i = 0; i < keys.length - 1; i++) {
       // FIX: Case-insensitive traversal to find the right nested object
       let nextKey = Object.keys(current).find(k => k.toLowerCase() === keys[i].toLowerCase()) || keys[i];
-      if (!current[nextKey]) current[nextKey] = {}; 
+      if (!current[nextKey]) current[nextKey] = {};
       current = current[nextKey];
     }
-    
+
     // FIX: Case-insensitive lookup for the final property to overwrite existing keys regardless of case
     const finalKeyReq = keys[keys.length - 1];
     const actualKey = Object.keys(current).find(k => k.toLowerCase() === finalKeyReq.toLowerCase()) || finalKeyReq;
@@ -429,15 +456,15 @@ error = signal<string | null>(null);
    */
   handleNumericEntityUpdate(entity: Pf1eEntity, field: string, event: any) {
     if (!this.isEditMode()) return;
-    
+
     // 1. Clean input: aggressive regex to find the first valid integer, ignoring extra text like "(-1)"
     const text = event.target.innerText;
     const match = text.match(/-?\d+/);
-    
+
     if (!match) {
-        // If invalid, revert UI to old value
-        event.target.innerText = this.getDeepValue(entity, field) ?? ''; 
-        return;
+      // If invalid, revert UI to old value
+      event.target.innerText = this.getDeepValue(entity, field) ?? '';
+      return;
     }
 
     // 2. Parse to number
@@ -447,32 +474,32 @@ error = signal<string | null>(null);
     const keys = field.split('.');
     let current = entity as any;
     for (let i = 0; i < keys.length - 1; i++) {
-        // FIX: Case-insensitive traversal
-        let nextKey = Object.keys(current).find(k => k.toLowerCase() === keys[i].toLowerCase()) || keys[i];
-        if (!current[nextKey]) current[nextKey] = {}; 
-        current = current[nextKey];
+      // FIX: Case-insensitive traversal
+      let nextKey = Object.keys(current).find(k => k.toLowerCase() === keys[i].toLowerCase()) || keys[i];
+      if (!current[nextKey]) current[nextKey] = {};
+      current = current[nextKey];
     }
 
     // FIX: Case-insensitive setting of the final key
     const finalKeyReq = keys[keys.length - 1];
     const actualKey = Object.keys(current).find(k => k.toLowerCase() === finalKeyReq.toLowerCase()) || finalKeyReq;
-    
+
     current[actualKey] = numVal;
 
     // 4. Update UI to show strictly the number (removes any pasted junk like modifiers)
     if (event.target.innerText !== String(numVal)) {
-        event.target.innerText = String(numVal);
+      event.target.innerText = String(numVal);
     }
 
     // 5. Mark as modified to ensure it gets sent to backend on 'Save Changes'
     this.modifiedEntities.update(set => set.add(entity._id));
     // Force trigger view update to recalculate modifiers immediately
-    this.linkedEntities.set([...this.linkedEntities()]); 
+    this.linkedEntities.set([...this.linkedEntities()]);
   }
 
   // Helper to get deep value for reverting invalid inputs
   private getDeepValue(obj: any, path: string): any {
-      return path.split('.').reduce((acc, part) => acc && acc[part], obj);
+    return path.split('.').reduce((acc, part) => acc && acc[part], obj);
   }
 
   addEntitySkill(entity: Pf1eEntity, nameInput: HTMLInputElement, valueInput: HTMLInputElement) {
@@ -481,8 +508,8 @@ error = signal<string | null>(null);
     const val = parseInt(valueInput.value.trim(), 10);
 
     if (!name || isNaN(val)) {
-        alert('Please enter a valid skill name and numeric value.');
-        return;
+      alert('Please enter a valid skill name and numeric value.');
+      return;
     }
 
     if (!entity['baseStats']) entity['baseStats'] = {};
@@ -500,9 +527,9 @@ error = signal<string | null>(null);
   removeEntitySkill(entity: Pf1eEntity, skillName: string) {
     if (!this.isEditMode() || !entity['baseStats']?.skills) return;
     if (confirm(`Remove skill '${skillName}'?`)) {
-        delete entity['baseStats']['skills'][skillName];
-        this.modifiedEntities.update(set => set.add(entity._id));
-        this.linkedEntities.set([...this.linkedEntities()]);
+      delete entity['baseStats']['skills'][skillName];
+      this.modifiedEntities.update(set => set.add(entity._id));
+      this.linkedEntities.set([...this.linkedEntities()]);
     }
   }
 
@@ -518,9 +545,9 @@ error = signal<string | null>(null);
   }
 
   private getLevelZeroSpellNomenclature(entity: Pf1eEntity): string {
-    const classString = (this.getCaseInsensitiveProp(entity, 'class') 
-                        || this.getCaseInsensitiveProp(entity['baseStats'], 'class') 
-                        || '').toLowerCase();
+    const classString = (this.getCaseInsensitiveProp(entity, 'class')
+      || this.getCaseInsensitiveProp(entity['baseStats'], 'class')
+      || '').toLowerCase();
 
     if (!classString) return 'Orisons';
 
@@ -533,7 +560,7 @@ error = signal<string | null>(null);
     if (divineClasses.some(c => classString.includes(c))) {
       return 'Orisons';
     }
-    
+
     return 'Orisons'; // Default
   }
 
@@ -558,7 +585,7 @@ error = signal<string | null>(null);
     if (!entity['spell_slots']) {
       entity['spell_slots'] = {};
     }
-    
+
     if (!isNaN(newValue) && newValue > 0) {
       entity['spell_slots'][level] = newValue;
     } else {
@@ -684,40 +711,40 @@ error = signal<string | null>(null);
   }
 
   async handleMapUpload(event: any) {
-      const file = event.target.files[0];
-      if (!file) return;
-  
-      const formData = new FormData();
-      formData.append('mapFile', file);
-  
-      this.isLoading.set(true);
-      try {
-          // Upload the file
-          const res = await lastValueFrom(this.http.post<any>('/codex/api/media/upload', formData));
-  
-          // Add the new map block with the returned URL
-          const data = this.codexData();
-          const path = this.currentPath();
-          const node = this.getNode(path);
-          if (node) {
-              if (!node.content) node.content = [];
-              node.content.push({
-                  type: 'map',
-                  imageUrl: res.url,
-                  caption: file.name.replace(/\.[^/.]+$/, "") // Default caption is filename without extension
-              });
-              // Trigger change detection by creating a new object reference
-              this.codexData.set(JSON.parse(JSON.stringify(data)));
-          }
-          this.saveChanges();
-      } catch (e) {
-          console.error('Map upload failed', e);
-          alert('Failed to upload map image.');
-      } finally {
-          this.isLoading.set(false);
-          // Clear input so same file can be selected again if needed
-          event.target.value = '';
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('mapFile', file);
+
+    this.isLoading.set(true);
+    try {
+      // Upload the file
+      const res = await lastValueFrom(this.http.post<any>('/codex/api/media/upload', formData));
+
+      // Add the new map block with the returned URL
+      const data = this.codexData();
+      const path = this.currentPath();
+      const node = this.getNode(path);
+      if (node) {
+        if (!node.content) node.content = [];
+        node.content.push({
+          type: 'map',
+          imageUrl: res.url,
+          caption: file.name.replace(/\.[^/.]+$/, "") // Default caption is filename without extension
+        });
+        // Trigger change detection by creating a new object reference
+        this.codexData.set(JSON.parse(JSON.stringify(data)));
       }
+      this.saveChanges();
+    } catch (e) {
+      console.error('Map upload failed', e);
+      alert('Failed to upload map image.');
+    } finally {
+      this.isLoading.set(false);
+      // Clear input so same file can be selected again if needed
+      event.target.value = '';
+    }
   }
 
   removeBlock(block: any) {
@@ -732,6 +759,24 @@ error = signal<string | null>(null);
       }
     }
   }
+
+  moveBlock(block: any, direction: 'up' | 'down') {
+    const data = this.codexData();
+    const path = this.currentPath();
+    const node = this.getNode(path);
+    if (node && node.content) {
+      const blockIndex = node.content.findIndex((b: any) => b === block);
+      if (blockIndex === -1) return;
+
+      const newIndex = direction === 'up' ? blockIndex - 1 : blockIndex + 1;
+      if (newIndex < 0 || newIndex >= node.content.length) return;
+
+      // Swap blocks
+      [node.content[blockIndex], node.content[newIndex]] = [node.content[newIndex], node.content[blockIndex]];
+      this.codexData.set(JSON.parse(JSON.stringify(data)));
+    }
+  }
+
 
   addRow(block: any) {
     const newRow: any = {};
@@ -760,7 +805,7 @@ error = signal<string | null>(null);
       this.codexData.set(JSON.parse(JSON.stringify(data)));
     }
   }
-  
+
   public getNode(path: string[]): any {
     // Find the entry in codex_entries with matching path_components
     const entries = this.codexData();
@@ -886,17 +931,17 @@ error = signal<string | null>(null);
     const itemType = type || (cleanedItemId.startsWith('eq_') ? 'equipment' : cleanedItemId.startsWith('sp_') ? 'spell' : 'rule');
 
     if (itemType === 'equipment') {
-        const item = this.equipmentCache().get(cleanedItemId);
-        title = item?.name || this.formatName(cleanedItemId.replace('eq_', ''));
-        if(item) description = `${item.description}\nCost: ${item.cost} | Weight: ${item.weight}`;
+      const item = this.equipmentCache().get(cleanedItemId);
+      title = item?.name || this.formatName(cleanedItemId.replace('eq_', ''));
+      if (item) description = `${item.description}\nCost: ${item.cost} | Weight: ${item.weight}`;
     } else if (itemType === 'spell') {
-        const item = this.spellsCache().get(cleanedItemId);
-        title = item?.name || this.formatName(cleanedItemId.replace('sp_', ''));
-        if (item) description = item.description;
+      const item = this.spellsCache().get(cleanedItemId);
+      title = item?.name || this.formatName(cleanedItemId.replace('sp_', ''));
+      if (item) description = item.description;
     } else { // rule
-        const item = this.rulesCache().get(cleanedItemId);
-        title = item?.name || this.formatName(cleanedItemId.replace(/^(feat_|sa_|cond_)/, ''));
-        if (item) description = item.description;
+      const item = this.rulesCache().get(cleanedItemId);
+      title = item?.name || this.formatName(cleanedItemId.replace(/^(feat_|sa_|cond_)/, ''));
+      if (item) description = item.description;
     }
     this.tooltipContent.set({ title, description });
     this.tooltipPosition.set({ top: `${event.clientY + 15}px`, left: `${event.clientX + 15}px` });
