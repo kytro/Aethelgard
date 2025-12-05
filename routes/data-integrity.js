@@ -1993,6 +1993,71 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         }
     });
 
+    // -------------------------------------------------------------
+    // ROUTE 18: FIX MISSING CODEX PARENT ENTRIES
+    // -------------------------------------------------------------
+    router.post('/fix-codex-parents', async (req, res) => {
+        if (!db) return res.status(503).json({ error: 'Database not ready' });
+        console.log(`[FIX CODEX PARENTS] Job started.`);
+
+        try {
+            // 1. Get all codex entries
+            const allEntries = await db.collection('codex_entries').find({}).toArray();
+            console.log(`[FIX CODEX PARENTS] Found ${allEntries.length} codex entries.`);
+
+            // 2. Build a set of all existing paths
+            const existingPaths = new Set();
+            for (const entry of allEntries) {
+                if (entry.path_components && Array.isArray(entry.path_components)) {
+                    existingPaths.add(JSON.stringify(entry.path_components));
+                }
+            }
+
+            // 3. Find all required parent paths
+            const missingParents = [];
+            for (const entry of allEntries) {
+                if (!entry.path_components || !Array.isArray(entry.path_components)) continue;
+
+                // For each entry, check if all parent paths exist
+                for (let i = 1; i < entry.path_components.length; i++) {
+                    const parentPath = entry.path_components.slice(0, i);
+                    const parentPathKey = JSON.stringify(parentPath);
+
+                    if (!existingPaths.has(parentPathKey)) {
+                        // This parent doesn't exist, add it
+                        existingPaths.add(parentPathKey); // Mark as "will exist" to avoid duplicates
+                        missingParents.push({
+                            name: parentPath[parentPath.length - 1],
+                            path_components: parentPath
+                        });
+                    }
+                }
+            }
+
+            // 4. Insert missing parents
+            if (missingParents.length > 0) {
+                console.log(`[FIX CODEX PARENTS] Found ${missingParents.length} missing parent entries:`);
+                for (const parent of missingParents) {
+                    console.log(`  - ${parent.path_components.join('/')}`);
+                }
+
+                await db.collection('codex_entries').insertMany(missingParents);
+                console.log(`[FIX CODEX PARENTS] Created ${missingParents.length} missing parent entries.`);
+            } else {
+                console.log(`[FIX CODEX PARENTS] No missing parent entries found.`);
+            }
+
+            res.status(200).json({
+                message: `Fix complete. Created ${missingParents.length} missing parent entries.`,
+                created: missingParents.map(p => p.path_components.join('/'))
+            });
+
+        } catch (e) {
+            console.error('[FIX CODEX PARENTS] Fatal error:', e);
+            res.status(500).json({ error: e.message || 'An unknown error occurred.' });
+        }
+    });
+
     return router;
 };
 // [NEW, FIXED FUNCTION]
