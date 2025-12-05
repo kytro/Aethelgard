@@ -25,6 +25,8 @@ interface GeneratedNpc {
     feats?: string[];
     specialAbilities?: string[];
     spellSlots?: { [level: string]: number };
+    size?: string;
+    bab?: number;
     cmb?: number;
     cmd?: number;
     dr?: string;
@@ -331,11 +333,19 @@ export class NpcGeneratorComponent {
                 if (npc.level) entity.baseStats.Level = npc.level;
                 if (npc.gender) entity.baseStats.Gender = npc.gender;
                 if (npc.alignment) entity.baseStats.Alignment = npc.alignment;
+                if (npc.size) entity.baseStats.size = npc.size;
                 if (npc.hitDice) entity.baseStats.HitDice = npc.hitDice;
-                if (npc.baseAttackBonus !== undefined) entity.baseStats.BaseAttackBonus = npc.baseAttackBonus;
+                if (npc.bab !== undefined) entity.baseStats.combat = entity.baseStats.combat || {};
+                if (npc.bab !== undefined) entity.baseStats.combat.bab = npc.bab;
                 if (npc.spellSlots) entity.spellSlots = npc.spellSlots;
-                if (npc.cmb !== undefined) entity.baseStats.CMB = npc.cmb;
-                if (npc.cmd !== undefined) entity.baseStats.CMD = npc.cmd;
+                if (npc.cmb !== undefined) {
+                    entity.baseStats.combat = entity.baseStats.combat || {};
+                    entity.baseStats.combat.cmb = npc.cmb;
+                }
+                if (npc.cmd !== undefined) {
+                    entity.baseStats.combat = entity.baseStats.combat || {};
+                    entity.baseStats.combat.cmd = npc.cmd;
+                }
                 if (npc.dr) entity.baseStats.DR = npc.dr;
                 if (npc.sr) entity.baseStats.SR = npc.sr;
                 if (npc.resist) entity.baseStats.Resist = npc.resist;

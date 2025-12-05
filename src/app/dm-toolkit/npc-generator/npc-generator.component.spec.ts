@@ -130,5 +130,42 @@ describe('NpcGeneratorComponent', () => {
             expect(component.npcSaveSuccessMessage()).toContain('1 NPCs saved');
             expect(component.lastGeneratedNpcs().length).toBe(0);
         });
+
+        it('should save size and combat stats (bab, cmb, cmd) to entity baseStats', async () => {
+            // Set up NPC with combat stats
+            component.lastGeneratedNpcs.set([
+                createMockGeneratedNpc({
+                    name: 'Warrior',
+                    size: 'Large',
+                    bab: 5,
+                    cmb: 8,
+                    cmd: 20
+                })
+            ]);
+            component.lastGeneratedGroupName.set('People/TestCombat');
+            await fixture.whenStable();
+
+            component.handleSaveNpcsToCodex();
+
+            const entityReq = httpMock.expectOne('/codex/api/admin/collections/entities_pf1e');
+            expect(entityReq.request.method).toBe('POST');
+
+            const body = entityReq.request.body;
+            expect(body.baseStats.size).toBe('Large');
+            expect(body.baseStats.combat).toBeDefined();
+            expect(body.baseStats.combat.bab).toBe(5);
+            expect(body.baseStats.combat.cmb).toBe(8);
+            expect(body.baseStats.combat.cmd).toBe(20);
+
+            entityReq.flush({ insertedId: 'combat-test-entity' });
+
+            await fixture.whenStable();
+
+            const codexReq = httpMock.expectOne('/codex/api/codex/data');
+            codexReq.flush({});
+
+            await fixture.whenStable();
+            expect(component.npcSaveSuccessMessage()).toContain('1 NPCs saved');
+        });
     });
 });

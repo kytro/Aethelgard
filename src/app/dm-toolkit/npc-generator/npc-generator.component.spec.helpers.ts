@@ -19,10 +19,14 @@ export function createMockGeneratedNpc(overrides = {}) {
     return {
         name: 'Test NPC',
         race: 'Human',
+        size: 'Medium',
         description: 'A test npc.',
         baseStats: { Str: 10, Dex: 12, Con: 10, Int: 10, Wis: 10, Cha: 10 },
         class: 'Fighter',
         level: 1,
+        bab: 1,
+        cmb: 1,
+        cmd: 13,
         equipment: ['Sword'],
         skills: { 'Perception': 5 },
         ...overrides

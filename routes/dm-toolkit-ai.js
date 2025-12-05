@@ -73,9 +73,11 @@ Use the WORLD CONTEXT below to ensure NPCs have appropriate:
 
 Respond ONLY with a valid JSON array of objects. Each object must have:
 
-"name", "race", "gender", "alignment" (e.g., "Chaotic Neutral"), "deity" (optional, from world religions if appropriate), "description", "backstory" (reference world lore where appropriate), "class" (e.g., "Fighter"), "level" (number).
+"name", "race", "gender", "size" (e.g., "Small", "Medium", "Large" - based on race), "alignment" (e.g., "Chaotic Neutral"), "deity" (optional, from world religions if appropriate), "description", "backstory" (reference world lore where appropriate), "class" (e.g., "Fighter"), "level" (number).
 "hitDice" (e.g., "d10" - appropriate for their class).
-"baseAttackBonus" (number - appropriate for their class/level).
+"bab" (Base Attack Bonus - number, calculate based on class and level: full BAB classes like Fighter get level, 3/4 BAB like Cleric get level*0.75, 1/2 BAB like Wizard get level*0.5).
+"cmb" (Combat Maneuver Bonus - number, calculate as BAB + Str modifier + size modifier).
+"cmd" (Combat Maneuver Defense - number, calculate as 10 + BAB + Str modifier + Dex modifier + size modifier).
 "baseStats": object with Str, Dex, Con, Int, Wis, Cha (values 3-18).
 "skills": object where keys are skill names and values are total bonuses (number).
 "feats": array of strings (standard PF1e feat names).
