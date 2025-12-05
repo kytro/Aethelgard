@@ -344,7 +344,20 @@ describe('CodexComponent', () => {
             component.aiCompletePreview.set(MOCK_AI_PREVIEW);
             component.aiCompletingEntityId.set(entity._id);
 
-            component.applyAiComplete();
+            // applyAiComplete is now async and makes an HTTP call
+            const applyPromise = component.applyAiComplete();
+
+            // Handle the PUT request to save the entity
+            const saveReq = httpMock.expectOne(`api/codex/entities/${entity._id}`);
+            expect(saveReq.request.method).toBe('PUT');
+            saveReq.flush({});
+
+            await applyPromise;
+            await fixture.whenStable();
+
+            // Handle any triggered get-linked-details request from updating linkedEntities
+            const pendingReqs = httpMock.match('api/codex/get-linked-details');
+            pendingReqs.forEach(req => req.flush({ rules: [], equipment: [], spells: [] }));
 
             // Check skills were added
             expect(entity['baseStats'].skills['Perception']).toBe(4);
@@ -362,9 +375,6 @@ describe('CodexComponent', () => {
 
             // Check spell slots were added
             expect(entity['spell_slots']['0']).toBe(3);
-
-            // Check entity is marked as modified
-            expect(component.modifiedEntities().has(entity._id)).toBe(true);
 
             // Check preview was cleared
             expect(component.aiCompletePreview()).toBeNull();
