@@ -103,6 +103,79 @@ Return ONLY a valid JSON object with these fields:
     }
   }
 
+  /**
+   * Fetches race data from the database, or creates it via AI if not found.
+   * @param {string} raceName - The name of the race (e.g., "Dwarf", "Elf", "Human")
+   * @returns {Promise<object|null>} - The race data object with traits, or null if failed
+   */
+  async function fetchOrCreateRace(raceName) {
+    if (!raceName || raceName === 'Unknown') return null;
+
+    try {
+      // Normalize race name for lookup
+      const normalizedName = raceName.trim();
+
+      // Check if race exists in database
+      let raceData = await db.collection('races_pf1e').findOne({
+        name: { $regex: new RegExp(`^${normalizedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+      });
+
+      if (raceData) {
+        return raceData;
+      }
+
+      // Not found - fetch from AI
+      console.log(`[Race Lookup] Race "${raceName}" not in database, fetching from AI...`);
+
+      const prompt = `You are a Pathfinder 1e rules expert. Provide complete racial data for:
+"${raceName}"
+
+Return ONLY a valid JSON object with these fields:
+{
+  "name": "Race Name",
+  "type": "Humanoid/Outsider/Dragon/etc",
+  "size": "Medium/Small/Large/etc",
+  "speed": 30,
+  "vision": "normal/low-light/darkvision 60ft/etc",
+  "abilityModifiers": { "Str": 0, "Dex": 0, "Con": 2, "Int": 0, "Wis": 2, "Cha": -2 },
+  "racialTraits": [
+    { "name": "Hardy", "description": "+2 racial bonus on saving throws against poison, spells, and spell-like abilities" },
+    { "name": "Darkvision", "description": "Can see in the dark up to 60 feet" }
+  ],
+  "immunities": [],
+  "resistances": [],
+  "languages": ["Common", "Dwarven"],
+  "description": "Brief race description"
+}
+
+IMPORTANT: Be accurate to PF1e Core Rulebook rules. Include all standard racial traits.`;
+
+      const aiRaceData = await generateContent(db, prompt, { jsonMode: true });
+
+      if (!aiRaceData || !aiRaceData.name) {
+        console.log(`[Race Lookup] Failed to get AI data for race: ${raceName}`);
+        return null;
+      }
+
+      // Generate ID and store
+      const raceId = 'race-' + aiRaceData.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      aiRaceData._id = raceId;
+
+      await db.collection('races_pf1e').updateOne(
+        { _id: raceId },
+        { $set: aiRaceData },
+        { upsert: true }
+      );
+
+      console.log(`[Race Lookup] Added race to database: ${aiRaceData.name} (${raceId})`);
+      return aiRaceData;
+
+    } catch (error) {
+      console.error(`[Race Lookup] Error fetching race "${raceName}":`, error.message);
+      return null;
+    }
+  }
+
   // This endpoint fetches all codex entries.
   router.get('/data', async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database not ready' });
@@ -563,6 +636,29 @@ Only include fields that were marked as "(NEEDS ...)" above.`;
         }
       }
 
+      // Fetch race data from database (or create if missing)
+      const raceData = await fetchOrCreateRace(race);
+      let racialTraitsSection = '';
+      if (raceData) {
+        const traitsList = (raceData.racialTraits || [])
+          .map(t => `  - ${t.name}: ${t.description}`)
+          .join('\n');
+        const immunitiesList = (raceData.immunities || []).length > 0
+          ? `\nImmunities: ${raceData.immunities.join(', ')}`
+          : '';
+        const resistancesList = (raceData.resistances || []).length > 0
+          ? `\nResistances: ${raceData.resistances.join(', ')}`
+          : '';
+        racialTraitsSection = `
+RACIAL TRAITS FOR ${raceData.name.toUpperCase()} (from database - use these EXACTLY):
+${traitsList}${immunitiesList}${resistancesList}
+Vision: ${raceData.vision || 'normal'}
+- Only add these racial traits to specialAbilities if they are MISSING`;
+      } else {
+        racialTraitsSection = `
+RACIAL TRAITS: Unknown race "${race}" - do not add any racial traits.`;
+      }
+
       // PHASE 2: Suggest skills, feats, spells, equipment based on determined class/level
       const phase2Prompt = `You are an expert Pathfinder 1st Edition (PF1e) game master and rules expert.
 
@@ -615,6 +711,7 @@ SPELL RULES (if ${entityClass} is a caster):
 - Add spells appropriate for the casting class and level
 - Use spells from AVAILABLE SPELLS list
 - Include proper spell slots for the class/level
+${racialTraitsSection}
 
 EQUIPMENT RULES (only for humanoids):
 - Suggest level-appropriate gear from AVAILABLE EQUIPMENT

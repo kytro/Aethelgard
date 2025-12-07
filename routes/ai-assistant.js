@@ -127,7 +127,7 @@ ${existingStructurePrompt}
                 }
 
                 --- AVAILABLE COLLECTIONS ---
-                ["codex_entries", "entities_pf1e", "equipment_pf1e", "rules_pf1e", "spells_pf1e", "deities_pf1e", "hazards_pf1e", "dm_toolkit_sessions", "dm_toolkit_fights", "dm_toolkit_combatants", "settings"]
+                ["codex_entries", "entities_pf1e", "equipment_pf1e", "rules_pf1e", "spells_pf1e", "deities_pf1e", "races_pf1e", "hazards_pf1e", "dm_toolkit_sessions", "dm_toolkit_fights", "dm_toolkit_combatants", "settings"]
                 
                 User Query: ${query}
             `;

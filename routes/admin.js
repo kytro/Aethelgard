@@ -17,13 +17,15 @@ module.exports = function (db) {
             const magicItemsCount = await db.collection('magic_items_pf1e').countDocuments();
             const spellCount = await db.collection('spells_pf1e').countDocuments();
             const deityCount = await db.collection('deities_pf1e').countDocuments();
+            const raceCount = await db.collection('races_pf1e').countDocuments();
 
             res.json({
                 entityCount,
                 ruleCount,
                 itemCount: equipmentCount + magicItemsCount,
                 spellCount,
-                deityCount
+                deityCount,
+                raceCount
             });
         } catch (error) {
             console.error('Failed to fetch dashboard stats:', error);
