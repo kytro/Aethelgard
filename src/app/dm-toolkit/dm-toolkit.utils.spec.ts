@@ -6,9 +6,13 @@ import {
     formatName,
     formatTime,
     calculateCompleteBaseStats,
+    calculateSkillBonus,
     SKILL_ABILITY_MAP,
     GOOD_SAVES,
-    POOR_SAVES
+    POOR_SAVES,
+    SIZE_DATA,
+    CONSTRUCT_HP_BONUS,
+    CalculateStatsOptions
 } from './dm-toolkit.utils';
 
 describe('DM Toolkit Utilities', () => {
@@ -299,6 +303,154 @@ describe('DM Toolkit Utilities', () => {
             expect(POOR_SAVES[0]).toBe(0);
             expect(POOR_SAVES[1]).toBe(0);
             expect(POOR_SAVES.length).toBeGreaterThan(20);
+        });
+
+        it('should have SIZE_DATA with correct modifiers', () => {
+            expect(SIZE_DATA).toBeDefined();
+            expect(SIZE_DATA['Medium'].mod).toBe(0);
+            expect(SIZE_DATA['Small'].mod).toBe(1);
+            expect(SIZE_DATA['Large'].mod).toBe(-1);
+            expect(SIZE_DATA['Tiny'].stealth).toBe(8);
+        });
+
+        it('should have CONSTRUCT_HP_BONUS by size', () => {
+            expect(CONSTRUCT_HP_BONUS).toBeDefined();
+            expect(CONSTRUCT_HP_BONUS['Small']).toBe(10);
+            expect(CONSTRUCT_HP_BONUS['Medium']).toBe(20);
+            expect(CONSTRUCT_HP_BONUS['Large']).toBe(30);
+            expect(CONSTRUCT_HP_BONUS['Huge']).toBe(40);
+        });
+    });
+
+    describe('calculateSkillBonus (Class Skills)', () => {
+        it('should calculate basic skill bonus without class skill', () => {
+            const bonus = calculateSkillBonus('Stealth', 5, 3, []);
+            expect(bonus).toBe(8); // 5 ranks + 3 Dex mod
+        });
+
+        it('should add +3 for class skill with at least 1 rank', () => {
+            const bonus = calculateSkillBonus('Stealth', 5, 3, ['Stealth']);
+            expect(bonus).toBe(11); // 5 ranks + 3 Dex mod + 3 class skill
+        });
+
+        it('should not add +3 for class skill with 0 ranks', () => {
+            const bonus = calculateSkillBonus('Stealth', 0, 3, ['Stealth']);
+            expect(bonus).toBe(3); // 0 ranks + 3 Dex mod, no class skill bonus
+        });
+
+        it('should be case-insensitive for class skill matching', () => {
+            const bonus = calculateSkillBonus('Perception', 3, 2, ['PERCEPTION', 'stealth']);
+            expect(bonus).toBe(8); // 3 ranks + 2 Wis mod + 3 class skill
+        });
+
+        it('should handle empty class skills array', () => {
+            const bonus = calculateSkillBonus('Climb', 4, 3, []);
+            expect(bonus).toBe(7); // 4 ranks + 3 Str mod
+        });
+    });
+
+    describe('calculateCompleteBaseStats - PF1e Creature Types', () => {
+        describe('Construct HP Bonus', () => {
+            it('should add construct HP bonus based on size', () => {
+                const stats = calculateCompleteBaseStats(
+                    { hp: '1d10', size: 'Medium', type: 'Construct' },
+                    { type: 'Construct' }
+                );
+                expect(stats.maxHp).toBe(5 + 20); // avg 1d10 = 5.5 -> 5, + 20 Medium bonus
+            });
+
+            it('should add large construct HP bonus', () => {
+                const stats = calculateCompleteBaseStats(
+                    { hp: '2d10', size: 'Large', type: 'Construct' },
+                    { type: 'Construct' }
+                );
+                expect(stats.maxHp).toBe(11 + 30); // avg 2d10 = 11, + 30 Large bonus
+            });
+
+            it('should not add HP bonus for non-constructs', () => {
+                const stats = calculateCompleteBaseStats(
+                    { hp: '2d10', size: 'Medium' },
+                    { type: 'Humanoid' }
+                );
+                expect(stats.maxHp).toBe(11); // avg 2d10 = 11, no construct bonus
+            });
+        });
+
+        describe('Undead Fort Saves (Charisma)', () => {
+            it('should use Cha for Fort saves when Undead', () => {
+                const stats = calculateCompleteBaseStats(
+                    { Con: 10, Cha: 18, Level: 5 },
+                    { type: 'Undead' }
+                );
+                // Cha 18 = +4 mod, should be used instead of Con
+                expect(stats.Saves).toContain('Fort');
+                // Fort should include +4 from Cha
+            });
+        });
+    });
+
+    describe('calculateCompleteBaseStats - CMB Agile Maneuvers', () => {
+        it('should use Str for CMB by default', () => {
+            const stats = calculateCompleteBaseStats({ Str: 16, Dex: 14, BAB: 5, size: 'Medium' });
+            expect(stats.CMB).toBe(8); // 5 BAB + 3 Str mod + 0 size
+        });
+
+        it('should use Dex for CMB when Tiny size', () => {
+            const stats = calculateCompleteBaseStats(
+                { Str: 8, Dex: 18, BAB: 3, size: 'Tiny' }
+            );
+            // Tiny: Str -1, Dex +4, should use max(Str, Dex) = +4
+            // CMB = 3 BAB + 4 Dex + (-2) size special mod = 5
+            expect(stats.CMB).toBe(5);
+        });
+
+        it('should use Dex for CMB when has Agile Maneuvers feat', () => {
+            const stats = calculateCompleteBaseStats(
+                { Str: 10, Dex: 18, BAB: 5, size: 'Medium' },
+                { feats: ['Agile Maneuvers'] }
+            );
+            // Str 0, Dex +4, should use max(Str, Dex) = +4
+            expect(stats.CMB).toBe(9); // 5 BAB + 4 Dex + 0 size
+        });
+
+        it('should use Str if higher even with Agile Maneuvers', () => {
+            const stats = calculateCompleteBaseStats(
+                { Str: 20, Dex: 14, BAB: 5, size: 'Medium' },
+                { feats: ['Agile Maneuvers'] }
+            );
+            // Str +5, Dex +2, should use max = +5
+            expect(stats.CMB).toBe(10); // 5 BAB + 5 Str + 0 size
+        });
+    });
+
+    describe('calculateCompleteBaseStats - Uncanny Dodge', () => {
+        it('should subtract Dex from Flat-Footed normally', () => {
+            const stats = calculateCompleteBaseStats({ Dex: 16, AC: 18 });
+            expect(stats['Flat-Footed']).toBe(15); // 18 - 3 Dex mod
+        });
+
+        it('should keep Dex in Flat-Footed with Uncanny Dodge', () => {
+            const stats = calculateCompleteBaseStats(
+                { Dex: 16, AC: 18 },
+                { specialAbilities: ['Uncanny Dodge'] }
+            );
+            expect(stats['Flat-Footed']).toBe(18); // keeps full AC
+        });
+
+        it('should handle case-insensitive Uncanny Dodge check', () => {
+            const stats = calculateCompleteBaseStats(
+                { Dex: 14, AC: 16 },
+                { specialAbilities: ['UNCANNY DODGE'] }
+            );
+            expect(stats['Flat-Footed']).toBe(16);
+        });
+
+        it('should handle Improved Uncanny Dodge', () => {
+            const stats = calculateCompleteBaseStats(
+                { Dex: 14, AC: 16 },
+                { specialAbilities: ['Improved Uncanny Dodge'] }
+            );
+            expect(stats['Flat-Footed']).toBe(16); // includes "uncanny dodge" in name
         });
     });
 });

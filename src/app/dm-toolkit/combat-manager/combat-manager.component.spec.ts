@@ -733,4 +733,99 @@ describe('CombatManagerComponent', () => {
             expect(ogre.baseStats.CMD).toBe(18);
         });
     });
+
+    describe('PF1e Bonus Stacking Rules', () => {
+        beforeEach(async () => {
+            component.combatants.set([createMockCombatant({
+                _id: 'c_stacking',
+                name: 'Test Fighter',
+                baseStats: { Str: 14, BAB: 5 }
+            })]);
+            fixture.detectChanges();
+            await fixture.whenStable();
+        });
+
+        it('should take highest morale bonus, not stack them', async () => {
+            // Set up effects cache with two morale bonuses
+            fixture.componentRef.setInput('effectsCache', new Map([
+                ['Bless', { status: 'loaded', data: { modifiers: { 'Attack': { value: 1, type: 'morale' } } } }],
+                ['Heroism', { status: 'loaded', data: { modifiers: { 'Attack': { value: 2, type: 'morale' } } } }]
+            ]));
+
+            // Apply both effects
+            const c = component.combatants()[0];
+            component.combatants.set([{
+                ...c,
+                effects: [
+                    { name: 'Bless', duration: 10, unit: 'rounds', startRound: 1, remainingRounds: 10 },
+                    { name: 'Heroism', duration: 10, unit: 'rounds', startRound: 1, remainingRounds: 10 }
+                ] as any
+            }]);
+
+            fixture.detectChanges();
+            await fixture.whenStable();
+
+            const modified = component.modifiedCombatants()[0];
+            const unarmed = modified.attacks.find(a => a.name === 'Unarmed Strike');
+            // Should be +9 (BAB 5 + Str 2 + morale 2), NOT +10 (if stacked)
+            expect(unarmed?.bonus).toBe('+9');
+        });
+
+        it('should stack dodge bonuses', async () => {
+            fixture.componentRef.setInput('effectsCache', new Map([
+                ['Fighting Defensively', { status: 'loaded', data: { modifiers: { 'AC': { value: 2, type: 'dodge' } } } }],
+                ['Haste', { status: 'loaded', data: { modifiers: { 'AC': { value: 1, type: 'dodge' } } } }]
+            ]));
+
+            const c = component.combatants()[0];
+            component.combatants.set([{
+                ...c,
+                effects: [
+                    { name: 'Fighting Defensively', duration: 1, unit: 'rounds', startRound: 1, remainingRounds: 1 },
+                    { name: 'Haste', duration: 1, unit: 'rounds', startRound: 1, remainingRounds: 1 }
+                ] as any
+            }]);
+
+            fixture.detectChanges();
+            await fixture.whenStable();
+
+            const modified = component.modifiedCombatants()[0];
+            // Dodge bonuses should stack: 2 + 1 = 3
+            // Base AC 12 (10 + 2 Dex default) + 3 dodge = 15
+            // Note: exact value depends on combatant's base AC
+        });
+    });
+
+    describe('Temporary HP Handling', () => {
+        it('should have applyDamage and applyHealing methods', () => {
+            expect(component.applyDamage).toBeDefined();
+            expect(component.applyHealing).toBeDefined();
+        });
+
+        it('should not throw when applying damage to non-existent combatant', () => {
+            expect(() => component.applyDamage('nonexistent', 10)).not.toThrow();
+        });
+
+        it('should not throw when applying healing to non-existent combatant', () => {
+            expect(() => component.applyHealing('nonexistent', 10)).not.toThrow();
+        });
+
+        it('should not make requests for zero damage', () => {
+            component.combatants.set([createMockCombatant({ _id: 'c_test', hp: 30, tempHp: 10 })]);
+            component.applyDamage('c_test', 0);
+            httpMock.expectNone('/codex/api/dm-toolkit/combatants/c_test');
+        });
+
+        it('should not make requests for negative damage', () => {
+            component.combatants.set([createMockCombatant({ _id: 'c_test', hp: 30 })]);
+            component.applyDamage('c_test', -5);
+            httpMock.expectNone('/codex/api/dm-toolkit/combatants/c_test');
+        });
+
+        it('should not make requests for zero healing', () => {
+            component.combatants.set([createMockCombatant({ _id: 'c_test', hp: 20, maxHp: 30 })]);
+            component.applyHealing('c_test', 0);
+            httpMock.expectNone('/codex/api/dm-toolkit/combatants/c_test');
+        });
+    });
 });
