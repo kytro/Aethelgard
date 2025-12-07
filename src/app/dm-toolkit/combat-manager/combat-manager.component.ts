@@ -5,11 +5,12 @@ import { FormsModule } from '@angular/forms';
 import { lastValueFrom } from 'rxjs';
 import {
   formatTime, getAbilityModifierAsNumber, calculateCompleteBaseStats, getCaseInsensitiveProp,
-  formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP, SIZE_DATA
+  formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP, SIZE_DATA,
+  CONSTRUCT_HP_BONUS, calculateSkillBonus, CalculateStatsOptions
 } from '../dm-toolkit.utils';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
-interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; }
+interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; tempHp?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; }
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
@@ -628,7 +629,7 @@ export class CombatManagerComponent {
           const numVals = allMods[stat][type].filter((v): v is number => typeof v === 'number');
           stringyMods[stat].push(...allMods[stat][type].filter((v): v is string => typeof v === 'string'));
           if (numVals.length > 0) {
-            if (['dodge', 'untyped', 'penalty', 'circumstance', 'morale', 'competence'].includes(type)) finalBonuses[stat] += numVals.reduce((s, v) => s + v, 0);
+            if (['dodge', 'untyped', 'penalty', 'circumstance'].includes(type)) finalBonuses[stat] += numVals.reduce((s, v) => s + v, 0);
             else {
               const pos = numVals.filter(v => v > 0);
               const neg = numVals.filter(v => v < 0);
@@ -962,5 +963,54 @@ export class CombatManagerComponent {
     this.customEffectName = '';
     this.customEffectDuration = 3;
     this.customEffectUnit = 'rounds';
+  }
+
+  /**
+   * Apply damage to a combatant, reducing temp HP first (PF1e rules)
+   * @param combatantId - ID of the combatant
+   * @param damage - Amount of damage to apply
+   */
+  applyDamage(combatantId: string, damage: number) {
+    const c = this.combatants().find(x => x._id === combatantId);
+    if (!c || damage <= 0) return;
+
+    let remainingDamage = damage;
+    let newTempHp = c.tempHp || 0;
+    let newHp = c.hp;
+
+    // Temp HP absorbs damage first
+    if (newTempHp > 0) {
+      if (remainingDamage <= newTempHp) {
+        newTempHp -= remainingDamage;
+        remainingDamage = 0;
+      } else {
+        remainingDamage -= newTempHp;
+        newTempHp = 0;
+      }
+    }
+
+    // Remaining damage goes to HP
+    newHp -= remainingDamage;
+
+    // Update combatant (batch updates)
+    this.handleUpdateCombatant(combatantId, 'hp', newHp);
+    if (c.tempHp !== undefined || newTempHp !== (c.tempHp || 0)) {
+      this.handleUpdateCombatant(combatantId, 'tempHp', newTempHp);
+    }
+  }
+
+  /**
+   * Apply healing to a combatant (does not restore temp HP, only regular HP)
+   * @param combatantId - ID of the combatant
+   * @param healing - Amount of healing to apply
+   */
+  applyHealing(combatantId: string, healing: number) {
+    const c = this.combatants().find(x => x._id === combatantId);
+    if (!c || healing <= 0) return;
+
+    // Healing caps at maxHp
+    const maxHp = c.maxHp || c.baseStats?.maxHp || 100;
+    const newHp = Math.min(c.hp + healing, maxHp);
+    this.handleUpdateCombatant(combatantId, 'hp', newHp);
   }
 }

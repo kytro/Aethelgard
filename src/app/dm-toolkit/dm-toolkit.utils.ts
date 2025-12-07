@@ -80,7 +80,43 @@ export const SIZE_DATA: { [key: string]: any } = {
     'Colossal': { mod: -8, specialMod: 8, stealth: -16, fly: -8 }
 };
 
-export const calculateCompleteBaseStats = (baseStats: any): any => {
+// PF1e Construct bonus HP by size (replaces Con-based HP)
+export const CONSTRUCT_HP_BONUS: { [key: string]: number } = {
+    'Fine': 0, 'Diminutive': 0, 'Tiny': 0, 'Small': 10,
+    'Medium': 20, 'Large': 30, 'Huge': 40,
+    'Gargantuan': 60, 'Colossal': 80
+};
+
+/**
+ * Calculate skill bonus with class skill +3 bonus (PF1e)
+ * @param skillName - Name of the skill
+ * @param ranks - Number of skill ranks
+ * @param abilityMod - Ability modifier for this skill
+ * @param classSkills - Array of class skill names (optional)
+ * @returns Total skill bonus
+ */
+export const calculateSkillBonus = (
+    skillName: string,
+    ranks: number,
+    abilityMod: number,
+    classSkills: string[] = []
+): number => {
+    let total = ranks + abilityMod;
+    // Class skill bonus: +3 if at least 1 rank and skill is a class skill
+    if (ranks >= 1 && classSkills.some(cs =>
+        cs.toLowerCase() === skillName.toLowerCase())) {
+        total += 3;
+    }
+    return total;
+};
+
+export interface CalculateStatsOptions {
+    type?: string;              // Creature type (Undead, Construct, Humanoid, etc.)
+    feats?: string[];           // List of feat names
+    specialAbilities?: string[]; // List of special ability names
+}
+
+export const calculateCompleteBaseStats = (baseStats: any, options?: CalculateStatsOptions): any => {
     const newStats: { [key: string]: any } = { ...(baseStats || {}) };
     const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
     abilities.forEach(ability => {
@@ -95,7 +131,23 @@ export const calculateCompleteBaseStats = (baseStats: any): any => {
     const strMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Str'));
     const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Dex'));
     const conMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Con'));
+    const chaMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Cha'));
     const wisMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Wis'));
+
+    // Determine creature type for special rules
+    const creatureType = (options?.type || getCaseInsensitiveProp(newStats, 'type') || '').toLowerCase();
+    const isUndead = creatureType.includes('undead');
+    const isConstruct = creatureType.includes('construct');
+
+    // Check for special abilities
+    const specialAbilities = options?.specialAbilities || [];
+    const hasUncannyDodge = specialAbilities.some(a =>
+        a.toLowerCase().includes('uncanny dodge'));
+
+    // Check for relevant feats
+    const feats = options?.feats || [];
+    const hasAgileManeuvers = feats.some(f =>
+        f.toLowerCase().includes('agile maneuvers'));
 
     // 1. Determine Size
     let size = getCaseInsensitiveProp(newStats, 'size');
@@ -111,6 +163,9 @@ export const calculateCompleteBaseStats = (baseStats: any): any => {
     newStats['size'] = size;
     const sizeStats = SIZE_DATA[size];
 
+    // Check if Tiny or smaller (for CMB Dex rule)
+    const isTinyOrSmaller = ['Fine', 'Diminutive', 'Tiny'].includes(size);
+
     let acValue = getCaseInsensitiveProp(newStats, 'AC');
     if (typeof acValue === 'string') {
         const acMatch = acValue.match(/^(\d+)/);
@@ -124,7 +179,16 @@ export const calculateCompleteBaseStats = (baseStats: any): any => {
     // Apply defaults with Size modifiers if not present
     if (typeof getCaseInsensitiveProp(newStats, 'AC') !== 'number') newStats['AC'] = 10 + dexMod + sizeStats.mod;
     if (typeof getCaseInsensitiveProp(newStats, 'Touch') !== 'number') newStats['Touch'] = 10 + dexMod + sizeStats.mod;
-    if (typeof getCaseInsensitiveProp(newStats, 'Flat-Footed') !== 'number') newStats['Flat-Footed'] = (newStats['AC'] || 10) - dexMod;
+
+    // Flat-Footed AC with Uncanny Dodge check (PF1e fix)
+    if (typeof getCaseInsensitiveProp(newStats, 'Flat-Footed') !== 'number') {
+        if (hasUncannyDodge) {
+            // Uncanny Dodge: keep Dex bonus when flat-footed
+            newStats['Flat-Footed'] = newStats['AC'];
+        } else {
+            newStats['Flat-Footed'] = (newStats['AC'] || 10) - dexMod;
+        }
+    }
 
     if (!getCaseInsensitiveProp(newStats, 'Saves')) {
         const level = parseInt(String(getCaseInsensitiveProp(newStats, 'Level') || getCaseInsensitiveProp(newStats, 'CR') || 1), 10);
@@ -143,8 +207,11 @@ export const calculateCompleteBaseStats = (baseStats: any): any => {
         const baseRef = isRefGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
         const baseWill = isWillGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
 
+        // Undead use Cha for Fort saves, Constructs have no Fort save modifier
+        const fortMod = isUndead ? chaMod : (isConstruct ? 0 : conMod);
+
         const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
-        newStats['Saves'] = `Fort ${formatMod(baseFort + conMod)}, Ref ${formatMod(baseRef + dexMod)}, Will ${formatMod(baseWill + wisMod)}`;
+        newStats['Saves'] = `Fort ${formatMod(baseFort + fortMod)}, Ref ${formatMod(baseRef + dexMod)}, Will ${formatMod(baseWill + wisMod)}`;
     }
 
     if (!getCaseInsensitiveProp(newStats, 'Speed')) newStats['Speed'] = '30 ft.';
@@ -153,18 +220,36 @@ export const calculateCompleteBaseStats = (baseStats: any): any => {
         newStats['BAB'] = parseInt(String(getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || getCaseInsensitiveProp(newStats, 'BAB') || 0).match(/-?\d+/)?.[0] || '0', 10);
     }
 
-    if (typeof getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + strMod + sizeStats.specialMod;
+    // CMB: Tiny+ creatures or those with Agile Maneuvers can use Dex (PF1e fix)
+    const useDexForCMB = isTinyOrSmaller || hasAgileManeuvers;
+    const cmbMod = useDexForCMB ? Math.max(strMod, dexMod) : strMod;
+
+    if (typeof getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + cmbMod + sizeStats.specialMod;
     if (typeof getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + newStats['BAB'] + strMod + dexMod + sizeStats.specialMod;
 
+    // HP Calculation with creature type handling (PF1e fix)
     const hpValue = getCaseInsensitiveProp(newStats, 'hp') || getCaseInsensitiveProp(newStats, 'HP') || '1d8';
     const isDiceNotation = /^\d+d\d+/.test(String(hpValue));
     const avgHpMatch = String(hpValue).match(/^(\d+)/);
     const diceInParenMatch = String(hpValue).match(/\((\s*\d+d\d+[+-]?\s*\d*\s*)\)/);
 
-    if (isDiceNotation) newStats['maxHp'] = calculateAverageHp(String(hpValue));
-    else if (avgHpMatch) newStats['maxHp'] = parseInt(avgHpMatch[1], 10);
-    else if (diceInParenMatch) newStats['maxHp'] = calculateAverageHp(diceInParenMatch[1]);
-    else newStats['maxHp'] = calculateAverageHp(String(hpValue));
+    let baseMaxHp: number;
+    if (isDiceNotation) baseMaxHp = calculateAverageHp(String(hpValue));
+    else if (avgHpMatch) baseMaxHp = parseInt(avgHpMatch[1], 10);
+    else if (diceInParenMatch) baseMaxHp = calculateAverageHp(diceInParenMatch[1]);
+    else baseMaxHp = calculateAverageHp(String(hpValue));
+
+    // Apply creature type HP modifiers
+    if (isConstruct) {
+        // Constructs get bonus HP based on size instead of Con
+        newStats['maxHp'] = baseMaxHp + (CONSTRUCT_HP_BONUS[size] || 0);
+    } else if (isUndead) {
+        // Note: For Undead, the HP from dice already uses Cha in the source data
+        // We just ensure maxHp is set correctly
+        newStats['maxHp'] = baseMaxHp;
+    } else {
+        newStats['maxHp'] = baseMaxHp;
+    }
 
     if (isNaN(newStats['maxHp']) || newStats['maxHp'] <= 0) newStats['maxHp'] = 10;
 
