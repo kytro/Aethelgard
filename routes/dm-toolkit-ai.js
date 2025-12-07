@@ -106,18 +106,62 @@ Generate accurate PF1e stats. Return a JSON object:
   "resist": "string like 'fire 10' or null",
   "immune": "string like 'fire, sleep' or null",
   "skills": { "Perception": number, "Stealth": number, etc. },
+  "classSkills": ["Perception", "Stealth", "Climb"] - list of class skill names,
   "feats": ["Feat Name", "Another Feat"],
   "specialAbilities": ["Ability 1", "Ability 2"],
-  "equipment": ["Longsword", "Chain mail"],
-  "magicItems": ["Ring of Protection +1"],
+  "equipment": [
+    { 
+      "name": "Longsword", 
+      "type": "weapon", 
+      "weight": 4,
+      "properties": { "damage_m": "1d8", "critical": "19-20/x2", "range": null }
+    },
+    {
+      "name": "Full Plate",
+      "type": "armor",
+      "weight": 50,
+      "maxDex": 1,
+      "checkPenalty": -6,
+      "armorBonus": 9
+    },
+    {
+      "name": "Heavy Shield",
+      "type": "shield", 
+      "weight": 15,
+      "shieldBonus": 2,
+      "checkPenalty": -2
+    }
+  ],
+  "magicItems": [
+    {
+      "name": "Ring of Protection +1",
+      "type": "ring",
+      "deflectionBonus": 1
+    },
+    {
+      "name": "+1 Longsword",
+      "type": "weapon",
+      "weight": 4,
+      "properties": { "damage_m": "1d8", "critical": "19-20/x2" }
+    }
+  ],
   "spells": { "0": ["Detect Magic"], "1": ["Magic Missile"] } or null if non-caster,
   "spellSlots": { "0": 4, "1": 3 } or null if non-caster
 }
 
-Rules: 
+Equipment Rules:
+- Weapons need: name, type:"weapon", weight, properties (damage_m, critical, range for ranged, light:true for light weapons)
+- Armor needs: name, type:"armor", weight, maxDex, checkPenalty, armorBonus
+- Shields need: name, type:"shield", weight, shieldBonus, checkPenalty
+- Magic items with AC bonuses specify: deflectionBonus, naturalArmor, etc.
+- TWF builds: include two melee weapons, mark light weapons with properties.light:true
+- Include weight for encumbrance calculation
+
+Class Rules: 
 - Dragons get high Str/Con/Cha, d12 HD, natural armor, often DR/SR
-- Fighters get full BAB progression
-- Wizards get 1/2 BAB, spells
+- Fighters get full BAB progression, heavy armor proficiency
+- Rogues get light armor, TWF is common, check for Weapon Finesse
+- Wizards get 1/2 BAB, spells, no armor
 - Calculate HP = HD count × (die average + Con mod)
 - Include appropriate class skills
 

@@ -5,6 +5,24 @@ import { FormsModule } from '@angular/forms';
 import { lastValueFrom } from 'rxjs';
 import { calculateCompleteBaseStats } from '../dm-toolkit.utils';
 
+// Equipment can be strings (old format) or objects (new PF1e format)
+interface EquipmentItem {
+    name: string;
+    type?: 'weapon' | 'armor' | 'shield' | 'ring' | 'wondrous' | 'potion' | 'other';
+    weight?: number;
+    maxDex?: number;
+    checkPenalty?: number;
+    armorBonus?: number;
+    shieldBonus?: number;
+    deflectionBonus?: number;
+    properties?: {
+        damage_m?: string;
+        critical?: string;
+        range?: number | null;
+        light?: boolean;
+    };
+}
+
 interface GeneratedNpc {
     name: string;
     race: string;
@@ -13,8 +31,9 @@ interface GeneratedNpc {
     class?: string;
     level?: number;
     skills?: { [key: string]: number };
-    equipment?: string[];
-    magicItems?: string[];
+    classSkills?: string[];
+    equipment?: (string | EquipmentItem)[];
+    magicItems?: (string | EquipmentItem)[];
     spells?: { [level: string]: string[] };
     backstory?: string;
     gender?: string;
@@ -283,11 +302,13 @@ export class NpcGeneratorComponent {
 
     objectKeys = Object.keys;
 
-    private mapToIds(names: string[], cache: Map<string, any>, idPrefix: string): string[] {
-        if (!names || !Array.isArray(names)) return [];
-        return names.map(name => {
-            for (const [id, item] of cache.entries()) {
-                if (item.name.toLowerCase() === name.toLowerCase()) {
+    private mapToIds(items: (string | EquipmentItem)[], cache: Map<string, any>, idPrefix: string): string[] {
+        if (!items || !Array.isArray(items)) return [];
+        return items.map(item => {
+            // Get name from string or object
+            const itemName = typeof item === 'string' ? item : item.name;
+            for (const [id, cacheItem] of cache.entries()) {
+                if (cacheItem.name?.toLowerCase() === itemName?.toLowerCase()) {
                     return id;
                 }
             }
@@ -452,6 +473,11 @@ export class NpcGeneratorComponent {
 
         if (npc.skills && Object.keys(npc.skills).length > 0) {
             entity.baseStats.skills = npc.skills;
+        }
+
+        // Class skills for +3 trained bonus
+        if (npc.classSkills?.length) {
+            entity.baseStats.classSkills = npc.classSkills;
         }
 
         if (npc.spellSlots) entity.spell_slots = npc.spellSlots;
