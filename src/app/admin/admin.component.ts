@@ -6,21 +6,23 @@ import { DashboardComponent } from '../dashboard/dashboard.component';
 import { DataIntegrityComponent } from '../data-integrity/data-integrity.component';
 import { AiAssistantComponent } from '../ai-assistant/ai-assistant.component';
 import { SettingsComponent } from '../settings/settings.component';
+import { OglImportComponent } from '../ogl-import/ogl-import.component';
 
 @Component({
   selector: 'app-admin',
   standalone: true,
   imports: [
-    CommonModule, 
-    DataBrowserComponent, 
-    BackupRestoreComponent, 
-    DashboardComponent, 
-    DataIntegrityComponent, 
-    AiAssistantComponent, 
-    SettingsComponent
+    CommonModule,
+    DataBrowserComponent,
+    BackupRestoreComponent,
+    DashboardComponent,
+    DataIntegrityComponent,
+    AiAssistantComponent,
+    SettingsComponent,
+    OglImportComponent
   ],
-   templateUrl: './admin.component.html',
-   styles: [`
+  templateUrl: './admin.component.html',
+  styles: [`
         :host {
         display: block;
         height: 100%;
@@ -30,5 +32,5 @@ import { SettingsComponent } from '../settings/settings.component';
 })
 export class AdminComponent {
   // State for the Admin Panel's sidebar
-  activeAdminView = signal<'dashboard' | 'data' | 'backup-restore' | 'data-integrity' | 'ai-assistant' | 'settings'>('dashboard');
+  activeAdminView = signal<'dashboard' | 'data' | 'backup-restore' | 'data-integrity' | 'ai-assistant' | 'settings' | 'ogl-import'>('dashboard');
 }

@@ -2,45 +2,52 @@
   <nav class="w-64 flex-shrink-0 bg-gray-800 p-4 flex flex-col border-r border-gray-700">
     <ul class="space-y-2">
       <li>
-        <a (click)="activeAdminView.set('dashboard')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'dashboard', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'dashboard'}">
-           Dashboard
+        <a (click)="activeAdminView.set('dashboard')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'dashboard', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'dashboard'}">
+          Dashboard
         </a>
       </li>
       <li>
-        <a (click)="activeAdminView.set('data')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'data', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'data'}">
-           Data Browser
+        <a (click)="activeAdminView.set('data')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'data', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'data'}">
+          Data Browser
         </a>
       </li>
       <li>
-        <a (click)="activeAdminView.set('backup-restore')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'backup-restore', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'backup-restore'}">
-           Backup & Restore
+        <a (click)="activeAdminView.set('backup-restore')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'backup-restore', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'backup-restore'}">
+          Backup & Restore
         </a>
       </li>
       <li>
-        <a (click)="activeAdminView.set('data-integrity')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'data-integrity', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'data-integrity'}">
-           Data Integrity
+        <a (click)="activeAdminView.set('data-integrity')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'data-integrity', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'data-integrity'}">
+          Data Integrity
         </a>
       </li>
       <li>
-        <a (click)="activeAdminView.set('ai-assistant')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'ai-assistant', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'ai-assistant'}">
-           AI Assistant
+        <a (click)="activeAdminView.set('ai-assistant')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'ai-assistant', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'ai-assistant'}">
+          AI Assistant
         </a>
       </li>
       <li>
-        <a (click)="activeAdminView.set('settings')" href="javascript:void(0)" 
-           class="flex items-center px-4 py-2 rounded-lg transition-colors" 
-           [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'settings', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'settings'}">
-           Settings
+        <a (click)="activeAdminView.set('settings')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'settings', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'settings'}">
+          Settings
+        </a>
+      </li>
+      <li>
+        <a (click)="activeAdminView.set('ogl-import')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'ogl-import', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'ogl-import'}">
+          OGL Import
         </a>
       </li>
     </ul>
@@ -48,12 +55,13 @@
 
   <main class="flex-1 overflow-y-auto p-8 bg-gray-900">
     @switch (activeAdminView()) {
-      @case ('dashboard') { <app-dashboard></app-dashboard> }
-      @case ('data') { <app-data-browser></app-data-browser> }
-      @case ('backup-restore') { <app-backup-restore></app-backup-restore> }
-      @case ('data-integrity') { <app-data-integrity></app-data-integrity> }
-      @case ('ai-assistant') { <app-ai-assistant></app-ai-assistant> }
-      @case ('settings') { <app-settings></app-settings> }
+    @case ('dashboard') { <app-dashboard></app-dashboard> }
+    @case ('data') { <app-data-browser></app-data-browser> }
+    @case ('backup-restore') { <app-backup-restore></app-backup-restore> }
+    @case ('data-integrity') { <app-data-integrity></app-data-integrity> }
+    @case ('ai-assistant') { <app-ai-assistant></app-ai-assistant> }
+    @case ('settings') { <app-settings></app-settings> }
+    @case ('ogl-import') { <app-ogl-import></app-ogl-import> }
     }
   </main>
 </div>

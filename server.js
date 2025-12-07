@@ -17,6 +17,7 @@ const aiAssistantRoutes = require('./routes/ai-assistant');
 const spellRoutes = require('./routes/spells');
 const storyPlannerRoutes = require('./routes/story-planner');
 const mediaRoutes = require('./routes/media');
+const oglImportRoutes = require('./routes/ogl-import');
 const collectionsRoutes = require('./routes/collections')
 
 const app = express();
@@ -54,6 +55,7 @@ MongoClient.connect(DATABASE_URL)
     app.use(`${apiBase}/spells`, spellRoutes(db));
     app.use(`${apiBase}/dm-toolkit/story-planner`, storyPlannerRoutes(db));
     app.use(`${apiBase}/media`, mediaRoutes(db));
+    app.use(`${apiBase}/ogl-import`, oglImportRoutes(db));
 
     /* ---------- Static Files (SPA) ---------- */
     app.use('/codex', express.static(path.join(__dirname, 'public')));
@@ -81,6 +83,7 @@ MongoClient.connect(DATABASE_URL)
         ${apiBase}/spells/*
         ${apiBase}/dm-toolkit/story-planner/*
         ${apiBase}/media/*
+        ${apiBase}/ogl-import/*
         ${apiBase}/health`);
     });
   })
