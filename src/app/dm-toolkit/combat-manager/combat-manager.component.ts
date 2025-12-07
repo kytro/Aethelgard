@@ -6,7 +6,8 @@ import { lastValueFrom } from 'rxjs';
 import {
   formatTime, getAbilityModifierAsNumber, calculateCompleteBaseStats, getCaseInsensitiveProp,
   formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP, SIZE_DATA,
-  CONSTRUCT_HP_BONUS, calculateSkillBonus, CalculateStatsOptions
+  CONSTRUCT_HP_BONUS, calculateSkillBonus, CalculateStatsOptions,
+  getArmorMaxDex, getArmorCheckPenalty, classifyNaturalAttack, isLightWeapon, LIGHT_WEAPONS
 } from '../dm-toolkit.utils';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
@@ -660,8 +661,20 @@ export class CombatManagerComponent {
       const conModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Con')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
       const wisModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Wis')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
       modifiedSaves.Ref += dexModDiff; modifiedSaves.Fort += conModDiff; modifiedSaves.Will += wisModDiff;
-      modifiedStats['AC'] = (getCaseInsensitiveProp(modifiedStats, 'AC') || 10) + dexModDiff;
-      modifiedStats['Touch'] = (getCaseInsensitiveProp(modifiedStats, 'Touch') || 10) + dexModDiff;
+
+      // PF1e: Cap Dex bonus to AC based on armor's Max Dex
+      const armorItems = [...equipment, ...magicItems];
+      const armorMaxDex = getArmorMaxDex(armorItems);
+      const currentDexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
+      const baseDexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
+
+      // Effective Dex mod for AC is capped by armor
+      const effectiveDexMod = armorMaxDex !== null ? Math.min(currentDexMod, armorMaxDex) : currentDexMod;
+      const baseEffectiveDexMod = armorMaxDex !== null ? Math.min(baseDexMod, armorMaxDex) : baseDexMod;
+      const cappedDexModDiff = effectiveDexMod - baseEffectiveDexMod;
+
+      modifiedStats['AC'] = (getCaseInsensitiveProp(modifiedStats, 'AC') || 10) + cappedDexModDiff;
+      modifiedStats['Touch'] = (getCaseInsensitiveProp(modifiedStats, 'Touch') || 10) + dexModDiff; // Touch ignores armor cap
       if (conModDiff !== 0) {
         const lvl = getCaseInsensitiveProp(baseStats, 'Level') || parseInt(String(getCaseInsensitiveProp(baseStats, 'HP') || '1d8').match(/\((\d+)d\d+/)?.[1] || '1', 10);
         modifiedStats['maxHp'] = (c.maxHp || 10) + (conModDiff * lvl);
@@ -684,7 +697,44 @@ export class CombatManagerComponent {
         parse(melee); parse(ranged);
         return attacks;
       }
-      const naturalAttacks = parseAttacks(baseStats);
+      const rawNaturalAttacks = parseAttacks(baseStats);
+
+      // PF1e: Apply secondary natural attack penalties (-5 to hit, 0.5x Str to damage)
+      const strMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
+      const hasMultiattack = allFeats.some((f: any) => f.name === 'Multiattack');
+
+      const naturalAttacks: ParsedAttack[] = rawNaturalAttacks.map((attack, index) => {
+        const attackType = classifyNaturalAttack(attack.name);
+        // First attack is always primary unless explicitly secondary type
+        const isSecondary = index > 0 && attackType === 'secondary';
+
+        if (isSecondary) {
+          // Apply -5 penalty (or -2 with Multiattack feat)
+          const penalty = hasMultiattack ? -2 : -5;
+          const currentBonus = parseInt(attack.bonus.match(/[+-]?\d+/)?.[0] || '0', 10);
+          const newBonus = currentBonus + penalty;
+          const formattedBonus = newBonus >= 0 ? `+${newBonus}` : `${newBonus}`;
+
+          // Adjust damage for 0.5x Str (if Str was added)
+          // This is approximate - we check if damage has a + modifier
+          let newDamage = attack.damage;
+          if (strMod > 0) {
+            const damageMatch = attack.damage.match(/^(\d+d\d+)([+-]\d+)?/);
+            if (damageMatch) {
+              const dice = damageMatch[1];
+              const halfStr = Math.floor(strMod / 2);
+              newDamage = halfStr > 0 ? `${dice}+${halfStr}` : dice;
+            }
+          }
+
+          return {
+            name: `${attack.name} (Secondary)`,
+            bonus: formattedBonus,
+            damage: newDamage
+          };
+        }
+        return attack;
+      });
 
       // Weapon attack generation logic
       const weaponAttacks: ParsedAttack[] = [];
@@ -694,13 +744,25 @@ export class CombatManagerComponent {
       const powerAttackFeat = allFeats.find((f: any) => f.name === 'Power Attack');
       const hasPowerAttack = powerAttackFeat && (c.activeFeats || []).includes(powerAttackFeat.id);
 
-      for (const weapon of weapons) {
+      // PF1e: Two-Weapon Fighting detection
+      const equippedMeleeWeapons = weapons.filter(w => {
+        const props = w.properties || {};
+        const lower = (w.name || '').toLowerCase();
+        const isRanged = props.range || lower.includes('bow') || lower.includes('crossbow') || lower.includes('sling');
+        return !isRanged && w.equipped !== false;
+      });
+      const isTWF = equippedMeleeWeapons.length >= 2;
+      const hasTWFFeat = allFeats.some((f: any) =>
+        f.name?.toLowerCase().includes('two-weapon fighting') || f.name === 'Two-Weapon Fighting');
+      const hasDoubleSlice = allFeats.some((f: any) => f.name === 'Double Slice');
+
+      for (const [weaponIndex, weapon] of weapons.entries()) {
         const props = weapon.properties || {};
         const weaponName = weapon.name || 'Unknown Weapon';
         const lowerWeaponName = weaponName.toLowerCase();
         const isRanged = props.range || lowerWeaponName.includes('bow') || lowerWeaponName.includes('crossbow') || lowerWeaponName.includes('sling');
         const isThrown = props.range && parseInt(props.range) > 0 && !lowerWeaponName.includes('bow') && !lowerWeaponName.includes('crossbow');
-        const isLight = props.light || lowerWeaponName.includes('dagger') || lowerWeaponName.includes('shortsword') || lowerWeaponName.includes('handaxe');
+        const isLightW = props.light || isLightWeapon(weaponName);
 
         let attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
         let damageAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str'));
@@ -709,7 +771,7 @@ export class CombatManagerComponent {
           attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
           const isComposite = lowerWeaponName.includes('composite');
           damageAbilityMod = isComposite ? getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Str')) : 0;
-        } else if (hasWeaponFinesse && isLight) {
+        } else if (hasWeaponFinesse && isLightW) {
           attackAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
         }
 
@@ -724,16 +786,48 @@ export class CombatManagerComponent {
           powerAttackDamage = Math.abs(powerAttackPenalty) * 2;
         }
 
+        // PF1e: TWF penalties
+        let twfPenalty = 0;
+        let twfDamageMult = 1;
+        if (isTWF && !isRanged) {
+          const meleeIndex = equippedMeleeWeapons.findIndex(w => w === weapon);
+          const isOffHand = meleeIndex > 0;
+          const offHandWeapon = equippedMeleeWeapons[1];
+          const offHandIsLight = offHandWeapon ? isLightWeapon(offHandWeapon.name || '') : false;
+
+          if (hasTWFFeat) {
+            // With TWF feat: -2/-2 if off-hand is light, else -4/-4
+            twfPenalty = offHandIsLight ? -2 : -4;
+          } else {
+            // Without feat: -4/-4 if off-hand light, else -6/-10
+            if (offHandIsLight) {
+              twfPenalty = -4;
+            } else {
+              twfPenalty = isOffHand ? -10 : -6;
+            }
+          }
+
+          // Off-hand gets 0.5x Str to damage (unless has Double Slice)
+          if (isOffHand && !hasDoubleSlice && damageAbilityMod > 0) {
+            twfDamageMult = 0.5;
+          }
+        }
+
         const sizeMod = SIZE_DATA[baseStats.size]?.mod || 0;
-        const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty + (finalBonuses['Attack'] || 0) + sizeMod;
+        const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty + twfPenalty + (finalBonuses['Attack'] || 0) + sizeMod;
         const formattedAttackBonus = totalAttackBonus >= 0 ? `+${totalAttackBonus}` : `${totalAttackBonus}`;
 
-        let totalDamageBonus = damageAbilityMod + enhancementBonus + powerAttackDamage;
+        let totalDamageBonus = Math.floor(damageAbilityMod * twfDamageMult) + enhancementBonus + powerAttackDamage;
         let damageString = props.damage_m || '1d6';
         if (totalDamageBonus !== 0) damageString += totalDamageBonus > 0 ? `+${totalDamageBonus}` : ` ${totalDamageBonus}`;
         const critString = props.critical ? ` (${props.critical})` : '';
 
-        weaponAttacks.push({ name: weaponName, bonus: formattedAttackBonus, damage: `${damageString}${critString}`.trim() });
+        // Add TWF indicator to name if applicable
+        const displayName = isTWF && !isRanged && equippedMeleeWeapons.findIndex(w => w === weapon) > 0
+          ? `${weaponName} (Off-Hand)`
+          : weaponName;
+
+        weaponAttacks.push({ name: displayName, bonus: formattedAttackBonus, damage: `${damageString}${critString}`.trim() });
       }
 
       let allAttacks = [...naturalAttacks, ...weaponAttacks];

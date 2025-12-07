@@ -12,7 +12,17 @@ import {
     POOR_SAVES,
     SIZE_DATA,
     CONSTRUCT_HP_BONUS,
-    CalculateStatsOptions
+    CalculateStatsOptions,
+    ARMOR_DATA,
+    SHIELD_DATA,
+    LIGHT_WEAPONS,
+    getArmorMaxDex,
+    getArmorCheckPenalty,
+    classifyNaturalAttack,
+    isLightWeapon,
+    CARRYING_CAPACITY,
+    calculateLoad,
+    calculateTotalWeight
 } from './dm-toolkit.utils';
 
 describe('DM Toolkit Utilities', () => {
@@ -451,6 +461,147 @@ describe('DM Toolkit Utilities', () => {
                 { specialAbilities: ['Improved Uncanny Dodge'] }
             );
             expect(stats['Flat-Footed']).toBe(16); // includes "uncanny dodge" in name
+        });
+    });
+
+    describe('Armor Data Tables', () => {
+        it('should have ARMOR_DATA with correct properties', () => {
+            expect(ARMOR_DATA).toBeDefined();
+            expect(ARMOR_DATA['full plate'].maxDex).toBe(1);
+            expect(ARMOR_DATA['full plate'].checkPenalty).toBe(-6);
+            expect(ARMOR_DATA['chain shirt'].maxDex).toBe(4);
+            expect(ARMOR_DATA['leather'].type).toBe('light');
+            expect(ARMOR_DATA['breastplate'].type).toBe('medium');
+        });
+
+        it('should have SHIELD_DATA defined', () => {
+            expect(SHIELD_DATA).toBeDefined();
+            expect(SHIELD_DATA['tower shield'].maxDex).toBe(2);
+            expect(SHIELD_DATA['buckler'].acBonus).toBe(1);
+        });
+    });
+
+    describe('getArmorMaxDex', () => {
+        it('should return null when no armor equipped', () => {
+            expect(getArmorMaxDex([])).toBeNull();
+            expect(getArmorMaxDex([{ name: 'Sword', type: 'weapon' }])).toBeNull();
+        });
+
+        it('should return maxDex from armor name lookup', () => {
+            const equipment = [{ name: 'Full Plate' }];
+            expect(getArmorMaxDex(equipment)).toBe(1);
+        });
+
+        it('should return lowest maxDex when multiple armors', () => {
+            const equipment = [
+                { name: 'Chain Shirt' }, // maxDex 4
+                { name: 'Tower Shield' } // maxDex 2
+            ];
+            expect(getArmorMaxDex(equipment)).toBe(2);
+        });
+
+        it('should use explicit maxDex property over lookup', () => {
+            const equipment = [{ name: 'Custom Armor', maxDex: 3 }];
+            expect(getArmorMaxDex(equipment)).toBe(3);
+        });
+    });
+
+    describe('getArmorCheckPenalty', () => {
+        it('should return 0 when no armor equipped', () => {
+            expect(getArmorCheckPenalty([])).toBe(0);
+        });
+
+        it('should return penalty from armor lookup', () => {
+            const equipment = [{ name: 'Full Plate' }];
+            expect(getArmorCheckPenalty(equipment)).toBe(-6);
+        });
+
+        it('should sum penalties from armor and shield', () => {
+            const equipment = [
+                { name: 'Breastplate' }, // -4
+                { name: 'Heavy Shield' } // -2
+            ];
+            expect(getArmorCheckPenalty(equipment)).toBe(-6);
+        });
+    });
+
+    describe('isLightWeapon', () => {
+        it('should identify light weapons', () => {
+            expect(isLightWeapon('Dagger')).toBe(true);
+            expect(isLightWeapon('Short Sword')).toBe(true);
+            expect(isLightWeapon('Kukri')).toBe(true);
+        });
+
+        it('should reject non-light weapons', () => {
+            expect(isLightWeapon('Longsword')).toBe(false);
+            expect(isLightWeapon('Greatsword')).toBe(false);
+        });
+
+        it('should handle null/undefined', () => {
+            expect(isLightWeapon('')).toBe(false);
+        });
+    });
+
+    describe('classifyNaturalAttack', () => {
+        it('should classify primary attacks', () => {
+            expect(classifyNaturalAttack('Bite')).toBe('primary');
+            expect(classifyNaturalAttack('2 Claws')).toBe('primary');
+            expect(classifyNaturalAttack('Gore')).toBe('primary');
+            expect(classifyNaturalAttack('Slam')).toBe('primary');
+        });
+
+        it('should classify secondary attacks', () => {
+            expect(classifyNaturalAttack('Hoof')).toBe('secondary');
+            expect(classifyNaturalAttack('Wing')).toBe('secondary');
+            expect(classifyNaturalAttack('Tentacle')).toBe('secondary');
+        });
+
+        it('should default unknown attacks to primary', () => {
+            expect(classifyNaturalAttack('Unknown Attack')).toBe('primary');
+        });
+    });
+
+    describe('Carrying Capacity & Encumbrance', () => {
+        it('should have CARRYING_CAPACITY table', () => {
+            expect(CARRYING_CAPACITY).toBeDefined();
+            expect(CARRYING_CAPACITY[10]).toEqual([33, 66, 100]);
+            expect(CARRYING_CAPACITY[15]).toEqual([66, 133, 200]);
+        });
+
+        it('should calculate light load', () => {
+            expect(calculateLoad(10, 30)).toBe('light');
+            expect(calculateLoad(15, 50)).toBe('light');
+        });
+
+        it('should calculate medium load', () => {
+            expect(calculateLoad(10, 50)).toBe('medium');
+            expect(calculateLoad(15, 100)).toBe('medium');
+        });
+
+        it('should calculate heavy load', () => {
+            expect(calculateLoad(10, 80)).toBe('heavy');
+            expect(calculateLoad(15, 150)).toBe('heavy');
+        });
+
+        it('should calculate overloaded', () => {
+            expect(calculateLoad(10, 150)).toBe('overloaded');
+        });
+
+        it('should calculate total weight', () => {
+            const equipment = [
+                { name: 'Sword', weight: 4 },
+                { name: 'Armor', weight: 50 },
+                { name: 'Rations', weight: 1, quantity: 10 }
+            ];
+            expect(calculateTotalWeight(equipment)).toBe(64);
+        });
+
+        it('should handle missing weight/quantity', () => {
+            const equipment = [
+                { name: 'Ring' },
+                { name: 'Potion', quantity: 5 }
+            ];
+            expect(calculateTotalWeight(equipment)).toBe(0);
         });
     });
 });

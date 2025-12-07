@@ -87,6 +87,154 @@ export const CONSTRUCT_HP_BONUS: { [key: string]: number } = {
     'Gargantuan': 60, 'Colossal': 80
 };
 
+// PF1e Armor data: maxDex, checkPenalty, type, arcaneSpellFailure
+export const ARMOR_DATA: { [key: string]: { maxDex: number; checkPenalty: number; type: 'light' | 'medium' | 'heavy'; weight: number } } = {
+    // Light Armor
+    'padded': { maxDex: 8, checkPenalty: 0, type: 'light', weight: 10 },
+    'leather': { maxDex: 6, checkPenalty: 0, type: 'light', weight: 15 },
+    'studded leather': { maxDex: 5, checkPenalty: -1, type: 'light', weight: 20 },
+    'chain shirt': { maxDex: 4, checkPenalty: -2, type: 'light', weight: 25 },
+    // Medium Armor
+    'hide': { maxDex: 4, checkPenalty: -3, type: 'medium', weight: 25 },
+    'scale mail': { maxDex: 3, checkPenalty: -4, type: 'medium', weight: 30 },
+    'chainmail': { maxDex: 2, checkPenalty: -5, type: 'medium', weight: 40 },
+    'breastplate': { maxDex: 3, checkPenalty: -4, type: 'medium', weight: 30 },
+    // Heavy Armor
+    'splint mail': { maxDex: 0, checkPenalty: -7, type: 'heavy', weight: 45 },
+    'banded mail': { maxDex: 1, checkPenalty: -6, type: 'heavy', weight: 35 },
+    'half-plate': { maxDex: 0, checkPenalty: -7, type: 'heavy', weight: 50 },
+    'full plate': { maxDex: 1, checkPenalty: -6, type: 'heavy', weight: 50 }
+};
+
+// PF1e Shield data
+export const SHIELD_DATA: { [key: string]: { acBonus: number; maxDex: number; checkPenalty: number; weight: number } } = {
+    'buckler': { acBonus: 1, maxDex: 99, checkPenalty: -1, weight: 5 },
+    'light shield': { acBonus: 1, maxDex: 99, checkPenalty: -1, weight: 6 },
+    'heavy shield': { acBonus: 2, maxDex: 99, checkPenalty: -2, weight: 15 },
+    'tower shield': { acBonus: 4, maxDex: 2, checkPenalty: -10, weight: 45 }
+};
+
+// Light weapons for TWF
+export const LIGHT_WEAPONS: string[] = [
+    'dagger', 'punching dagger', 'spiked gauntlet', 'light mace', 'sickle',
+    'gladius', 'handaxe', 'kukri', 'light hammer', 'light pick', 'shortsword',
+    'starknife', 'sap', 'short sword'
+];
+
+// Primary vs Secondary natural attacks
+export const PRIMARY_NATURAL_ATTACKS: string[] = ['bite', 'claw', 'gore', 'slam', 'sting', 'tail slap', 'talons'];
+export const SECONDARY_NATURAL_ATTACKS: string[] = ['hoof', 'tentacle', 'wing', 'pincer'];
+
+/**
+ * Get the Max Dex bonus from equipped armor
+ * @returns The lowest maxDex from all armor, or null if no armor
+ */
+export const getArmorMaxDex = (equipment: any[]): number | null => {
+    let lowestMaxDex: number | null = null;
+
+    for (const item of equipment) {
+        const name = (item.name || '').toLowerCase();
+        // Check if item has explicit maxDex property
+        if (typeof item.maxDex === 'number') {
+            lowestMaxDex = lowestMaxDex === null ? item.maxDex : Math.min(lowestMaxDex, item.maxDex);
+            continue;
+        }
+        // Look up in armor table
+        const armorData = ARMOR_DATA[name];
+        if (armorData) {
+            lowestMaxDex = lowestMaxDex === null ? armorData.maxDex : Math.min(lowestMaxDex, armorData.maxDex);
+        }
+        // Check shields too
+        const shieldData = SHIELD_DATA[name];
+        if (shieldData && shieldData.maxDex < 99) {
+            lowestMaxDex = lowestMaxDex === null ? shieldData.maxDex : Math.min(lowestMaxDex, shieldData.maxDex);
+        }
+    }
+
+    return lowestMaxDex;
+};
+
+/**
+ * Get armor check penalty from equipped armor/shield
+ */
+export const getArmorCheckPenalty = (equipment: any[]): number => {
+    let totalPenalty = 0;
+
+    for (const item of equipment) {
+        const name = (item.name || '').toLowerCase();
+        if (typeof item.checkPenalty === 'number') {
+            totalPenalty += item.checkPenalty;
+            continue;
+        }
+        const armorData = ARMOR_DATA[name];
+        if (armorData) totalPenalty += armorData.checkPenalty;
+        const shieldData = SHIELD_DATA[name];
+        if (shieldData) totalPenalty += shieldData.checkPenalty;
+    }
+
+    return totalPenalty;
+};
+
+/**
+ * Classify a natural attack as primary or secondary
+ */
+export const classifyNaturalAttack = (attackName: string): 'primary' | 'secondary' => {
+    const lower = attackName.toLowerCase();
+    if (PRIMARY_NATURAL_ATTACKS.some(p => lower.includes(p))) return 'primary';
+    if (SECONDARY_NATURAL_ATTACKS.some(s => lower.includes(s))) return 'secondary';
+    // Default: if it's the only attack or first in list, treat as primary
+    return 'primary';
+};
+
+/**
+ * Check if a weapon is light (for TWF calculations)
+ */
+export const isLightWeapon = (weaponName: string): boolean => {
+    const lower = (weaponName || '').toLowerCase();
+    return LIGHT_WEAPONS.some(lw => lower.includes(lw));
+};
+
+// PF1e Carrying Capacity by Strength score [light, medium, heavy]
+export const CARRYING_CAPACITY: { [str: number]: [number, number, number] } = {
+    1: [3, 6, 10], 2: [6, 13, 20], 3: [10, 20, 30], 4: [13, 26, 40], 5: [16, 33, 50],
+    6: [20, 40, 60], 7: [23, 46, 70], 8: [26, 53, 80], 9: [30, 60, 90], 10: [33, 66, 100],
+    11: [38, 76, 115], 12: [43, 86, 130], 13: [50, 100, 150], 14: [58, 116, 175], 15: [66, 133, 200],
+    16: [76, 153, 230], 17: [86, 173, 260], 18: [100, 200, 300], 19: [116, 233, 350], 20: [133, 266, 400],
+    21: [153, 306, 460], 22: [173, 346, 520], 23: [200, 400, 600], 24: [233, 466, 700], 25: [266, 533, 800],
+    26: [306, 613, 920], 27: [346, 693, 1040], 28: [400, 800, 1200], 29: [466, 933, 1400]
+};
+
+export type LoadCategory = 'light' | 'medium' | 'heavy' | 'overloaded';
+
+export const LOAD_PENALTIES: { [load: string]: { maxDex: number; checkPenalty: number; speedMult: number } } = {
+    'light': { maxDex: 99, checkPenalty: 0, speedMult: 1 },
+    'medium': { maxDex: 3, checkPenalty: -3, speedMult: 0.75 },
+    'heavy': { maxDex: 1, checkPenalty: -6, speedMult: 0.5 },
+    'overloaded': { maxDex: 0, checkPenalty: -99, speedMult: 0 }
+};
+
+/**
+ * Calculate load category based on Strength and carried weight
+ */
+export const calculateLoad = (str: number, weight: number): LoadCategory => {
+    const capacity = CARRYING_CAPACITY[str] || CARRYING_CAPACITY[10];
+    if (weight <= capacity[0]) return 'light';
+    if (weight <= capacity[1]) return 'medium';
+    if (weight <= capacity[2]) return 'heavy';
+    return 'overloaded';
+};
+
+/**
+ * Calculate total equipment weight
+ */
+export const calculateTotalWeight = (equipment: any[]): number => {
+    return equipment.reduce((total, item) => {
+        const weight = item.weight || 0;
+        const quantity = item.quantity || 1;
+        return total + (weight * quantity);
+    }, 0);
+};
+
 /**
  * Calculate skill bonus with class skill +3 bonus (PF1e)
  * @param skillName - Name of the skill
