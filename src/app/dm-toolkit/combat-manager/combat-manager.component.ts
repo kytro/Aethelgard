@@ -817,7 +817,9 @@ export class CombatManagerComponent {
         const totalAttackBonus = (getCaseInsensitiveProp(modifiedStats, 'BAB') || 0) + attackAbilityMod + enhancementBonus + powerAttackPenalty + twfPenalty + (finalBonuses['Attack'] || 0) + sizeMod;
         const formattedAttackBonus = totalAttackBonus >= 0 ? `+${totalAttackBonus}` : `${totalAttackBonus}`;
 
-        let totalDamageBonus = Math.floor(damageAbilityMod * twfDamageMult) + enhancementBonus + powerAttackDamage;
+        // Add damage bonus from effects (e.g., Prayer, Bardic Inspiration)
+        const effectDamageBonus = finalBonuses['Damage'] || 0;
+        let totalDamageBonus = Math.floor(damageAbilityMod * twfDamageMult) + enhancementBonus + powerAttackDamage + effectDamageBonus;
         let damageString = props.damage_m || '1d6';
         if (totalDamageBonus !== 0) damageString += totalDamageBonus > 0 ? `+${totalDamageBonus}` : ` ${totalDamageBonus}`;
         const critString = props.critical ? ` (${props.critical})` : '';
@@ -838,8 +840,9 @@ export class CombatManagerComponent {
         const sizeMod = SIZE_DATA[baseStats.size]?.mod || 0;
         const unarmedAttackBonus = bab + strMod + (finalBonuses['Attack'] || 0) + sizeMod;
         const formattedBonus = unarmedAttackBonus >= 0 ? `+${unarmedAttackBonus}` : `${unarmedAttackBonus}`;
-        const strDamageBonus = strMod > 0 ? `+${strMod}` : strMod !== 0 ? ` ${strMod}` : '';
-        const unarmedDamage = `1d3${strDamageBonus}${hasImprovedUnarmedStrike ? '' : ' (nonlethal)'}`;
+        const totalUnarmedDamage = strMod + (finalBonuses['Damage'] || 0);
+        const damageBonus = totalUnarmedDamage > 0 ? `+${totalUnarmedDamage}` : totalUnarmedDamage !== 0 ? `${totalUnarmedDamage}` : '';
+        const unarmedDamage = `1d3${damageBonus}${hasImprovedUnarmedStrike ? '' : ' (nonlethal)'}`;
         allAttacks.push({ name: 'Unarmed Strike', bonus: formattedBonus, damage: unarmedDamage });
       }
 
@@ -860,6 +863,12 @@ export class CombatManagerComponent {
           // Apply size modifiers
           if (skillName === 'Stealth') finalValue += SIZE_DATA[baseStats.size]?.stealth || 0;
           if (skillName === 'Fly') finalValue += SIZE_DATA[baseStats.size]?.fly || 0;
+
+          // Specific skill bonus from effects (e.g., +4 Stealth from Invisibility)
+          finalValue += finalBonuses[skillName] || 0;
+
+          // Generic skill checks penalty/bonus
+          finalValue += finalBonuses['Skill Checks'] || 0;
 
           skills[skillName] = finalValue;
         });
@@ -888,12 +897,15 @@ export class CombatManagerComponent {
                 const modifiedAbilityMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, governingAbility));
                 const genericSkillPenalty = finalBonuses['Skill Checks'] || 0;
 
+                // Specific skill bonus from effects (e.g., +4 Stealth from Invisibility)
+                const specificSkillBonus = finalBonuses[skillName] || 0;
+
                 // Size modifiers for skills
                 let sizeSkillMod = 0;
                 if (skillName === 'Stealth') sizeSkillMod = SIZE_DATA[baseStats.size]?.stealth || 0;
                 if (skillName === 'Fly') sizeSkillMod = SIZE_DATA[baseStats.size]?.fly || 0;
 
-                skills[skillName] = ranksAndMisc + modifiedAbilityMod + genericSkillPenalty + sizeSkillMod;
+                skills[skillName] = ranksAndMisc + modifiedAbilityMod + genericSkillPenalty + sizeSkillMod + specificSkillBonus;
               } else {
                 skills[skillName] = originalBonus;
               }
