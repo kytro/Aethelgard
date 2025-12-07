@@ -910,8 +910,9 @@ export class CombatManagerComponent {
     let pathIdx = 0;
     while (true) {
       const node = this.getNodeFromCodex(currentPath);
-      if (!node || typeof node !== 'object' || Array.isArray(node.content) || !this._isNavigable(node)) { break; }
+      if (!node || typeof node !== 'object' || !this._isNavigable(node)) { break; }
 
+      // Find navigable children (subcategories) - these become dropdown options
       const options = Object.keys(node).filter(key => {
         const child = node[key];
         return typeof child === 'object' &&
@@ -920,7 +921,9 @@ export class CombatManagerComponent {
           this._isNavigable(child);
       });
 
+      // If no navigable children, stop building dropdowns (we're at a leaf category)
       if (options.length === 0) break;
+
       dropdowns.push({ level: pathIdx, options: options.sort() });
       const nextSegment = this.selectedCodexPath()[pathIdx];
       if (nextSegment) { currentPath.push(nextSegment); pathIdx++; } else { break; }

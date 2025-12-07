@@ -560,6 +560,59 @@ describe('CombatManagerComponent', () => {
             component.handlePathChange(1, '');
             expect(component.selectedCodexPath()).toEqual(['Solarran_Freehold']);
         });
+
+        it('should continue building dropdowns for nodes with both rich text content AND navigable children', async () => {
+            // This tests the bug fix where cascadingDropdowns would break when a node had
+            // both a 'content' array (rich text) AND navigable children (subcategories)
+            // The mock codex has People > Solarran_Freehold which has both:
+            // - content: [{type: 'heading'...}, {type: 'paragraph'...}] (rich text)
+            // - Merchant_Quarter: {...} (navigable child)
+            // - Town_Guard: {...} (template child)
+
+            component.addFormSource.set('People');
+            component.selectedCodexPath.set([]);
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            // First dropdown should show Solarran_Freehold
+            let dropdowns = component.cascadingDropdowns();
+            expect(dropdowns.length).toBe(1);
+            expect(dropdowns[0].options).toContain('Solarran_Freehold');
+
+            // Now select Solarran_Freehold - should show Merchant_Quarter as next dropdown
+            // even though Solarran_Freehold has a rich text content array
+            component.selectedCodexPath.set(['Solarran_Freehold']);
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            dropdowns = component.cascadingDropdowns();
+            // Should have 2 dropdowns now: one at level 0 (Solarran_Freehold) and one at level 1 (Merchant_Quarter)
+            expect(dropdowns.length).toBe(2);
+            expect(dropdowns[1].options).toContain('Merchant_Quarter');
+        });
+
+        it('should return empty array for Custom, Find, and Found sources', () => {
+            component.addFormSource.set('Custom');
+            expect(component.cascadingDropdowns()).toEqual([]);
+
+            component.addFormSource.set('Find');
+            expect(component.cascadingDropdowns()).toEqual([]);
+
+            component.addFormSource.set('Found');
+            expect(component.cascadingDropdowns()).toEqual([]);
+        });
+
+        it('should reset source and path when handleSourceChange is called', () => {
+            component.addFormSource.set('People');
+            component.selectedCodexPath.set(['Solarran_Freehold', 'Merchant_Quarter']);
+            component.selectedFoundCreatureId.set('some-id');
+
+            component.handleSourceChange('Bestiary');
+
+            expect(component.addFormSource()).toBe('Bestiary');
+            expect(component.selectedCodexPath()).toEqual([]);
+            expect(component.selectedFoundCreatureId()).toBeNull();
+        });
     });
 
     describe('Detailed Modifiers & Effects', () => {
