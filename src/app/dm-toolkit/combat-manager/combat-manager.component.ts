@@ -968,8 +968,50 @@ export class CombatManagerComponent {
     this.handleUpdateCombatant(id, 'effects', updated);
   }
 
-  handleCastSpell(caster: CombatantWithModifiers, spell: Spell, targetId: string) {
-    // Cast logic placeholder
+  async handleCastSpell(caster: CombatantWithModifiers, spell: Spell, targetId: string) {
+    const level = spell.level || 0;
+    const slots = caster.spellSlots || {};
+    const currentSlots = slots[level] || 0;
+
+    // Check spell slots for level 1+ spells
+    if (level > 0 && currentSlots <= 0) {
+      this.logAction(`${caster.name} has no level ${level} spell slots remaining!`);
+      return;
+    }
+
+    // Consume spell slot for level 1+ spells
+    if (level > 0) {
+      const newSlots = { ...slots, [level]: currentSlots - 1 };
+      await this.handleUpdateCombatant(caster._id, 'spellSlots', newSlots);
+    }
+
+    // Find target name
+    const target = this.combatants().find(c => c._id === targetId);
+    const targetName = target ? target.name : 'self';
+
+    // Calculate DC if saving throw applies
+    let dcInfo = '';
+    if (spell.savingThrow && spell.savingThrow.toLowerCase() !== 'none') {
+      // PF1e: DC = 10 + spell level + casting ability modifier
+      // Try to determine casting ability from class
+      const classLower = (caster.baseStats?.Class || '').toLowerCase();
+      let castingAbility = 'Int'; // Default: Wizard, Magus, Witch
+      if (['cleric', 'druid', 'ranger', 'inquisitor'].some(c => classLower.includes(c))) {
+        castingAbility = 'Wis';
+      } else if (['sorcerer', 'bard', 'oracle', 'paladin', 'summoner'].some(c => classLower.includes(c))) {
+        castingAbility = 'Cha';
+      }
+      const casterMod = getAbilityModifierAsNumber(caster.modifiedStats[castingAbility] || 10);
+      const dc = 10 + level + casterMod;
+      dcInfo = ` (DC ${dc} ${spell.savingThrow})`;
+    }
+
+    // Log the cast
+    this.logAction(`${caster.name} casts ${spell.name} on ${targetName}${dcInfo}.`);
+
+    // Track cast spell
+    const castSpells = [...(caster.castSpells || []), spell.id];
+    await this.handleUpdateCombatant(caster._id, 'castSpells', castSpells);
   }
 
   // Tooltips logic
