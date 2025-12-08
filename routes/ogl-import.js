@@ -7,60 +7,35 @@ const router = express.Router();
  */
 module.exports = function (db) {
 
-    // Available OGL data sources - can be extended with more sources
-    // VERIFIED WORKING URLs as of 2024
+    // Available OGL data sources
+    // NOTE: Feat sources are not available - use Custom Import with your own URL
+    // The spells source below is verified working as of Dec 2024
     const OGL_SOURCES = {
         'community-spells-complete': {
-            name: 'PF1e Spells (Complete)',
-            description: 'Comprehensive spell list from cityofwalls gist (~2000+ spells)',
+            name: 'PF1e Spells (Complete ~2000+)',
+            description: 'Comprehensive spell list from all Pathfinder 1e books (cityofwalls gist)',
             url: 'https://gist.githubusercontent.com/cityofwalls/0fdeb2da5d7b475968c8de88c75e77ad/raw/PathfinderSpellsJSON.txt',
             collection: 'spells_pf1e',
             transform: (item) => ({
+                // Use existing app prefix convention
                 _id: `spell-${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
                 name: item.name,
                 school: item.school,
+                // Parse spell level from "sorcerer/wizard 2, cleric 3" format
                 level: item.spell_level || item.level,
                 castingTime: item.casting_time,
                 components: item.components,
                 range: item.range,
                 targets: item.targets,
+                area: item.area,
+                effect: item.effect,
                 duration: item.duration,
                 savingThrow: item.saving_throw,
                 spellResistance: item.spell_resistance,
                 description: item.description,
-                source: item.source || 'PFRPG Core'
-            })
-        },
-        'community-feats': {
-            name: 'PF1e Feats',
-            description: 'Pathfinder RPG feats from Luxura PFRPG Feat Card project',
-            url: 'https://raw.githubusercontent.com/Luxura/PFRPG_Feat_card/master/feat.json',
-            collection: 'rules_pf1e',
-            transform: (item) => ({
-                _id: `feat-${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
-                name: item.name,
-                type: 'feat',
-                prerequisites: item.prerequisites || item.prerequisite,
-                benefit: item.benefit || item.description,
-                normal: item.normal,
-                special: item.special,
-                source: item.source || 'PFRPG Core'
-            })
-        },
-        'django-srd-feats': {
-            name: 'SRD Feats (d20)',
-            description: 'Feats from django-srd20 pathfinder repository',
-            url: 'https://raw.githubusercontent.com/django-srd20/pathfinder/master/feats.json',
-            collection: 'rules_pf1e',
-            transform: (item) => ({
-                _id: `feat-${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
-                name: item.name,
-                type: 'feat',
-                prerequisites: item.prerequisites,
-                benefit: item.benefit || item.text,
-                normal: item.normal,
-                special: item.special,
-                source: 'd20 SRD'
+                source: item.source || 'PFRPG Core',
+                // Store original spell_level for class-specific lookup
+                spellLevelByClass: item.spell_level
             })
         }
     };
