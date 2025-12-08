@@ -11,7 +11,7 @@ const upload = multer({ storage: multer.memoryStorage() });
  * Provides endpoints to import PF1e data from known Open Game License sources
  */
 module.exports = function (db) {
-    const OGL_SOURCES = {}; // Keep empty if no web sources are active
+
 
     // Mappings for file types to Entity Types (based on filename/path conventions in PSRD-Data)
     const TYPE_MAPPING = {
