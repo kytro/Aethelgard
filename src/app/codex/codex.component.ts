@@ -1138,19 +1138,18 @@ export class CodexComponent implements OnInit {
     }
 
     try {
-      await lastValueFrom(this.http.patch('api/codex/entity', {
-        _id: entity._id,
-        updates: {
-          'baseStats.combat.bab': babStr,
-          'baseStats.combat.cmb': newStats.cmb,
-          'baseStats.combat.cmd': newStats.cmd,
-          'baseStats.saves.fortitude': newStats.fort,
-          'baseStats.saves.reflex': newStats.ref,
-          'baseStats.saves.will': newStats.will,
-          'baseStats.saves.fort': newStats.fort,
-          'baseStats.saves.ref': newStats.ref
-        }
-      }));
+      const updates = {
+        'baseStats.combat.bab': babStr,
+        'baseStats.combat.cmb': newStats.cmb,
+        'baseStats.combat.cmd': newStats.cmd,
+        'baseStats.saves.fortitude': newStats.fort,
+        'baseStats.saves.reflex': newStats.ref,
+        'baseStats.saves.will': newStats.will,
+        'baseStats.saves.fort': newStats.fort,
+        'baseStats.saves.ref': newStats.ref
+      };
+
+      await lastValueFrom(this.http.put(`api/codex/entities/${entity._id}`, updates));
 
       this.closeFixStatsModal();
       this.linkedEntities.set([...this.linkedEntities()]);
