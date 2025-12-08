@@ -80,21 +80,27 @@ ${existingStructurePrompt}
                   - **Combatant (NPC, Monster)**: Two docs. One in 'entities_pf1e', linked by 'entity_id' in 'codex_entries'.
                   - **Non-Combatant (Quest, Location)**: One doc in 'codex_entries' ONLY.
 
-                --- STRUCTURED CONTENT ---
-                The 'content' field must be a JSON array of blocks:
+                --- STRUCTURED CONTENT RULES ---
+                The 'content' field must be a JSON array of blocks.
+                IMPORTANT PARSING RULES:
+                1. If a line ends with a colon (e.g., "The Gearworks:") or is short and bold/capitalized, treat it as a "heading" block. 
+                2. The text following such a line should be a separate "paragraph" block.
+                3. Do NOT merge a defined title/heading into the paragraph text.
+                
+                Content Types:
                 - { "type": "heading", "text": "..." }
                 - { "type": "paragraph", "text": "..." }
                 - { "type": "list", "items": ["...", "..." ] }
                 - { "type": "table", "title": "...", "headers": ["...", "..."], "rows": [{ "Header1": "...", "Header2": "..." }] }
 
                 --- DATA FIELDS BY TYPE ---
+                (Note: 'summary' field is NOT used. Put all descriptive text in 'content')
 
                 **Quest (stored in codex_entries):**
                 {
                   "path_components": ["Quest Category", "Quest Name"],
                   "name": "Quest Name",
                   "category": "Quest",
-                  "summary": "...",
                   "content": [ ... ],
                   "createdAt": "$NOW"
                 }
@@ -118,7 +124,6 @@ ${existingStructurePrompt}
                   "path_components": ["Places", "Location Name"],
                   "name": "Location Name",
                   "category": "Location",
-                  "summary": "...",
                   "content": [ ... ],
                   "createdAt": "$NOW"
                 }
@@ -128,7 +133,6 @@ ${existingStructurePrompt}
                   "path_components": ["Items", "Item Name"],
                   "name": "Item Name",
                   "category": "Item",
-                  "summary": "...",
                   "content": [ ... ],
                   "createdAt": "$NOW"
                 }

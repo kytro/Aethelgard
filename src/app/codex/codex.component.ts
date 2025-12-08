@@ -1072,4 +1072,99 @@ export class CodexComponent implements OnInit {
     if (!preview?.additions?.spellSlots) return [];
     return Object.entries(preview.additions.spellSlots).map(([level, slots]) => ({ level, slots: slots as number }));
   }
+
+  // --- FIX STATS LOGIC ---
+  fixStatsModal = signal<{ isOpen: boolean; entity: Pf1eEntity | null; suggested: any; current: any; loading: boolean }>({
+    isOpen: false,
+    entity: null,
+    suggested: null,
+    current: null,
+    loading: false
+  });
+
+  async openFixStatsModal(entity: Pf1eEntity) {
+    this.fixStatsModal.set({ isOpen: true, entity, suggested: null, current: null, loading: true });
+
+    try {
+      const response: any = await lastValueFrom(this.http.post('api/data-integrity/calculate-fixes', { entity }));
+
+      const bs = entity['baseStats'] || {};
+      const current = {
+        bab: bs?.combat?.bab ?? (bs.BAB ?? 0),
+        cmb: bs?.combat?.cmb ?? (bs.CMB ?? '-'),
+        cmd: bs?.combat?.cmd ?? (bs.CMD ?? '-'),
+        fort: bs?.saves?.fortitude ?? (bs?.saves?.fort ?? 0),
+        ref: bs?.saves?.reflex ?? (bs?.saves?.ref ?? 0),
+        will: bs?.saves?.will ?? 0
+      };
+
+      const suggested = {
+        bab: response.bab,
+        cmb: response.cmb,
+        cmd: response.cmd,
+        fort: response.saves.fort.total,
+        ref: response.saves.ref.total,
+        will: response.saves.will.total,
+        _raw: response
+      };
+
+      this.fixStatsModal.set({ isOpen: true, entity, suggested, current, loading: false });
+
+    } catch (err: any) {
+      console.error('Failed to calculate fixes:', err);
+      this.error.set('Failed to calculate stats: ' + (err.error?.error || err.message));
+      this.fixStatsModal.update(s => ({ ...s, isOpen: false }));
+    }
+  }
+
+  closeFixStatsModal() {
+    this.fixStatsModal.set({ isOpen: false, entity: null, suggested: null, current: null, loading: false });
+  }
+
+  async applyFixStats() {
+    const state = this.fixStatsModal();
+    if (!state.entity || !state.suggested) return;
+
+    const entity = state.entity;
+    const newStats = state.suggested;
+
+    let babStr = String(newStats.bab);
+    if (newStats.bab >= 6) {
+      babStr = `+${newStats.bab}/+${newStats.bab - 5}`;
+      if (newStats.bab >= 11) babStr += `/+${newStats.bab - 10}`;
+      if (newStats.bab >= 16) babStr += `/+${newStats.bab - 15}`;
+    } else {
+      babStr = `+${newStats.bab}`;
+    }
+
+    try {
+      await lastValueFrom(this.http.patch('api/codex/entity', {
+        _id: entity._id,
+        updates: {
+          'baseStats.combat.bab': babStr,
+          'baseStats.combat.cmb': newStats.cmb,
+          'baseStats.combat.cmd': newStats.cmd,
+          'baseStats.saves.fortitude': newStats.fort,
+          'baseStats.saves.reflex': newStats.ref,
+          'baseStats.saves.will': newStats.will,
+          'baseStats.saves.fort': newStats.fort,
+          'baseStats.saves.ref': newStats.ref
+        }
+      }));
+
+      this.closeFixStatsModal();
+      this.linkedEntities.set([...this.linkedEntities()]);
+
+    } catch (err: any) {
+      console.error('Failed to apply fixes:', err);
+      this.error.set('Failed to save fixes: ' + (err.error?.error || err.message));
+    }
+  }
+
+  updateSuggested(field: string, value: any) {
+    this.fixStatsModal.update(s => {
+      if (!s.suggested) return s;
+      return { ...s, suggested: { ...s.suggested, [field]: parseInt(value, 10) } };
+    });
+  }
 }

@@ -189,6 +189,10 @@
                   <span>🤖 AI Complete</span>
                   }
                 </button>
+                <button (click)="openFixStatsModal(entity)"
+                  class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold py-1.5 px-3 rounded-lg transition-colors flex items-center gap-2 ml-2">
+                  <span>🔧 Fix Stats</span>
+                </button>
               </div>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
                 <p><strong class="font-semibold text-gray-400">Class:</strong> <span
@@ -603,6 +607,136 @@
     [style.top]="tooltipPosition().top" [style.left]="tooltipPosition().left">
     <span class="font-bold block mb-1 text-yellow-400">{{ content.title }}</span>
     <span class="whitespace-pre-wrap text-gray-300">{{ content.description || 'No description found.' }}</span>
+  </div>
+  }
+
+  @if (fixStatsModal().isOpen) {
+  <div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+    <div class="bg-gray-900 border border-gray-700 rounded-lg shadow-xl max-w-2xl w-full p-6">
+      <h3 class="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+        <span>🔧</span> Fix Entity Stats <span class="text-gray-500 text-lg font-normal">for {{
+          fixStatsModal().entity?.name }}</span>
+      </h3>
+
+      @if (fixStatsModal().loading) {
+      <div class="flex items-center justify-center py-12">
+        <svg class="animate-spin h-8 w-8 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none"
+          viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor"
+            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+          </path>
+        </svg>
+        <span class="ml-3 text-gray-300">Calculating stats...</span>
+      </div>
+      } @else {
+      <div class="overflow-x-auto">
+        <table class="w-full text-left text-sm text-gray-300">
+          <thead class="text-xs uppercase bg-gray-800 text-gray-400">
+            <tr>
+              <th class="px-4 py-3">Stat</th>
+              <th class="px-4 py-3">Current</th>
+              <th class="px-4 py-3">Calculated</th>
+              <th class="px-4 py-3">New Value (Editable)</th>
+            </tr>
+          </thead>
+          <tbody>
+            <!-- BAB -->
+            <tr class="border-b border-gray-800">
+              <td class="px-4 py-3 font-semibold">BAB</td>
+              <td class="px-4 py-3">{{ fixStatsModal().current.bab }}</td>
+              <td class="px-4 py-3 text-blue-400">{{ fixStatsModal().suggested._raw?.bab }}</td>
+              <td class="px-4 py-3">
+                <input type="number" [value]="fixStatsModal().suggested.bab"
+                  (input)="updateSuggested('bab', $event.target.value)"
+                  class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white w-20 focus:border-blue-500 outline-none">
+              </td>
+            </tr>
+            <!-- CMB -->
+            <tr class="border-b border-gray-800">
+              <td class="px-4 py-3 font-semibold">CMB</td>
+              <td class="px-4 py-3">{{ fixStatsModal().current.cmb }}</td>
+              <td class="px-4 py-3 text-blue-400">{{ fixStatsModal().suggested._raw?.cmb }}</td>
+              <td class="px-4 py-3">
+                <input type="number" [value]="fixStatsModal().suggested.cmb"
+                  (input)="updateSuggested('cmb', $event.target.value)"
+                  class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white w-20 focus:border-blue-500 outline-none">
+              </td>
+            </tr>
+            <!-- CMD -->
+            <tr class="border-b border-gray-800">
+              <td class="px-4 py-3 font-semibold">CMD</td>
+              <td class="px-4 py-3">{{ fixStatsModal().current.cmd }}</td>
+              <td class="px-4 py-3 text-blue-400">{{ fixStatsModal().suggested._raw?.cmd }}</td>
+              <td class="px-4 py-3">
+                <input type="number" [value]="fixStatsModal().suggested.cmd"
+                  (input)="updateSuggested('cmd', $event.target.value)"
+                  class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white w-20 focus:border-blue-500 outline-none">
+              </td>
+            </tr>
+            <!-- Fort -->
+            <tr class="border-b border-gray-800">
+              <td class="px-4 py-3 font-semibold">Fortitude</td>
+              <td class="px-4 py-3">{{ fixStatsModal().current.fort }}</td>
+              <td class="px-4 py-3 text-blue-400">{{ fixStatsModal().suggested._raw?.saves?.fort?.total }}
+                <span class="text-xs text-gray-500">({{ fixStatsModal().suggested._raw?.saves?.fort?.base }} + {{
+                  fixStatsModal().suggested._raw?.saves?.fort?.mod }})</span>
+              </td>
+              <td class="px-4 py-3 block">
+                <input type="number" [value]="fixStatsModal().suggested.fort"
+                  (input)="updateSuggested('fort', $event.target.value)"
+                  class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white w-20 focus:border-blue-500 outline-none">
+              </td>
+            </tr>
+            <!-- Ref -->
+            <tr class="border-b border-gray-800">
+              <td class="px-4 py-3 font-semibold">Reflex</td>
+              <td class="px-4 py-3">{{ fixStatsModal().current.ref }}</td>
+              <td class="px-4 py-3 text-blue-400">{{ fixStatsModal().suggested._raw?.saves?.ref?.total }}
+                <span class="text-xs text-gray-500">({{ fixStatsModal().suggested._raw?.saves?.ref?.base }} + {{
+                  fixStatsModal().suggested._raw?.saves?.ref?.mod }})</span>
+              </td>
+              <td class="px-4 py-3">
+                <input type="number" [value]="fixStatsModal().suggested.ref"
+                  (input)="updateSuggested('ref', $event.target.value)"
+                  class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white w-20 focus:border-blue-500 outline-none">
+              </td>
+            </tr>
+            <!-- Will -->
+            <tr>
+              <td class="px-4 py-3 font-semibold">Will</td>
+              <td class="px-4 py-3">{{ fixStatsModal().current.will }}</td>
+              <td class="px-4 py-3 text-blue-400">{{ fixStatsModal().suggested._raw?.saves?.will?.total }}
+                <span class="text-xs text-gray-500">({{ fixStatsModal().suggested._raw?.saves?.will?.base }} + {{
+                  fixStatsModal().suggested._raw?.saves?.will?.mod }})</span>
+              </td>
+              <td class="px-4 py-3">
+                <input type="number" [value]="fixStatsModal().suggested.will"
+                  (input)="updateSuggested('will', $event.target.value)"
+                  class="bg-gray-800 border border-gray-600 rounded px-2 py-1 text-white w-20 focus:border-blue-500 outline-none">
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="mt-4 p-3 bg-blue-900/20 text-blue-200 text-xs rounded border border-blue-800">
+          <strong>Detail:</strong> Level determined as {{ fixStatsModal().suggested._raw?.level }}.
+          Class logic assumed {{ fixStatsModal().suggested._raw?.bab === fixStatsModal().suggested._raw?.level ? 'Full'
+          : (fixStatsModal().suggested._raw?.bab > fixStatsModal().suggested._raw?.level * 0.6 ? 'Medium' : 'Poor') }}
+          BAB.
+        </div>
+      </div>
+      <div class="flex justify-end gap-3 mt-6">
+        <button (click)="closeFixStatsModal()"
+          class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded font-bold transition-colors">
+          Cancel
+        </button>
+        <button (click)="applyFixStats()"
+          class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-bold transition-colors">
+          Apply Fixes
+        </button>
+      </div>
+      }
+    </div>
   </div>
   }
 </div>

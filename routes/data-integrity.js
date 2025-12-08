@@ -707,6 +707,139 @@ ${JSON.stringify(existingNames)}`;
         }
     });
 
+    // -------------------------------------------------------------
+    // ROUTE 1.6: CALCULATE FIXES (Manual "Fix Stats" Feature)
+    // -------------------------------------------------------------
+    router.post('/calculate-fixes', async (req, res) => {
+        const entity = req.body.entity;
+        if (!entity || !entity.baseStats) {
+            return res.status(400).json({ error: 'Invalid entity provided.' });
+        }
+
+        try {
+            const baseStats = entity.baseStats;
+            const stats = {
+                str: getAbilityModifierAsNumber(baseStats.Str ?? 10),
+                dex: getAbilityModifierAsNumber(baseStats.Dex ?? 10),
+                con: getAbilityModifierAsNumber(baseStats.Con ?? 10),
+                int: getAbilityModifierAsNumber(baseStats.Int ?? 10),
+                wis: getAbilityModifierAsNumber(baseStats.Wis ?? 10),
+                cha: getAbilityModifierAsNumber(baseStats.Cha ?? 10)
+            };
+
+            // Progression Tables
+            const GOOD_SAVES = [2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12];
+            const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6];
+
+            const SIZE_MODS = {
+                'Fine': { size: 8, special: -8 }, 'Diminutive': { size: 4, special: -4 },
+                'Tiny': { size: 2, special: -2 }, 'Small': { size: 1, special: -1 },
+                'Medium': { size: 0, special: 0 }, 'Large': { size: -1, special: 1 },
+                'Huge': { size: -2, special: 2 }, 'Gargantuan': { size: -4, special: 4 },
+                'Colossal': { size: -8, special: 8 }
+            };
+
+            // 1. Level / HD
+            // Try to parse HD (e.g., "12d10+48") or use explicit level
+            let level = 1;
+            const hpString = String(baseStats.hp || baseStats.HP || "");
+            const hdMatch = hpString.match(/(\d+)d/);
+            if (hdMatch) {
+                level = parseInt(hdMatch[1], 10);
+            } else if (baseStats.level) {
+                level = parseInt(baseStats.level, 10);
+            } else {
+                // Fallback to CR if available?
+                const crString = String(baseStats.CR || 1);
+                const cr = parseFloat(crString.includes('/') ? (parseInt(crString.split('/')[0]) / parseInt(crString.split('/')[1])) : crString);
+                if (cr > 1) level = Math.max(1, Math.floor(cr)); // Rough approximation
+            }
+            // Cap at 20 for table safety, though monsters go higher.
+            // For monsters > 20, logic is usually linear.
+            const safeIndex = Math.min(Math.max(0, level - 1), 19);
+
+
+            // 2. Class / Role Logic (Heuristic for BAB/Saves)
+            // Default to "Monster" progressions if class unknown
+            // BAB: Fast (1), Medium (0.75), Slow (0.5)
+            // Saves: Usually 2 Good, 1 Poor? Or all Good (Outsider)? Or all Poor (Construct)?
+            const className = (baseStats.class || "").toLowerCase();
+            const type = (baseStats.type || "").toLowerCase();
+
+            // Simple BAB Heuristic
+            let babMult = 0.75; // Medium
+            if (['fighter', 'barbarian', 'paladin', 'ranger', 'cavalier', 'gunslinger', 'slayer', 'swashbuckler', 'dragon', 'magical beast', 'outsider'].some(c => className.includes(c) || type.includes(c))) {
+                babMult = 1;
+            } else if (['wizard', 'sorcerer', 'witch', 'fey', 'undead'].some(c => className.includes(c) || type.includes(c))) {
+                babMult = 0.5;
+            }
+            const bab = Math.floor(level * babMult);
+
+            // Saves Heuristic
+            // Construct/Undead have immune traits, but assuming standard saves
+            // Outsider/Dragon = All Good
+            // Humanoid = 1 Good (usually Ref or Fort based on typical classes)? Too complex to guess perfectly.
+            // Strategy: Calculate Good/Poor values for this level and let user pick?
+            // BETTER: Calculate based on Stats (Con for Fort, Dex for Ref, Wis for Will)
+            // If Con is high, assume Good Fort? No, that's cheat.
+            // Let's assume POOR saves by default and let user override, OR Provide both specific options?
+            // "Calculated" column will assume Good for the 2 highest stats? 
+            // Let's just provide the raw base numbers for Good/Poor at this level so user sees context?
+            // Actually, let's try to match existing logic:
+            // High Save = GOOD_SAVES[safeIndex], Low Save = POOR_SAVES[safeIndex]
+
+            // We will guess based on class keywords or type
+            let fortGood = false, refGood = false, willGood = false;
+
+            if (type.includes('dragon') || type.includes('outsider')) { fortGood = true; refGood = true; willGood = true; }
+            else if (type.includes('undead')) { willGood = true; } // Undead have good Will
+            else if (type.includes('magical beast')) { fortGood = true; refGood = true; }
+            else if (type.includes('animal')) { fortGood = true; refGood = true; }
+            else if (type.includes('construct')) { } // Usually poor?
+            else if (type.includes('fey')) { refGood = true; willGood = true; }
+            else if (type.includes('humanoid')) { fortGood = true; } // Generic warrior assumption
+            // Class overrides
+            if (className.includes('cleric') || className.includes('druid') || className.includes('wizard') || className.includes('sorcerer')) { willGood = true; }
+            if (className.includes('rogue') || className.includes('bard') || className.includes('ranger') || className.includes('monk')) { refGood = true; }
+            if (className.includes('fighter') || className.includes('barbarian') || className.includes('paladin') || className.includes('ranger') || className.includes('monk')) { fortGood = true; }
+
+            const baseFort = fortGood ? GOOD_SAVES[safeIndex] : POOR_SAVES[safeIndex];
+            const baseRef = refGood ? GOOD_SAVES[safeIndex] : POOR_SAVES[safeIndex];
+            const baseWill = willGood ? GOOD_SAVES[safeIndex] : POOR_SAVES[safeIndex];
+
+            const fort = baseFort + stats.con;
+            const ref = baseRef + stats.dex;
+            const will = baseWill + stats.wis;
+
+            // 3. Size Mods
+            let sizeKey = 'Medium';
+            for (const key of Object.keys(SIZE_MODS)) {
+                if ((baseStats.size || "").toLowerCase() === key.toLowerCase()) sizeKey = key;
+            }
+            const sizeMod = SIZE_MODS[sizeKey];
+
+            // 4. CM
+            const cmb = bab + stats.str + sizeMod.special;
+            const cmd = 10 + bab + stats.str + stats.dex + sizeMod.special;
+
+            res.json({
+                level,
+                bab,
+                cmb,
+                cmd,
+                saves: {
+                    fort: { total: fort, base: baseFort, mod: stats.con, isGood: fortGood },
+                    ref: { total: ref, base: baseRef, mod: stats.dex, isGood: refGood },
+                    will: { total: will, base: baseWill, mod: stats.wis, isGood: willGood }
+                }
+            });
+
+        } catch (e) {
+            console.error('[CALCULATE FIXES] Error:', e);
+            res.status(500).json({ error: e.message });
+        }
+    });
+
 
     // -------------------------------------------------------------
     // ROUTE 2: LINK EQUIPMENT (Gemini-assisted with PF1e Prompt)
