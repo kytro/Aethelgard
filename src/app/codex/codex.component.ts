@@ -28,7 +28,7 @@ interface TooltipContent { title: string; description: string; }
 @Component({
   selector: 'app-codex',
   standalone: true,
-  imports: [CommonModule, MapViewerComponent, KeyValuePipe],
+  imports: [CommonModule, MapViewerComponent],
   templateUrl: './codex.component.html',
   styleUrls: ['./codex.component.css'],
   styles: [`

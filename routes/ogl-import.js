@@ -1,201 +1,218 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const JSZip = require('jszip');
+
+// Use memory storage for processing zip files without saving to disk first
+const upload = multer({ storage: multer.memoryStorage() });
 
 /**
  * OGL Data Import Routes
  * Provides endpoints to import PF1e data from known Open Game License sources
  */
 module.exports = function (db) {
+    const OGL_SOURCES = {}; // Keep empty if no web sources are active
 
-    // Available OGL data sources
-    // NOTE: Feat sources are not available - use Custom Import with your own URL
-    // The spells source below is verified working as of Dec 2024
-    const OGL_SOURCES = {
-        'community-spells-complete': {
-            name: 'PF1e Spells (Complete ~2000+)',
-            description: 'Comprehensive spell list from all Pathfinder 1e books (cityofwalls gist)',
-            url: 'https://gist.githubusercontent.com/cityofwalls/0fdeb2da5d7b475968c8de88c75e77ad/raw/PathfinderSpellsJSON.txt',
-            collection: 'spells_pf1e',
-            transform: (item) => ({
-                // Use existing app prefix convention: sp_ for spells
-                _id: `sp_${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
-                name: item.name,
-                school: item.school,
-                // Parse spell level from "sorcerer/wizard 2, cleric 3" format
-                level: item.spell_level || item.level,
-                castingTime: item.casting_time,
-                components: item.components,
-                range: item.range,
-                targets: item.targets,
-                area: item.area,
-                effect: item.effect,
-                duration: item.duration,
-                savingThrow: item.saving_throw,
-                spellResistance: item.spell_resistance,
-                description: item.description,
-                source: item.source || 'PFRPG Core',
-                // Store original spell_level for class-specific lookup
-                spellLevelByClass: item.spell_level
-            })
-        }
+    // Mappings for file types to Entity Types (based on filename/path conventions in PSRD-Data)
+    const TYPE_MAPPING = {
+        'feat': 'feat',
+        'item': 'item',
+        'spell': 'spell'
+    };
+
+    const COLLECTIONS = {
+        'feat': 'entities_pf1e',
+        'item': 'entities_pf1e',
+        'spell': 'spells_pf1e'
     };
 
     /**
-     * GET /sources
-     * Returns list of available OGL data sources
+     * Transform logic to map OGL JSON to Codex schema
      */
-    router.get('/sources', (req, res) => {
-        const sources = Object.entries(OGL_SOURCES).map(([key, value]) => ({
-            key,
-            name: value.name,
-            description: value.description,
-            collection: value.collection
-        }));
-        res.json(sources);
-    });
+    function transform(data, type, sourceDir) {
+        if (!data.name) return null;
+
+        const idBase = data.name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+        const sourceBook = sourceDir.split('/')[0]; // e.g., 'core_rulebook'
+
+        if (type === 'spell') {
+            return {
+                _id: `sp_${idBase}`,
+                name: data.name,
+                type: 'spell',
+                school: data.school,
+                subschool: data.subschool,
+                descriptor: data.descriptor,
+                level: data.spell_level,
+                castingTime: data.casting_time,
+                components: data.components,
+                range: data.range,
+                area: data.area,
+                target: data.target,
+                duration: data.duration,
+                savingThrow: data.saving_throw,
+                spellResistance: data.spell_resistance,
+                description: data.description_formated || data.description,
+                source: sourceBook,
+                fullText: data.full_text,
+                isOGL: true
+            };
+        } else if (type === 'feat') {
+            return {
+                _id: `feat_${idBase}`,
+                name: data.name,
+                type: 'feat',
+                description: data.description,
+                prerequisites: data.prerequisites,
+                benefit: data.benefit,
+                normal: data.normal,
+                special: data.special,
+                source: sourceBook,
+                featType: data.type,
+                fullText: data.full_text,
+                isOGL: true
+            };
+        } else if (type === 'item') {
+            let subType = 'equipment';
+            if (sourceDir.includes('ultimate_equipment')) {
+                if (data.aura || data.slot) subType = 'magic_item';
+            }
+            if (data.armor_class || data.armor_check_penalty) subType = 'armor';
+            if (data.dmg_s || data.dmg_m || data.critical) subType = 'weapon';
+
+            return {
+                _id: `item_${idBase}`,
+                name: data.name,
+                type: subType,
+                description: data.description,
+                price: data.price,
+                weight: data.weight,
+                damageSmall: data.dmg_s,
+                damageMedium: data.dmg_m,
+                critical: data.critical,
+                range: data.range,
+                weaponType: data.weapon_type,
+                damageType: data.type,
+                armorBonus: data.armor_bonus || data.ac,
+                maxDex: data.max_dex_bonus,
+                checkPenalty: data.armor_check_penalty || data.check_penalty,
+                arcaneFailure: data.arcane_spell_failure_chance || data.spell_failure,
+                speed30: data.speed_30,
+                speed20: data.speed_20,
+                aura: data.aura,
+                slot: data.slot,
+                cl: data.cl,
+                construction: data.construction,
+                source: sourceBook,
+                fullText: data.full_text,
+                isOGL: true
+            };
+        }
+        return null;
+    }
 
     /**
-     * POST /import
-     * Import data from a selected OGL source
-     * Body: { sourceKey: string, mode: 'merge' | 'replace' }
+     * POST /import/zip
+     * Upload and process a PSRD-Data zip file
      */
-    router.post('/import', async (req, res) => {
-        const { sourceKey, mode = 'merge' } = req.body;
+    router.post('/import/zip', upload.single('file'), async (req, res) => {
+        console.log('[OGL Import (ZIP)] Starting import...');
 
-        if (!sourceKey || !OGL_SOURCES[sourceKey]) {
-            return res.status(400).json({ error: `Unknown source: ${sourceKey}` });
+        if (!req.file) {
+            return res.status(400).json({ error: 'No file uploaded' });
         }
 
-        const source = OGL_SOURCES[sourceKey];
-        console.log(`[OGL Import] Starting import from ${source.name} (${mode} mode)`);
-
         try {
-            // Fetch data from source URL
-            const response = await fetch(source.url);
+            const zip = await JSZip.loadAsync(req.file.buffer);
+            console.log(`[OGL Import (ZIP)] Opened zip file. Processing entries...`);
 
-            if (!response.ok) {
-                throw new Error(`Failed to fetch from ${source.url}: ${response.status}`);
-            }
-
-            const rawData = await response.json();
-
-            // Handle different data structures (array or object with items property)
-            let items = [];
-            if (Array.isArray(rawData)) {
-                items = rawData;
-            } else if (rawData.items) {
-                items = rawData.items;
-            } else if (rawData.spells) {
-                items = rawData.spells;
-            } else if (rawData.feats) {
-                items = rawData.feats;
-            } else {
-                // Try to extract from first object property that's an array
-                const firstArrayProp = Object.values(rawData).find(v => Array.isArray(v));
-                if (firstArrayProp) {
-                    items = firstArrayProp;
-                }
-            }
-
-            if (!items.length) {
-                return res.status(400).json({ error: 'No items found in source data' });
-            }
-
-            console.log(`[OGL Import] Found ${items.length} items to import`);
-
-            // Transform items
-            const transformed = items
-                .filter(item => item && item.name) // Filter out invalid items
-                .map(source.transform);
-
-            // Replace mode: clear collection first
-            if (mode === 'replace') {
-                const deleteResult = await db.collection(source.collection).deleteMany({ source: { $regex: /^PSRD|Community/i } });
-                console.log(`[OGL Import] Cleared ${deleteResult.deletedCount} existing OGL items`);
-            }
-
-            // Bulk upsert
-            const bulkOps = transformed.map(item => ({
-                updateOne: {
-                    filter: { _id: item._id },
-                    update: { $set: item },
-                    upsert: true
-                }
-            }));
-
-            const result = await db.collection(source.collection).bulkWrite(bulkOps, { ordered: false });
-
-            const summary = {
-                source: source.name,
-                collection: source.collection,
-                mode: mode,
-                itemsProcessed: transformed.length,
-                inserted: result.upsertedCount || 0,
-                updated: result.modifiedCount || 0,
-                matched: result.matchedCount || 0
+            let processedCount = 0;
+            let errorCount = 0;
+            const updates = {
+                entities_pf1e: [],
+                spells_pf1e: []
             };
 
-            console.log(`[OGL Import] Complete:`, summary);
-            res.json(summary);
+            // Targeted directories to scan within the zip
+            const TARGET_DIRS = [
+                'feat', 'item', 'spell'
+            ];
+
+            const entries = Object.keys(zip.files);
+
+            for (const filename of entries) {
+                const file = zip.files[filename];
+                if (file.dir || !filename.endsWith('.json')) continue;
+
+                // Check if file is in a target directory (e.g. contains /feat/)
+                // Normalize path separators just in case
+                const normPath = filename.replace(/\\/g, '/');
+
+                // Determine type based on path
+                // Looking for structure generally like 'core_rulebook/feat/...' or just 'feat/...'
+                let typeKey = null;
+                for (const t of TARGET_DIRS) {
+                    // Check if path contains /{type}/ or ends with /{type}.json (unlikely)
+                    // We assume PSRD structure: BookName/type/filename.json
+                    if (normPath.includes(`/${t}/`)) {
+                        typeKey = t;
+                        break;
+                    }
+                }
+
+                if (!typeKey) continue;
+
+                const entityType = TYPE_MAPPING[typeKey];
+                const collectionName = COLLECTIONS[typeKey];
+
+                try {
+                    const content = await file.async('string');
+                    const rawData = JSON.parse(content);
+
+                    // Pass the full path as sourceDir to help with book identification
+                    const doc = transform(rawData, entityType, normPath);
+                    if (doc) {
+                        updates[collectionName].push({
+                            updateOne: {
+                                filter: { _id: doc._id },
+                                update: { $set: doc },
+                                upsert: true
+                            }
+                        });
+                        processedCount++;
+                    }
+                } catch (e) {
+                    console.error(`Error processing ${filename}:`, e.message);
+                    errorCount++;
+                }
+            }
+
+            // Bulk write
+            const resultSummary = {
+                processed: processedCount,
+                errors: errorCount,
+                entities: 0,
+                spells: 0
+            };
+
+            for (const [colName, ops] of Object.entries(updates)) {
+                if (ops.length > 0) {
+                    // Split into chunks of 1000
+                    const chunkSize = 1000;
+                    for (let i = 0; i < ops.length; i += chunkSize) {
+                        const chunk = ops.slice(i, i + chunkSize);
+                        const result = await db.collection(colName).bulkWrite(chunk, { ordered: false });
+                        if (colName === 'entities_pf1e') resultSummary.entities += (result.upsertedCount + result.modifiedCount);
+                        if (colName === 'spells_pf1e') resultSummary.spells += (result.upsertedCount + result.modifiedCount);
+                    }
+                }
+            }
+
+            console.log(`[OGL Import (ZIP)] Complete.`, resultSummary);
+            res.json(resultSummary);
 
         } catch (error) {
-            console.error(`[OGL Import] Error:`, error);
-            res.status(500).json({ error: error.message });
-        }
-    });
-
-    /**
-     * POST /import/custom
-     * Import from a custom URL
-     * Body: { url: string, collection: string, mode: 'merge' | 'replace', idPrefix: string }
-     */
-    router.post('/import/custom', async (req, res) => {
-        const { url, collection, mode = 'merge', idPrefix = 'custom-' } = req.body;
-
-        if (!url || !collection) {
-            return res.status(400).json({ error: 'url and collection are required' });
-        }
-
-        try {
-            const response = await fetch(url);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch from ${url}: ${response.status}`);
-            }
-
-            const rawData = await response.json();
-            const items = Array.isArray(rawData) ? rawData : rawData.items || Object.values(rawData).find(v => Array.isArray(v)) || [];
-
-            if (!items.length) {
-                return res.status(400).json({ error: 'No items found in source data' });
-            }
-
-            const transformed = items
-                .filter(item => item && item.name)
-                .map(item => ({
-                    _id: `${idPrefix}${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
-                    ...item,
-                    source: 'Custom Import'
-                }));
-
-            if (mode === 'replace') {
-                await db.collection(collection).deleteMany({ source: 'Custom Import' });
-            }
-
-            const bulkOps = transformed.map(item => ({
-                updateOne: { filter: { _id: item._id }, update: { $set: item }, upsert: true }
-            }));
-
-            const result = await db.collection(collection).bulkWrite(bulkOps, { ordered: false });
-
-            res.json({
-                source: url,
-                collection,
-                itemsProcessed: transformed.length,
-                inserted: result.upsertedCount || 0,
-                updated: result.modifiedCount || 0
-            });
-
-        } catch (error) {
+            console.error('[OGL Import (ZIP)] Error:', error);
             res.status(500).json({ error: error.message });
         }
     });
