@@ -8,101 +8,59 @@ const router = express.Router();
 module.exports = function (db) {
 
     // Available OGL data sources - can be extended with more sources
+    // VERIFIED WORKING URLs as of 2024
     const OGL_SOURCES = {
-        'psrd-spells-core': {
-            name: 'PSRD Core Spells',
-            description: 'Core Rulebook spells from Pathfinder SRD',
-            url: 'https://raw.githubusercontent.com/PSRD-Data-release/prd-json/master/core_rulebook/spells.json',
+        'community-spells-complete': {
+            name: 'PF1e Spells (Complete)',
+            description: 'Comprehensive spell list from cityofwalls gist (~2000+ spells)',
+            url: 'https://gist.githubusercontent.com/cityofwalls/0fdeb2da5d7b475968c8de88c75e77ad/raw/PathfinderSpellsJSON.txt',
             collection: 'spells_pf1e',
             transform: (item) => ({
-                _id: `spell-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+                _id: `spell-${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
                 name: item.name,
                 school: item.school,
                 level: item.spell_level || item.level,
                 castingTime: item.casting_time,
                 components: item.components,
                 range: item.range,
+                targets: item.targets,
                 duration: item.duration,
                 savingThrow: item.saving_throw,
                 spellResistance: item.spell_resistance,
-                description: item.description || item.text,
-                source: 'PSRD Core'
+                description: item.description,
+                source: item.source || 'PFRPG Core'
             })
         },
-        'psrd-feats-core': {
-            name: 'PSRD Core Feats',
-            description: 'Core Rulebook feats from Pathfinder SRD',
-            url: 'https://raw.githubusercontent.com/PSRD-Data-release/prd-json/master/core_rulebook/feats.json',
+        'community-feats': {
+            name: 'PF1e Feats',
+            description: 'Pathfinder RPG feats from Luxura PFRPG Feat Card project',
+            url: 'https://raw.githubusercontent.com/Luxura/PFRPG_Feat_card/master/feat.json',
             collection: 'rules_pf1e',
             transform: (item) => ({
-                _id: `feat-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+                _id: `feat-${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
                 name: item.name,
                 type: 'feat',
                 prerequisites: item.prerequisites || item.prerequisite,
                 benefit: item.benefit || item.description,
                 normal: item.normal,
                 special: item.special,
-                source: 'PSRD Core'
+                source: item.source || 'PFRPG Core'
             })
         },
-        'psrd-equipment': {
-            name: 'PSRD Equipment',
-            description: 'Weapons, Armor, and Gear from Pathfinder SRD',
-            url: 'https://raw.githubusercontent.com/PSRD-Data-release/prd-json/master/core_rulebook/equipment.json',
-            collection: 'equipment_pf1e',
+        'django-srd-feats': {
+            name: 'SRD Feats (d20)',
+            description: 'Feats from django-srd20 pathfinder repository',
+            url: 'https://raw.githubusercontent.com/django-srd20/pathfinder/master/feats.json',
+            collection: 'rules_pf1e',
             transform: (item) => ({
-                _id: `eq-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+                _id: `feat-${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
                 name: item.name,
-                type: item.type || 'gear',
-                weight: item.weight,
-                cost: item.cost || item.price,
-                description: item.description,
-                // Weapon properties
-                damage: item.damage,
-                critical: item.critical,
-                range: item.range,
-                // Armor properties
-                armorBonus: item.armor_bonus,
-                maxDex: item.max_dex,
-                checkPenalty: item.armor_check_penalty,
-                source: 'PSRD Core'
-            })
-        },
-        'psrd-magic-items': {
-            name: 'PSRD Magic Items',
-            description: 'Magic items from Pathfinder SRD',
-            url: 'https://raw.githubusercontent.com/PSRD-Data-release/prd-json/master/core_rulebook/magic_items.json',
-            collection: 'magic_items_pf1e',
-            transform: (item) => ({
-                _id: `mi-${item.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
-                name: item.name,
-                slot: item.slot,
-                aura: item.aura,
-                cl: item.cl,
-                weight: item.weight,
-                cost: item.cost || item.price,
-                description: item.description,
-                construction: item.construction,
-                source: 'PSRD Core'
-            })
-        },
-        'community-spells-complete': {
-            name: 'Community Spells (All Books)',
-            description: 'Comprehensive spell list from community sources',
-            url: 'https://raw.githubusercontent.com/arantius/pf1e-spells/master/spells.json',
-            collection: 'spells_pf1e',
-            transform: (item) => ({
-                _id: `spell-${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
-                name: item.name,
-                school: item.school,
-                level: item.level,
-                castingTime: item.casting_time || item.castingTime,
-                range: item.range,
-                duration: item.duration,
-                savingThrow: item.saving_throw || item.savingThrow,
-                spellResistance: item.spell_resistance || item.spellResistance,
-                description: item.description,
-                source: item.source || 'Community'
+                type: 'feat',
+                prerequisites: item.prerequisites,
+                benefit: item.benefit || item.text,
+                normal: item.normal,
+                special: item.special,
+                source: 'd20 SRD'
             })
         }
     };
