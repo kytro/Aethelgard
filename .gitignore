@@ -150,3 +150,7 @@ scratch.md
 *.bak
 
 *.zip
+
+# Codex Backup
+codex_backup*.json
+codex_backup*/

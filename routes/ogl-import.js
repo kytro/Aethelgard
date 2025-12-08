@@ -1,5 +1,4 @@
 const express = require('express');
-const router = express.Router();
 const multer = require('multer');
 const JSZip = require('jszip');
 
@@ -11,19 +10,28 @@ const upload = multer({ storage: multer.memoryStorage() });
  * Provides endpoints to import PF1e data from known Open Game License sources
  */
 module.exports = function (db) {
+    const router = express.Router();
 
 
     // Mappings for file types to Entity Types (based on filename/path conventions in PSRD-Data)
     const TYPE_MAPPING = {
         'feat': 'feat',
         'item': 'item',
-        'spell': 'spell'
+        'spell': 'spell',
+        'trap': 'trap',
+        'monster': 'monster',
+        'npc': 'npc',
+        'deity': 'deity'
     };
 
     const COLLECTIONS = {
-        'feat': 'entities_pf1e',
-        'item': 'entities_pf1e',
-        'spell': 'spells_pf1e'
+        'feat': 'rules_pf1e',
+        'item': 'equipment_pf1e',
+        'spell': 'spells_pf1e',
+        'trap': 'hazards_pf1e',
+        'monster': 'entities_pf1e',
+        'npc': 'entities_pf1e',
+        'deity': 'entities_pf1e'
     };
 
     /**
@@ -107,6 +115,120 @@ module.exports = function (db) {
                 fullText: data.full_text,
                 isOGL: true
             };
+        } else if (type === 'trap') {
+            return {
+                _id: `hz_${idBase}`, // Standardized prefix for hazards
+                name: data.name,
+                type: data.type || 'Trap',
+                cr: data.cr,
+                xp: data.xp,
+                perception: data.perception || data.search,
+                disableDevice: data.disable_device,
+                effects: data.effects || [],
+                description: data.description,
+                source: sourceBook,
+                fullText: data.full_text,
+                isOGL: true
+            };
+        } else if (type === 'monster' || type === 'npc') {
+            // Helper to clean descriptions
+            const cleanDesc = (d) => (d || '').replace(/<[^>]*>/g, '').trim();
+
+            // Construct Base Stats
+            const baseStats = {
+                Str: data.ability_scores?.str || data.strength || 10,
+                Dex: data.ability_scores?.dex || data.dexterity || 10,
+                Con: data.ability_scores?.con || data.constitution || 10,
+                Int: data.ability_scores?.int || data.intelligence || 10,
+                Wis: data.ability_scores?.wis || data.wisdom || 10,
+                Cha: data.ability_scores?.cha || data.charisma || 10,
+                size: data.size || 'Medium',
+                race: data.race,
+                class: data.class,
+                alignment: data.alignment,
+                hp: data.hp || data.hit_points, // Support variations
+                hitDice: data.hd,
+                speed: data.speed,
+                senses: data.senses,
+                type: data.creature_type || data.type,
+                subtype: data.creature_subtype || data.subtype
+            };
+
+            // AC
+            if (data.ac) {
+                baseStats.armorClass = {
+                    total: parseInt(data.ac) || 10,
+                    touch: parseInt(data.ac_touch) || 10,
+                    flatFooted: parseInt(data.ac_flat_footed) || 10
+                };
+            }
+
+            // Saves
+            if (data.saves) {
+                baseStats.saves = {
+                    fortitude: parseInt(data.fort) || 0,
+                    reflex: parseInt(data.ref) || 0,
+                    will: parseInt(data.will) || 0
+                };
+            }
+
+            // Combat
+            baseStats.combat = {
+                bab: parseInt(data.base_attack) || 0,
+                cmb: data.cmb,
+                cmd: data.cmd,
+                init: parseInt(data.init) || 0
+            };
+
+            // Skills
+            if (data.skills) {
+                baseStats.skills = {};
+                // Split by comma, but be careful of commas inside parentheses if any (though standard OGL skills usually don't have them)
+                // A simpler split by ',' is usually sufficient for standard statblocks
+                const skillParts = data.skills.split(',').map(s => s.trim());
+                skillParts.forEach(part => {
+                    // Regex to match "Skill Name +Modifier"
+                    // Handles "Perception +5", "Knowledge (arcana) +10"
+                    const match = part.match(/^(.*?)\s+([+-]?\d+)$/);
+                    if (match) {
+                        const skillName = match[1].trim();
+                        const modifier = parseInt(match[2]);
+                        baseStats.skills[skillName] = modifier;
+                    }
+                });
+            }
+
+            return {
+                _id: `${type}_${idBase}`,
+                name: data.name,
+                type: type, // 'monster' or 'npc'
+                cr: data.cr,
+                xp: data.xp,
+                description: cleanDesc(data.description),
+                baseStats: baseStats,
+                source: sourceBook,
+                sections: data.sections || [], // Keep extra sections/special abilities if available
+                fullText: data.full_text,
+                environment: data.environment,
+                organization: data.organization,
+                treasure: data.treasure,
+                isOGL: true
+            };
+        } else if (type === 'deity') {
+            return {
+                _id: `deity_${idBase}`,
+                name: data.name,
+                type: 'deity',
+                alignment: data.alignment,
+                domains: data.domains,
+                favoredWeapon: data.favored_weapon,
+                centersOfWorship: data.centers_of_worship,
+                nationality: data.nationality,
+                description: data.description,
+                source: sourceBook,
+                fullText: data.full_text,
+                isOGL: true
+            };
         }
         return null;
     }
@@ -129,14 +251,19 @@ module.exports = function (db) {
             let processedCount = 0;
             let errorCount = 0;
             const updates = {
-                entities_pf1e: [],
-                spells_pf1e: []
+                entities_pf1e: [],  // Legacy / Misc
+                rules_pf1e: [],     // Feats
+                equipment_pf1e: [], // Items
+                hazards_pf1e: [],   // Traps
+                spells_pf1e: []     // Spells
             };
 
             // Targeted directories to scan within the zip
             const TARGET_DIRS = [
-                'feat', 'item', 'spell'
+                'feat', 'item', 'spell', 'trap', 'monster', 'npc', 'deity'
             ];
+
+            const codexOps = []; // Store ops for Codex Entries
 
             const entries = Object.keys(zip.files);
 
@@ -180,6 +307,228 @@ module.exports = function (db) {
                             }
                         });
                         processedCount++;
+
+                        // --- CODEX PAGE GENERATION (For Monsters/NPCs) ---
+                        if (entityType === 'monster' || entityType === 'npc') {
+                            const category = doc.baseStats?.type || 'Uncategorized';
+                            // Capitalize first letter
+                            const catFormatted = category.charAt(0).toUpperCase() + category.slice(1);
+
+                            const path = ['Bestiary', catFormatted, doc.name];
+
+                            // Helper to parse HTML to Blocks
+                            // Supports <p>, <table>, <h3>
+                            function parseHtmlToBlocks(html) {
+                                const blocks = [];
+                                if (!html) return blocks;
+
+                                // Remove newlines to make regex easier
+                                const cleanHtml = html.replace(/\r?\n|\r/g, '');
+
+                                // Simple regex parser
+                                // Note: This is not a full HTML parser and assumes well-formed OGL data
+                                let remaining = cleanHtml;
+
+                                // Regexes
+                                const tableRegex = /<table.*?>(.*?)<\/table>/i;
+                                const pRegex = /<p.*?>(.*?)<\/p>/i;
+                                const hRegex = /<h[1-6].*?>(.*?)<\/h[1-6]>/i;
+                                const captionRegex = /<caption.*?>(.*?)<\/caption>/i;
+
+                                // We will iteratively find the first match of any type
+                                while (remaining.length > 0) {
+                                    const tableMatch = remaining.match(tableRegex);
+                                    const pMatch = remaining.match(pRegex);
+                                    const hMatch = remaining.match(hRegex);
+
+                                    let bestMatch = null;
+                                    let type = '';
+                                    let minIndex = Infinity;
+
+                                    if (tableMatch && tableMatch.index < minIndex) { minIndex = tableMatch.index; bestMatch = tableMatch; type = 'table'; }
+                                    if (pMatch && pMatch.index < minIndex) { minIndex = pMatch.index; bestMatch = pMatch; type = 'paragraph'; }
+                                    if (hMatch && hMatch.index < minIndex) { minIndex = hMatch.index; bestMatch = hMatch; type = 'heading'; }
+
+                                    if (!bestMatch) break; // No more known tags
+
+                                    // Add everything before as partial text if needed? Usually OGL is wrapped.
+                                    // For now, ignore text outside tags to avoid noise.
+
+                                    if (type === 'paragraph') {
+                                        blocks.push({
+                                            type: 'paragraph',
+                                            text: bestMatch[1].replace(/<[^>]*>/g, '') // Strip inner tags like <i>
+                                        });
+                                    } else if (type === 'heading') {
+                                        blocks.push({
+                                            type: 'heading',
+                                            text: bestMatch[1].replace(/<[^>]*>/g, '')
+                                        });
+                                    } else if (type === 'table') {
+                                        const tableContent = bestMatch[1];
+                                        const rows = [];
+                                        const headers = [];
+                                        let title = '';
+
+                                        // Extract Caption
+                                        const captionMatch = tableContent.match(captionRegex);
+                                        if (captionMatch) title = captionMatch[1].replace(/<[^>]*>/g, '');
+
+                                        // Extract Headers <thead>...<th>
+                                        const theadMatch = tableContent.match(/<thead.*?>(.*?)<\/thead>/i);
+                                        if (theadMatch) {
+                                            const headerMatches = theadMatch[1].match(/<th.*?>(.*?)<\/th>/gi);
+                                            if (headerMatches) {
+                                                headerMatches.forEach(h => {
+                                                    headers.push(h.replace(/<[^>]*>/g, '').trim());
+                                                });
+                                            }
+                                        }
+
+                                        // Extract Rows <tr> (inside tbody or just table)
+                                        // Simple regex for tr
+                                        const trMatches = tableContent.match(/<tr.*?>(.*?)<\/tr>/gi);
+                                        if (trMatches) {
+                                            trMatches.forEach(tr => {
+                                                // Check for th inside tr if headers empty? 
+                                                // OGL tables usually have thead.
+                                                // Let's assume tr contains tds.
+                                                const rowObj = {};
+                                                const tdMatches = tr.match(/<td.*?>(.*?)<\/td>/gi);
+                                                if (tdMatches) {
+                                                    tdMatches.forEach((td, idx) => {
+                                                        const key = headers[idx] || `Column ${idx + 1}`;
+                                                        rowObj[key] = td.replace(/<[^>]+>/g, '').trim(); // Strip tags but keep text
+                                                    });
+                                                    // Only add if it looks like a data row
+                                                    if (Object.keys(rowObj).length > 0) rows.push(rowObj);
+                                                }
+                                            });
+                                        }
+
+                                        // Generate default headers if missing
+                                        if (headers.length === 0 && rows.length > 0) {
+                                            Object.keys(rows[0]).forEach((_, i) => headers.push(`Column ${i + 1}`));
+                                        }
+
+                                        blocks.push({
+                                            type: 'table',
+                                            title: title,
+                                            headers: headers,
+                                            rows: rows
+                                        });
+                                    }
+
+                                    // Advance
+                                    remaining = remaining.substring(minIndex + bestMatch[0].length);
+                                }
+                                return blocks;
+                            }
+
+                            // Recursive function to flatten sections into blocks
+                            function convertSectionsToBlocks(sections) {
+                                let blocks = [];
+                                if (!sections || !Array.isArray(sections)) return blocks;
+
+                                for (const section of sections) {
+                                    // 1. Add Section Title as Heading if exists
+                                    if (section.name && section.name !== 'Description' && section.name !== 'Role') { // Skip some generic ones if desired
+                                        blocks.push({ type: 'heading', text: section.name });
+                                    }
+
+                                    // 2. Parse Body HTML
+                                    if (section.body) {
+                                        blocks = blocks.concat(parseHtmlToBlocks(section.body));
+                                    }
+
+                                    // 3. Recurse for subsections
+                                    if (section.sections) {
+                                        blocks = blocks.concat(convertSectionsToBlocks(section.sections));
+                                    }
+                                }
+                                return blocks;
+                            }
+
+                            const pageContent = convertSectionsToBlocks(doc.sections);
+
+                            // 1. Ensure 'Bestiary' exists
+                            // 2. Ensure Category exists
+                            // 3. Create Entry
+
+                            // We push individual upserts for the hierarchy to ensure structure
+                            // Optimization: In a real bulk scenario, deduplication is better, but this ensures correctness per entry.
+
+                            const commonUpdate = {
+                                update: { $setOnInsert: { type: 'category' } }, // Default to category if creating parents
+                                upsert: true
+                            };
+
+                            // Root: Bestiary
+                            codexOps.push({
+                                updateOne: {
+                                    filter: { path_components: ['Bestiary'] },
+                                    update: { $setOnInsert: { name: 'Bestiary', path_components: ['Bestiary'], type: 'category' } },
+                                    upsert: true
+                                }
+                            });
+
+                            codexOps.push({
+                                updateOne: {
+                                    filter: { path_components: ['Bestiary', catFormatted] },
+                                    update: { $setOnInsert: { name: catFormatted, path_components: ['Bestiary', catFormatted], type: 'category' } },
+                                    upsert: true
+                                }
+                            });
+
+                            // The Page Itself
+                            codexOps.push({
+                                updateOne: {
+                                    filter: { path_components: path },
+                                    update: {
+                                        $set: {
+                                            name: doc.name,
+                                            path_components: path,
+                                            entityId: doc._id,
+                                            type: 'page',
+                                            description: doc.description, // Link description for preview
+                                            content: pageContent // NEW: Add parsed blocks
+                                        }
+                                    },
+                                    upsert: true
+                                }
+                            });
+                        }
+
+                        // --- CODEX PAGE GENERATION (For Deities) ---
+                        if (entityType === 'deity') {
+                            const path = ['Deities', doc.name];
+
+                            // Ensure 'Deities' exists (Root)
+                            codexOps.push({
+                                updateOne: {
+                                    filter: { path_components: ['Deities'] },
+                                    update: { $setOnInsert: { name: 'Deities', path_components: ['Deities'], type: 'category' } },
+                                    upsert: true
+                                }
+                            });
+
+                            // The Page Itself
+                            codexOps.push({
+                                updateOne: {
+                                    filter: { path_components: path },
+                                    update: {
+                                        $set: {
+                                            name: doc.name,
+                                            path_components: path,
+                                            entityId: doc._id,
+                                            type: 'page',
+                                            description: doc.description
+                                        }
+                                    },
+                                    upsert: true
+                                }
+                            });
+                        }
                     }
                 } catch (e) {
                     console.error(`Error processing ${filename}:`, e.message);
@@ -192,6 +541,9 @@ module.exports = function (db) {
                 processed: processedCount,
                 errors: errorCount,
                 entities: 0,
+                rules: 0,
+                equipment: 0,
+                hazards: 0,
                 spells: 0
             };
 
@@ -202,10 +554,28 @@ module.exports = function (db) {
                     for (let i = 0; i < ops.length; i += chunkSize) {
                         const chunk = ops.slice(i, i + chunkSize);
                         const result = await db.collection(colName).bulkWrite(chunk, { ordered: false });
-                        if (colName === 'entities_pf1e') resultSummary.entities += (result.upsertedCount + result.modifiedCount);
-                        if (colName === 'spells_pf1e') resultSummary.spells += (result.upsertedCount + result.modifiedCount);
+                        const count = result.upsertedCount + result.modifiedCount;
+
+                        if (colName === 'entities_pf1e') resultSummary.entities += count;
+                        if (colName === 'rules_pf1e') resultSummary.rules += count;
+                        if (colName === 'equipment_pf1e') resultSummary.equipment += count;
+                        if (colName === 'hazards_pf1e') resultSummary.hazards += count;
+                        if (colName === 'spells_pf1e') resultSummary.spells += count;
                     }
                 }
+            }
+
+            // Execute Codex Updates
+            if (codexOps.length > 0) {
+                console.log(`[OGL Import] Updating Codex with ${codexOps.length} operations...`);
+
+                // Deduplicate parent creates if possible, or just run them unordered (MongoDB handles idempotent upserts well)
+                const chunkSize = 1000;
+                for (let i = 0; i < codexOps.length; i += chunkSize) {
+                    const chunk = codexOps.slice(i, i + chunkSize);
+                    await db.collection('codex_entries').bulkWrite(chunk, { ordered: false });
+                }
+                console.log(`[OGL Import] Codex hierarchy updated.`);
             }
 
             console.log(`[OGL Import (ZIP)] Complete.`, resultSummary);

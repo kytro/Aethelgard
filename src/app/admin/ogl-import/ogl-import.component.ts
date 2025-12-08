@@ -66,14 +66,26 @@ import { OglImportService } from './ogl-import.service';
                <dd class="text-red-400 font-mono">{{result.errors}}</dd>
              </div>
              <div class="col-span-2 border-t border-slate-700 my-2"></div>
-             <div>
-               <dt class="text-slate-500">Entities Upserted</dt>
-               <dd class="text-amber-400 font-mono text-lg">{{result.entities}}</dd>
-             </div>
-             <div>
-               <dt class="text-slate-500">Spells Upserted</dt>
-               <dd class="text-blue-400 font-mono text-lg">{{result.spells}}</dd>
-             </div>
+              <div>
+                <dt class="text-slate-500">Rules / Feats</dt>
+                <dd class="text-amber-400 font-mono text-lg">{{result.rules}}</dd>
+              </div>
+              <div>
+                <dt class="text-slate-500">Equipment</dt>
+                <dd class="text-blue-400 font-mono text-lg">{{result.equipment}}</dd>
+              </div>
+              <div>
+                <dt class="text-slate-500">Hazards / Traps</dt>
+                <dd class="text-red-400 font-mono text-lg">{{result.hazards}}</dd>
+              </div>
+              <div>
+                <dt class="text-slate-500">Spells</dt>
+                <dd class="text-purple-400 font-mono text-lg">{{result.spells}}</dd>
+              </div>
+              <div>
+                <dt class="text-slate-500">Other Entities</dt>
+                <dd class="text-slate-400 font-mono text-lg">{{result.entities}}</dd>
+              </div>
            </dl>
         </div>
         
