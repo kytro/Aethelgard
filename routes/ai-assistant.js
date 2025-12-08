@@ -43,7 +43,9 @@ module.exports = function (db) {
             const recentEntries = await db.collection('codex_entries').find().sort({ _id: -1 }).limit(5).project({ path_components: 1, _id: 0 }).toArray();
             let existingStructurePrompt = '';
             if (recentEntries.length > 0) {
-                const examplesString = JSON.stringify(recentEntries.map(e => e.path_components), null, 2);
+                // Filter out 'Codex' from examples to prevent AI from learning bad habits
+                const cleanedExamples = recentEntries.map(e => (e.path_components || []).filter(c => c !== 'Codex'));
+                const examplesString = JSON.stringify(cleanedExamples, null, 2);
                 existingStructurePrompt = `\r\n                --- EXISTING STRUCTURE EXAMPLE ---\r\n                Pay close attention to the existing path structures. Match capitalization and use of underscores precisely. When creating new entries, use the same conventions as these recent entries from the database:\r\n                ${examplesString}\r\n`;
             }
 
@@ -59,6 +61,7 @@ ${existingStructurePrompt}
                 --- CRITICAL RULES ---
                 1. The 'entities_pf1e' collection is ONLY for combat-ready entities. The correct 'type' for these are 'NPC', 'Monster', 'Creature', or 'Character'.
                 2. NEVER create an 'entities_pf1e' document for types like 'Quest', 'Location', 'Item', or 'Organization'. All data for these non-combatant types belongs in a single 'codex_entries' document. These entries MUST NOT have an 'entity_id'.
+                3. **PATH GENERATION**: The 'path_components' array MUST NOT include 'Codex'. Start directly with the top-level category (e.g., ['Places', 'City Name']).
 
                 --- RESPONSE FORMAT ---
                 Your response must be a JSON array, where each object is a distinct database operation.
@@ -84,7 +87,7 @@ ${existingStructurePrompt}
 
                 **Quest (stored in codex_entries):**
                 {
-                  "path_components": ["...", "Quest Name"],
+                  "path_components": ["Quest Category", "Quest Name"],
                   "name": "Quest Name",
                   "category": "Quest",
                   "summary": "...",
@@ -108,7 +111,7 @@ ${existingStructurePrompt}
 
                 **Location (stored in codex_entries):**
                 {
-                  "path_components": ["...", "Location Name"],
+                  "path_components": ["Places", "Location Name"],
                   "name": "Location Name",
                   "category": "Location",
                   "summary": "...",
@@ -118,7 +121,7 @@ ${existingStructurePrompt}
 
                 **Item (stored in codex_entries):**
                 {
-                  "path_components": ["...", "Item Name"],
+                  "path_components": ["Items", "Item Name"],
                   "name": "Item Name",
                   "category": "Item",
                   "summary": "...",
