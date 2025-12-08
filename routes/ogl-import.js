@@ -17,8 +17,8 @@ module.exports = function (db) {
             url: 'https://gist.githubusercontent.com/cityofwalls/0fdeb2da5d7b475968c8de88c75e77ad/raw/PathfinderSpellsJSON.txt',
             collection: 'spells_pf1e',
             transform: (item) => ({
-                // Use existing app prefix convention
-                _id: `spell-${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
+                // Use existing app prefix convention: sp_ for spells
+                _id: `sp_${item.name?.toLowerCase().replace(/[^a-z0-9]/g, '_') || 'unknown'}`,
                 name: item.name,
                 school: item.school,
                 // Parse spell level from "sorcerer/wizard 2, cleric 3" format
