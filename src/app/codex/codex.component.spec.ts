@@ -430,4 +430,68 @@ describe('CodexComponent', () => {
             ]);
         });
     });
+
+    describe('Fix Stats Feature', () => {
+        beforeEach(async () => {
+            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
+            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
+            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
+            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            await fixture.whenStable();
+            fixture.detectChanges();
+        });
+
+        it('should apply fixes and update local model', async () => {
+            // Setup an entity with old stats
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity.baseStats = {
+                combat: { bab: 0, cmb: '-', cmd: '-' },
+                saves: { fort: 0, ref: 0, will: 0 }
+            };
+            component.linkedEntities.set([entity]);
+
+            // Setup the modal state
+            const suggested = {
+                bab: 5, cmb: 5, cmd: 15,
+                fort: 2, ref: 2, will: 2,
+                _raw: { saves: { fort: { total: 2 }, ref: { total: 2 }, will: { total: 2 } } }
+            };
+            component.fixStatsModal.set({
+                isOpen: true,
+                entity,
+                current: { bab: 0, cmb: '-', cmd: '-', fort: 0, ref: 0, will: 0 },
+                suggested,
+                loading: false
+            });
+
+            // Call apply
+            const applyPromise = component.applyFixStats();
+
+            // Expect PUT request
+            const req = httpMock.expectOne(`api/codex/entities/${entity._id}`);
+            expect(req.request.method).toBe('PUT');
+            // Verify payload contains new stats
+            // The updates object uses dot-notation keys for MongoDB, so we access them as such
+            expect(req.request.body['baseStats.combat'].bab).toBe('+5');
+            expect(req.request.body['baseStats.saves'].fort).toBe(2);
+
+            req.flush({}); // Success response
+
+            await applyPromise;
+            await fixture.whenStable();
+            fixture.detectChanges();
+
+            // The update to linkedEntities triggers the effect to fetch details again
+            const detailsReq = httpMock.expectOne('api/codex/get-linked-details');
+            detailsReq.flush({ rules: [], equipment: [], spells: [] });
+
+            // Verify Local Model Update
+            const updatedEntity = component.linkedEntities()[0];
+            expect(updatedEntity['baseStats'].combat.bab).toBe('+5');
+            expect(updatedEntity['baseStats'].saves.fort).toBe(2);
+
+            // Modal should be closed
+            expect(component.fixStatsModal().isOpen).toBe(false);
+        });
+    });
 });

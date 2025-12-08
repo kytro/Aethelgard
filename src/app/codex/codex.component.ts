@@ -1138,16 +1138,40 @@ export class CodexComponent implements OnInit {
     }
 
     try {
+      // Construct updates. We replace the entire 'combat' and 'saves' objects
+      // to avoid MongoDB errors if these fields are currently strings (e.g. from OGL import).
+      // We also merge with existing data if it's an object, to be safe, though usually we are "fixing" these.
+
+      const currentCombat = (typeof entity['baseStats']?.combat === 'object') ? entity['baseStats'].combat : {};
+      const currentSaves = (typeof entity['baseStats']?.saves === 'object') ? entity['baseStats'].saves : {};
+
       const updates = {
-        'baseStats.combat.bab': babStr,
-        'baseStats.combat.cmb': newStats.cmb,
-        'baseStats.combat.cmd': newStats.cmd,
-        'baseStats.saves.fortitude': newStats.fort,
-        'baseStats.saves.reflex': newStats.ref,
-        'baseStats.saves.will': newStats.will,
-        'baseStats.saves.fort': newStats.fort,
-        'baseStats.saves.ref': newStats.ref
+        'baseStats.combat': {
+          ...currentCombat,
+          bab: babStr,
+          cmb: newStats.cmb,
+          cmd: newStats.cmd
+        },
+        'baseStats.saves': {
+          ...currentSaves,
+          fort: newStats.fort,
+          ref: newStats.ref,
+          will: newStats.will,
+          fortitude: newStats.fort,
+          reflex: newStats.ref
+        }
       };
+
+      // Apply updates locally to ensure view refreshes immediately
+      if (!entity['baseStats']) entity['baseStats'] = {};
+      // We can't just assign updates['baseStats.combat'] because the entity might not have that structure initialized if it's very partial
+      // But normally it should be fine. However, let's be safe and assign specifically.
+
+      // Actually, because updates is constructed with quoted keys like 'baseStats.combat', we can access them from the updates object.
+      // And assign them to the entity's nested structure.
+
+      entity['baseStats']['combat'] = updates['baseStats.combat'];
+      entity['baseStats']['saves'] = updates['baseStats.saves'];
 
       await lastValueFrom(this.http.put(`api/codex/entities/${entity._id}`, updates));
 
