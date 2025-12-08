@@ -43,8 +43,11 @@ module.exports = function (db) {
             const recentEntries = await db.collection('codex_entries').find().sort({ _id: -1 }).limit(5).project({ path_components: 1, _id: 0 }).toArray();
             let existingStructurePrompt = '';
             if (recentEntries.length > 0) {
-                // Filter out 'Codex' from examples to prevent AI from learning bad habits
-                const cleanedExamples = recentEntries.map(e => (e.path_components || []).filter(c => c !== 'Codex'));
+                // Filter out 'Codex' from examples and replace spaces with underscores
+                const cleanedExamples = recentEntries.map(e => (e.path_components || [])
+                    .filter(c => c !== 'Codex')
+                    .map(c => c.replace(/ /g, '_'))
+                );
                 const examplesString = JSON.stringify(cleanedExamples, null, 2);
                 existingStructurePrompt = `\r\n                --- EXISTING STRUCTURE EXAMPLE ---\r\n                Pay close attention to the existing path structures. Match capitalization and use of underscores precisely. When creating new entries, use the same conventions as these recent entries from the database:\r\n                ${examplesString}\r\n`;
             }
@@ -61,7 +64,8 @@ ${existingStructurePrompt}
                 --- CRITICAL RULES ---
                 1. The 'entities_pf1e' collection is ONLY for combat-ready entities. The correct 'type' for these are 'NPC', 'Monster', 'Creature', or 'Character'.
                 2. NEVER create an 'entities_pf1e' document for types like 'Quest', 'Location', 'Item', or 'Organization'. All data for these non-combatant types belongs in a single 'codex_entries' document. These entries MUST NOT have an 'entity_id'.
-                3. **PATH GENERATION**: The 'path_components' array MUST NOT include 'Codex'. Start directly with the top-level category (e.g., ['Places', 'City Name']).
+                3. **PATH GENERATION**: The 'path_components' array MUST NOT include 'Codex'. Start directly with the top-level category (e.g., ['Places', 'City_Name']).
+                4. **NO SPACES**: The 'path_components' array MUST NOT contain spaces. Use underscores instead (e.g., ['Places', 'Solarran_Freehold']).
 
                 --- RESPONSE FORMAT ---
                 Your response must be a JSON array, where each object is a distinct database operation.
