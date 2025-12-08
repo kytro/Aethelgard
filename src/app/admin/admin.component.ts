@@ -6,7 +6,7 @@ import { DashboardComponent } from '../dashboard/dashboard.component';
 import { DataIntegrityComponent } from '../data-integrity/data-integrity.component';
 import { AiAssistantComponent } from '../ai-assistant/ai-assistant.component';
 import { SettingsComponent } from '../settings/settings.component';
-import { OglImportComponent } from '../ogl-import/ogl-import.component';
+import { OglImportComponent } from './ogl-import/ogl-import.component';
 
 @Component({
   selector: 'app-admin',
