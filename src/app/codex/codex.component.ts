@@ -10,6 +10,7 @@ interface CodexEntry {
   path_components: string[];
   content?: any[];
   isCompleted?: boolean;
+  relatedPages?: string[]; // Array of JSON.stringified path arrays
 }
 interface Pf1eRule { name: string; description: string; }
 interface Pf1eEquipment { name: string; description: string; cost: string; weight: string; }
@@ -536,6 +537,97 @@ export class CodexComponent implements OnInit {
       this.modifiedEntities.update(set => set.add(entity._id));
       this.linkedEntities.set([...this.linkedEntities()]);
     }
+  }
+
+  // --- Reciprocal Page Linking ---
+
+  // Helper to format path for storage/comparison
+  formatPath(path: string[]): string {
+    return JSON.stringify(path);
+  }
+
+  // Helper to parse stored path
+  parsePath(pathStr: string): string[] {
+    try {
+      return JSON.parse(pathStr);
+    } catch {
+      return [];
+    }
+  }
+
+  getAvailablePages(): CodexEntry[] {
+    const all = this.codexData() || [];
+    const currentStr = this.formatPath(this.currentPath());
+    // Filter out current page and root categories that might not be linkable if desired,
+    // though linking to categories is probably fine.
+    // Also filter out any that are ALREADY linked.
+    const active = this.currentView().activeEntry;
+    if (!active) return [];
+
+    const existingLinks = new Set(active.relatedPages || []);
+
+    return all.filter(e => {
+      const pStr = this.formatPath(e.path_components);
+      return pStr !== currentStr && !existingLinks.has(pStr);
+    });
+  }
+
+  getRelatedPages(entry: CodexEntry): CodexEntry[] {
+    if (!entry.relatedPages) return [];
+    const all = this.codexData() || [];
+    const relatedMap = new Map(all.map(e => [this.formatPath(e.path_components), e]));
+
+    return entry.relatedPages
+      .map(pStr => relatedMap.get(pStr))
+      .filter((e): e is CodexEntry => !!e);
+  }
+
+  addRelatedPage(entry: CodexEntry, targetPathStr: string) {
+    if (!entry || !targetPathStr) return;
+
+    // 1. Add to current entry
+    if (!entry.relatedPages) entry.relatedPages = [];
+    if (!entry.relatedPages.includes(targetPathStr)) {
+      entry.relatedPages.push(targetPathStr);
+    }
+
+    // 2. Find target entry and add reciprocal link
+    const all = this.codexData() || [];
+    const targetEntry = all.find(e => this.formatPath(e.path_components) === targetPathStr);
+
+    if (targetEntry) {
+      if (!targetEntry.relatedPages) targetEntry.relatedPages = [];
+      const currentPathStr = this.formatPath(entry.path_components);
+      if (!targetEntry.relatedPages.includes(currentPathStr)) {
+        targetEntry.relatedPages.push(currentPathStr);
+      }
+    }
+
+    // Trigger signal update
+    this.codexData.update(d => JSON.parse(JSON.stringify(d)));
+  }
+
+  removeRelatedPage(entry: CodexEntry, targetPathStr: string) {
+    if (!entry || !entry.relatedPages) return;
+
+    // 1. Remove from current entry
+    entry.relatedPages = entry.relatedPages.filter(p => p !== targetPathStr);
+
+    // 2. Remove reciprocal link from target
+    const all = this.codexData() || [];
+    const targetEntry = all.find(e => this.formatPath(e.path_components) === targetPathStr);
+
+    if (targetEntry && targetEntry.relatedPages) {
+      const currentPathStr = this.formatPath(entry.path_components);
+      targetEntry.relatedPages = targetEntry.relatedPages.filter(p => p !== currentPathStr);
+    }
+
+    // Trigger signal update
+    this.codexData.update(d => JSON.parse(JSON.stringify(d)));
+  }
+
+  formatPathForDisplay(path: string[]): string {
+    return path.map(p => this.formatName(p)).join(' / ');
   }
 
   getSpellSlots(entity: Pf1eEntity): { level: number, slots: number }[] {

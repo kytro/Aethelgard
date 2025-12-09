@@ -494,4 +494,78 @@ describe('CodexComponent', () => {
             expect(component.fixStatsModal().isOpen).toBe(false);
         });
     });
+
+    describe('Reciprocal Page Linking', () => {
+        beforeEach(async () => {
+            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
+            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
+            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
+            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            await fixture.whenStable();
+            fixture.detectChanges();
+        });
+
+        it('should add reciprocal link', () => {
+            const entry1 = (component as any).codexData()![0]; // Locations
+            const entry2 = (component as any).codexData()![1]; // Town Square
+
+            component.addRelatedPage(entry1, component.formatPath(entry2.path_components));
+
+            expect(entry1.relatedPages).toContain(JSON.stringify(entry2.path_components));
+            expect(entry2.relatedPages).toContain(JSON.stringify(entry1.path_components));
+        });
+
+        it('should remove reciprocal link', () => {
+            const entry1 = (component as any).codexData()![0];
+            const entry2 = (component as any).codexData()![1];
+
+            // Setup
+            component.addRelatedPage(entry1, component.formatPath(entry2.path_components));
+
+            // Action
+            // Re-fetch after add setup
+            const dataAfterAdd = (component as any).codexData();
+            const u1setup = dataAfterAdd[0];
+
+            // Action
+            component.removeRelatedPage(u1setup, component.formatPath(entry2.path_components));
+
+            // Re-fetch after remove
+            const finalData = (component as any).codexData();
+            const finalEntry1 = finalData[0];
+            const finalEntry2 = finalData[1];
+
+            expect(finalEntry1.relatedPages).not.toContain(JSON.stringify(entry2.path_components));
+            expect(finalEntry2.relatedPages).not.toContain(JSON.stringify(entry1.path_components));
+        });
+
+        it('should get available pages filtering self and existing links', () => {
+            const entry1 = (component as any).codexData()![0];
+            const entry2 = (component as any).codexData()![1];
+
+            // Set current page to entry1
+            component.navigateTo(entry1);
+            fixture.detectChanges();
+
+            let available = component.getAvailablePages();
+            let availablePaths = available.map(e => component.formatPath(e.path_components));
+
+            // Should contain entry2
+            expect(availablePaths).toContain(component.formatPath(entry2.path_components));
+            // Should not contain self (entry1)
+            expect(availablePaths).not.toContain(component.formatPath(entry1.path_components));
+
+            // Now link them
+            // Re-fetch to be safe
+            const freshEntry1 = (component as any).codexData()![0];
+            component.addRelatedPage(freshEntry1, component.formatPath(entry2.path_components));
+            fixture.detectChanges();
+
+            available = component.getAvailablePages();
+            availablePaths = available.map(e => component.formatPath(e.path_components));
+
+            // Should NOT contain entry2 anymore
+            expect(availablePaths).not.toContain(component.formatPath(entry2.path_components));
+        });
+    });
 });
