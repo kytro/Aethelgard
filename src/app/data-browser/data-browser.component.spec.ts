@@ -100,4 +100,28 @@ describe('DataBrowserComponent', () => {
         await fixture.whenStable();
         expect(component.collections()).not.toContain('col1');
     });
+
+    it('should create new document', async () => {
+        component.selectedCollection.set('col1');
+        component.startNewDocument();
+        expect(component.isCreating()).toBe(true);
+        expect(component.newDocumentJson()).toContain('New Document');
+
+        const newDocJson = { name: 'Brand New Doc' };
+        component.newDocumentJson.set(JSON.stringify(newDocJson));
+
+        component.createDocument();
+
+        const req = httpMock.expectOne('api/admin/collections/col1');
+        expect(req.request.method).toBe('POST');
+        expect(req.request.body).toEqual(newDocJson);
+        req.flush({ message: 'Created', insertedId: 'new-id-123' });
+
+        await fixture.whenStable();
+
+        expect(component.isCreating()).toBe(false);
+        expect(component.documents().length).toBe(1);
+        expect(component.documents()[0]._id).toBe('new-id-123');
+        expect(component.documents()[0].name).toBe('Brand New Doc');
+    });
 });

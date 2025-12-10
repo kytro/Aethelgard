@@ -3,6 +3,7 @@ import { CommonModule, KeyValuePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
 import { MapViewerComponent } from './map-viewer/map-viewer.component';
+import { FormsModule } from '@angular/forms';
 
 // --- TYPE INTERFACES ---
 interface CodexEntry {
@@ -29,7 +30,7 @@ interface TooltipContent { title: string; description: string; }
 @Component({
   selector: 'app-codex',
   standalone: true,
-  imports: [CommonModule, MapViewerComponent],
+  imports: [CommonModule, MapViewerComponent, FormsModule],
   templateUrl: './codex.component.html',
   styleUrls: ['./codex.component.css'],
   styles: [`
@@ -1018,6 +1019,62 @@ export class CodexComponent implements OnInit {
    */
   isLeaf(entry: CodexEntry): boolean {
     return entry && Array.isArray(entry.content);
+  }
+
+  // --- Add Page Logic ---
+  isAddingPage = signal<boolean>(false);
+  newPageName = signal<string>('');
+
+  startAddPage() {
+    this.isAddingPage.set(true);
+    this.newPageName.set('');
+  }
+
+  cancelAddPage() {
+    this.isAddingPage.set(false);
+  }
+
+  async createPage() {
+    const name = this.newPageName().trim();
+    if (!name) return;
+
+    const currentPath = this.currentPath();
+    // To ensure compatibility with backend that expects path_components,
+    // we construct the full path including the new page name.
+    // NOTE: Backend handles parent creation if missing.
+    const newPath = [...currentPath, name.replace(/ /g, '_')];
+
+    const newEntry: CodexEntry = {
+      name: name,
+      path_components: newPath,
+      content: [] // Empty content makes it a leaf/page
+    };
+
+    try {
+      // Optimistically update
+      const data = this.codexData() || [];
+      data.push(newEntry);
+      this.codexData.set(JSON.parse(JSON.stringify(data)));
+      this.isAddingPage.set(false);
+
+      // Persist using existing save mechanism (or direct call if prefered)
+      // Since we modified codexData, saveChanges() handles diff or full save.
+      // But saveChanges might be heavy. Let's send just this new entry to the backend via PUT /data
+      // The backend accepts an array of entries to upsert.
+
+      this.isLoading.set(true);
+      await lastValueFrom(this.http.put('api/codex/data', [newEntry]));
+      this.isLoading.set(false);
+
+      this.navigateTo(newEntry);
+
+    } catch (err: any) {
+      console.error('Failed to create page', err);
+      this.error.set(err.error?.error || 'Failed to create page.');
+      // Revert optimistic update?
+      // For now, let's just reload to stay consistent
+      window.location.reload();
+    }
   }
 
   // --- Tooltip Logic ---

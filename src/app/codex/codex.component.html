@@ -39,7 +39,19 @@
   <div class="flex flex-1 overflow-hidden">
 
     <nav class="w-64 flex-shrink-0 bg-gray-800 p-4 flex flex-col border-r border-gray-700">
-      <h3 class="text-2xl font-bold text-white mb-4">Entries</h3>
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-2xl font-bold text-white">Entries</h3>
+        @if (isEditMode()) {
+        <button (click)="startAddPage()" class="bg-green-600 hover:bg-green-700 text-white font-bold p-1 rounded"
+          title="Add New Page">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd"
+              d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z"
+              clip-rule="evenodd" />
+          </svg>
+        </button>
+        }
+      </div>
       @if (isEditMode() && isCategoryNode()) {
       <div class="mb-4 p-3 bg-gray-700/50 rounded-lg space-y-3">
         <label class="flex items-center justify-between cursor-pointer">
@@ -785,3 +797,20 @@
   </div>
   }
 </div>
+
+@if (isAddingPage()) {
+<div class="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+  <div class="bg-gray-900 border border-gray-700 rounded-lg shadow-xl max-w-md w-full p-6">
+    <h3 class="text-2xl font-bold text-white mb-4">New Page</h3>
+    <input type="text" [(ngModel)]="newPageName" (keyup.enter)="createPage()"
+      class="w-full bg-gray-800 border border-gray-600 rounded px-3 py-2 text-white mb-6 focus:border-green-500 outline-none"
+      placeholder="Page Name">
+    <div class="flex justify-end gap-3">
+      <button (click)="cancelAddPage()"
+        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded font-bold">Cancel</button>
+      <button (click)="createPage()"
+        class="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-bold">Create</button>
+    </div>
+  </div>
+</div>
+}

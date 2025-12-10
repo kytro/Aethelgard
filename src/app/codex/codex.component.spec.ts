@@ -567,5 +567,25 @@ describe('CodexComponent', () => {
             // Should NOT contain entry2 anymore
             expect(availablePaths).not.toContain(component.formatPath(entry2.path_components));
         });
+
+        it('should add new page', async () => {
+            // Mock initial state
+            component.enterEditMode();
+            component.startAddPage();
+            expect(component.isAddingPage()).toBe(true);
+
+            component.newPageName.set('New Test Page');
+
+            component.createPage();
+
+            const req = httpMock.expectOne('api/codex/data');
+            expect(req.request.method).toBe('PUT');
+            expect(req.request.body[0].name).toBe('New Test Page');
+            req.flush({});
+
+            await fixture.whenStable();
+
+            expect(component.isAddingPage()).toBe(false);
+        });
     });
 });

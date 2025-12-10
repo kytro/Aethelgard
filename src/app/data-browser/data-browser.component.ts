@@ -94,7 +94,7 @@ export class DataBrowserComponent {
     this.filterTerm.set('');
     this.cancelEdit();
   }
-  
+
   // --- Edit Logic ---
   editDocument(doc: any, event: MouseEvent) {
     event.stopPropagation();
@@ -120,20 +120,73 @@ export class DataBrowserComponent {
     try {
       const updatedDoc = JSON.parse(this.editedJson());
       const docId = docToSave._id;
-      
+
       await lastValueFrom(this.http.put(`api/admin/collections/${collectionName}/${docId}`, updatedDoc));
-      
+
       // Update local state
       this.documents.update(docs => docs.map(d => d._id === docId ? updatedDoc : d));
       this.selectDocument(updatedDoc); // Reselect the doc to show the updated, non-edit view
       this.cancelEdit(); // Exit edit mode
 
     } catch (err: any) {
-        if (err instanceof SyntaxError) {
-            this.error.set('Invalid JSON format.');
-        } else {
-            this.error.set(err.error?.error || `Failed to save document ${docToSave._id}.`);
-        }
+      if (err instanceof SyntaxError) {
+        this.error.set('Invalid JSON format.');
+      } else {
+        this.error.set(err.error?.error || `Failed to save document ${docToSave._id}.`);
+      }
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
+
+  // --- Create Logic ---
+  isCreating = signal<boolean>(false);
+  newDocumentJson = signal<string>('');
+
+  startNewDocument() {
+    this.isCreating.set(true);
+    this.newDocumentJson.set('{\n  "name": "New Document"\n}');
+  }
+
+  cancelNewDocument() {
+    this.isCreating.set(false);
+    this.newDocumentJson.set('');
+  }
+
+  async createDocument() {
+    const collectionName = this.selectedCollection();
+    if (!collectionName) return;
+
+    this.isLoading.set(true);
+    this.error.set(null);
+
+    try {
+      const newDoc = JSON.parse(this.newDocumentJson());
+
+      const res = await lastValueFrom(this.http.post<{ message: string, insertedId: string }>(
+        `api/admin/collections/${collectionName}`,
+        newDoc
+      ));
+
+      // If the backend returned an insertedId, make sure the local doc has it
+      if (res.insertedId) {
+        newDoc._id = res.insertedId;
+      }
+
+      // Update local state
+      this.documents.update(docs => [...docs, newDoc]);
+      this.isCreating.set(false);
+
+      // Optionally select the new doc
+      this.selectDocument(newDoc);
+
+    } catch (err: any) {
+      if (err instanceof SyntaxError) {
+        this.error.set('Invalid JSON format.');
+      } else {
+        this.error.set(err.error?.error || 'Failed to create document.');
+      }
     } finally {
       this.isLoading.set(false);
     }
@@ -150,7 +203,7 @@ export class DataBrowserComponent {
       }
     }, 3000);
   }
-  
+
   async deleteCollection(name: string, event: MouseEvent) {
     event.stopPropagation();
     if (this.confirmingDeleteCollection() !== name) {
@@ -177,7 +230,7 @@ export class DataBrowserComponent {
   requestDeleteDocument(docId: string, event: MouseEvent) {
     event.stopPropagation();
     this.confirmingDeleteDoc.set(docId);
-      setTimeout(() => {
+    setTimeout(() => {
       if (this.confirmingDeleteDoc() === docId) {
         this.confirmingDeleteDoc.set(null);
       }
@@ -186,11 +239,11 @@ export class DataBrowserComponent {
 
   async deleteDocument(docId: string, event: MouseEvent) {
     event.stopPropagation();
-      if (this.confirmingDeleteDoc() !== docId) {
+    if (this.confirmingDeleteDoc() !== docId) {
       this.requestDeleteDocument(docId, event);
       return;
     }
-    
+
     const collectionName = this.selectedCollection();
     if (!collectionName) return;
 
