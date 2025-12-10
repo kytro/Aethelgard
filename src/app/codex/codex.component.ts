@@ -561,7 +561,8 @@ export class CodexComponent implements OnInit {
     // Filter out current page and root categories that might not be linkable if desired,
     // though linking to categories is probably fine.
     // Also filter out any that are ALREADY linked.
-    const active = this.currentView().activeEntry;
+    // FIX: Fallback to current node if activeEntry is null (e.g. for Category pages) to allow linking/testing
+    const active = this.currentView().activeEntry || this.getNode(this.currentPath());
     if (!active) return [];
 
     const existingLinks = new Set(active.relatedPages || []);
