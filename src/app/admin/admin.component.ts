@@ -7,6 +7,7 @@ import { DataIntegrityComponent } from '../data-integrity/data-integrity.compone
 import { AiAssistantComponent } from '../ai-assistant/ai-assistant.component';
 import { SettingsComponent } from '../settings/settings.component';
 import { OglImportComponent } from './ogl-import/ogl-import.component';
+import { GoogleDocImportComponent } from './google-doc-import/google-doc-import.component';
 
 @Component({
   selector: 'app-admin',
@@ -19,7 +20,9 @@ import { OglImportComponent } from './ogl-import/ogl-import.component';
     DataIntegrityComponent,
     AiAssistantComponent,
     SettingsComponent,
-    OglImportComponent
+    SettingsComponent,
+    OglImportComponent,
+    GoogleDocImportComponent
   ],
   templateUrl: './admin.component.html',
   styles: [`
@@ -32,5 +35,5 @@ import { OglImportComponent } from './ogl-import/ogl-import.component';
 })
 export class AdminComponent {
   // State for the Admin Panel's sidebar
-  activeAdminView = signal<'dashboard' | 'data' | 'backup-restore' | 'data-integrity' | 'ai-assistant' | 'settings' | 'ogl-import'>('dashboard');
+  activeAdminView = signal<'dashboard' | 'data' | 'backup-restore' | 'data-integrity' | 'ai-assistant' | 'settings' | 'ogl-import' | 'google-doc-import'>('dashboard');
 }

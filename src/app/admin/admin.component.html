@@ -50,6 +50,13 @@
           OGL Import
         </a>
       </li>
+      <li>
+        <a (click)="activeAdminView.set('google-doc-import')" href="javascript:void(0)"
+          class="flex items-center px-4 py-2 rounded-lg transition-colors"
+          [ngClass]="{'bg-yellow-500 text-gray-900 font-semibold': activeAdminView() === 'google-doc-import', 'text-gray-300 hover:bg-gray-700': activeAdminView() !== 'google-doc-import'}">
+          Google Docs Import
+        </a>
+      </li>
     </ul>
   </nav>
 
@@ -62,6 +69,7 @@
     @case ('ai-assistant') { <app-ai-assistant></app-ai-assistant> }
     @case ('settings') { <app-settings></app-settings> }
     @case ('ogl-import') { <app-ogl-import></app-ogl-import> }
+    @case ('google-doc-import') { <app-google-doc-import></app-google-doc-import> }
     }
   </main>
 </div>
