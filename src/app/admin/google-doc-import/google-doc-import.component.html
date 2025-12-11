@@ -1,85 +1,86 @@
-<div class="p-4 bg-gray-900 text-gray-100 min-h-screen">
-    <h2 class="text-2xl font-bold mb-4 text-white">Google Docs Import (Tree Mode)</h2>
+<div class="p-4 text-gray-200 h-full flex flex-col">
+    <h2 class="text-2xl font-bold mb-4 text-yellow-500 flex-shrink-0">Google Docs Import</h2>
 
-    <!-- STEP 1: Connect -->
     <div *ngIf="step() === 1" class="step-container">
-        <h3 class="text-xl mb-2 text-blue-400">Step 1: Connect Document</h3>
-        <p class="text-sm text-gray-400 mb-2">Note: The document must be publicly accessible.</p>
-        <div class="flex gap-2">
-            <input type="text" [ngModel]="docIdInput()" (ngModelChange)="docIdInput.set($event)"
-                placeholder="Paste Google Doc Link here..."
-                class="border border-gray-600 bg-gray-800 p-2 rounded flex-1 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none">
-            <button (click)="fetchDoc()"
-                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-                [disabled]="isLoading()">
+        <h3 class="text-xl mb-4 font-semibold">1. Connect Document</h3>
+        <p class="text-sm text-gray-400 mb-4">Ensure the document is public (Anyone with link).</p>
+        <div class="flex gap-4">
+            <input type="text" [(ngModel)]="docIdInput" placeholder="https://docs.google.com/document/d/..."
+                class="bg-gray-900 border border-gray-600 rounded p-2 flex-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button (click)="fetchDoc()" [disabled]="isLoading()"
+                class="bg-blue-600 hover:bg-blue-500 text-white px-6 py-2 rounded font-bold disabled:opacity-50">
                 {{ isLoading() ? 'Fetching...' : 'Fetch' }}
             </button>
         </div>
     </div>
 
-    <!-- STEP 2: Configure Tree -->
-    <div *ngIf="step() === 2" class="step-container">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-xl text-blue-400">Step 2: Review & Import Hierarchy</h3>
+    <div *ngIf="step() === 2" class="flex flex-col flex-1 overflow-hidden">
+        <div class="flex justify-between items-center mb-4 flex-shrink-0">
+            <h3 class="text-xl font-semibold">2. Configure Mapping ({{ docTitle() }})</h3>
             <div class="flex gap-2">
                 <button (click)="reset()"
-                    class="bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700">Back</button>
-                <button (click)="saveImport()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
-                    Import Selected
+                    class="bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded text-sm">Cancel</button>
+                <button (click)="generatePreview()"
+                    class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded font-bold text-white">
+                    Next: Preview
                 </button>
             </div>
         </div>
 
-        <div class="bg-gray-800 border border-gray-700 rounded p-4 overflow-x-auto">
-            <!-- Recursive Tree Template -->
+        <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 flex-1 overflow-y-auto">
             <ng-template #nodeTemplate let-nodes="nodes">
-                <div *ngFor="let node of nodes" class="mb-1">
-                    <div class="flex items-center gap-2 py-1 hover:bg-gray-700 rounded px-1 transition-colors">
-
-                        <!-- Expand/Collapse -->
+                <div *ngFor="let node of nodes" class="mb-2" [class.excluded-node]="node.isExcluded">
+                    <div
+                        class="flex items-center gap-2 p-2 rounded hover:bg-gray-700/50 group border-b border-gray-700/30">
                         <button (click)="toggleNode(node)"
                             class="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white">
-                            <span *ngIf="node.children.length > 0">
-                                {{ node.expanded ? '▼' : '▶' }}
-                            </span>
+                            <span *ngIf="node.children.length > 0">{{ node.expanded ? '▼' : '▶' }}</span>
                         </button>
 
-                        <!-- Import Checkbox -->
-                        <input type="checkbox" [checked]="node.isPage" (change)="toggleIsPage(node)"
-                            class="w-4 h-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700">
+                        <span class="font-medium min-w-[200px] truncate"
+                            [style.padding-left.rem]="(node.level - 1) * 0.5">
+                            <span class="text-xs text-gray-500 mr-2">H{{node.level}}</span>
+                            {{ node.text }}
+                        </span>
 
-                        <!-- Node Path/Name Input -->
-                        <!-- If importing as page, show Path Input. Else just show text (as content). -->
-                        <div class="relative flex-1 mx-2" *ngIf="node.isPage">
-                            <input type="text" [value]="node.pathString" (input)="handlePathInput(node, $event)"
+                        <div class="flex items-center gap-4 border-l border-gray-600 pl-4">
+                            <label class="flex items-center gap-1 cursor-pointer select-none"
+                                title="Skip this section and children">
+                                <input type="checkbox" [checked]="node.isExcluded" (change)="toggleIsExcluded(node)"
+                                    class="form-checkbox h-4 w-4 text-red-500 rounded border-gray-500 bg-gray-700">
+                                <span class="text-xs text-gray-400">Exclude</span>
+                            </label>
+
+                            <label class="flex items-center gap-1 cursor-pointer select-none"
+                                [class.opacity-50]="node.isExcluded">
+                                <input type="checkbox" [checked]="node.isPage" (change)="toggleIsPage(node)"
+                                    [disabled]="node.isExcluded"
+                                    class="form-checkbox h-4 w-4 text-yellow-500 rounded border-gray-500 bg-gray-700">
+                                <span class="text-xs text-gray-400">Page</span>
+                            </label>
+                        </div>
+
+                        <div class="relative flex-1 mx-2" *ngIf="node.isPage && !node.isExcluded">
+                            <input type="text" [value]="node.pathString"
+                                (input)="onSearchInput($event); onPathChange(node, $event.target.value)"
                                 (focus)="onFocusPath(node)" (blur)="activeNodeId.set(null)"
-                                class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-green-300 focus:border-yellow-500 focus:outline-none">
+                                class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-green-300 focus:border-yellow-500 focus:outline-none placeholder-gray-600"
+                                placeholder="Codex Path...">
 
-                            <!-- Autosuggest Dropdown -->
                             <div *ngIf="activeNodeId() === node.id && filteredPaths().length > 0" class="dropdown-list">
                                 <div *ngFor="let path of filteredPaths()" (mousedown)="selectPathSuggestion(node, path)"
-                                    class="dropdown-item text-sm">
+                                    class="dropdown-item">
                                     {{ path }}
                                 </div>
                             </div>
                         </div>
 
-                        <span *ngIf="!node.isPage" class="flex-1 text-gray-500 italic text-sm">
-                            {{ node.text }} (Merged into parent)
-                        </span>
-
-                        <!-- Manual Indicator -->
-                        <span *ngIf="node.isManual" class="text-xs text-yellow-500 mx-2" title="Manually edited path">
-                            [M]
-                        </span>
-
-                        <!-- Level Badge -->
-                        <span class="text-xs text-gray-600 px-1 border border-gray-700 rounded">
-                            H{{ node.level }}
+                        <span *ngIf="node.isPage && !node.isExcluded" class="text-xs px-2 py-0.5 rounded"
+                            [ngClass]="node.isManual ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-700 text-gray-400'">
+                            {{ node.isManual ? 'Manual' : 'Auto' }}
                         </span>
                     </div>
 
-                    <!-- Children recursively -->
                     <div *ngIf="node.expanded && node.children.length > 0" class="tree-node">
                         <ng-container
                             *ngTemplateOutlet="nodeTemplate; context: { nodes: node.children }"></ng-container>
@@ -87,8 +88,76 @@
                 </div>
             </ng-template>
 
-            <!-- Start Tree -->
             <ng-container *ngTemplateOutlet="nodeTemplate; context: { nodes: rootNodes() }"></ng-container>
+
+            <div *ngIf="rootNodes().length === 0" class="text-gray-500 text-center py-8">
+                No headings found in document.
+            </div>
+        </div>
+    </div>
+
+    <div *ngIf="step() === 3" class="flex flex-col flex-1 overflow-hidden">
+        <div class="flex justify-between items-center mb-4 flex-shrink-0">
+            <h3 class="text-xl font-semibold">3. Preview & Edit Content</h3>
+            <div class="flex gap-2">
+                <button (click)="backToMapping()"
+                    class="bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded text-sm">Back</button>
+                <button (click)="saveImport()" [disabled]="isLoading()"
+                    class="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-bold text-white disabled:opacity-50">
+                    {{ isLoading() ? 'Saving...' : 'Confirm Import' }}
+                </button>
+            </div>
+        </div>
+
+        <div class="flex-1 overflow-y-auto space-y-6 pr-2">
+            <p class="text-gray-400 text-sm">Review the pages to be created. You can edit text blocks here before
+                saving.</p>
+
+            <div *ngFor="let page of previewPages(); let i = index"
+                class="bg-gray-800 border border-gray-700 rounded-lg p-6">
+                <div class="mb-4 pb-2 border-b border-gray-700">
+                    <div class="text-sm text-yellow-500 font-mono mb-1">{{ page.path_components.join(' / ') }}</div>
+                    <input [(ngModel)]="page.name"
+                        class="bg-transparent text-xl font-bold text-white border-none focus:ring-0 w-full" />
+                </div>
+
+                <div class="space-y-4">
+                    <div *ngFor="let block of page.content; let j = index" class="group relative">
+                        <span class="absolute -left-16 top-2 text-xs text-gray-600 w-12 text-right uppercase">{{
+                            block.type }}</span>
+
+                        <ng-container [ngSwitch]="block.type">
+
+                            <input *ngSwitchCase="'heading'" [(ngModel)]="block.text"
+                                class="w-full bg-gray-900/50 border-l-4 border-blue-500 p-2 text-lg font-semibold text-white focus:outline-none focus:bg-gray-900">
+
+                            <textarea *ngSwitchCase="'paragraph'" [(ngModel)]="block.text" rows="3"
+                                class="w-full bg-gray-900/30 border border-transparent focus:border-gray-600 rounded p-2 text-gray-300 focus:outline-none focus:bg-gray-900 resize-y"></textarea>
+
+                            <div *ngSwitchCase="'table'" class="overflow-x-auto bg-gray-900/50 p-2 rounded">
+                                <div class="text-xs text-gray-500 mb-1">Table (Read-only preview)</div>
+                                <table class="w-full text-sm text-left">
+                                    <thead class="text-gray-400 bg-gray-800">
+                                        <tr>
+                                            <th *ngFor="let h of block.headers" class="p-1">{{h}}</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="text-gray-300">
+                                        <tr *ngFor="let row of block.rows" class="border-t border-gray-700">
+                                            <td *ngFor="let h of block.headers" class="p-1">{{ row[h] }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                        </ng-container>
+                    </div>
+
+                    <div *ngIf="page.content.length === 0" class="text-gray-500 italic p-4 text-center">
+                        (No content in this page)
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </div>

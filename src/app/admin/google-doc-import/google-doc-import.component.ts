@@ -26,11 +26,28 @@ interface ImportNode {
 
     // Mapping configuration
     isPage: boolean;        // If true, this node becomes a codex entry
-    pathString: string;     // Editable path string (e.g. "Locations/City/Tavern")
+    isExcluded: boolean;    // If true, skip this node and children
+    pathString: string;     // Editable path string
     isManual: boolean;      // If true, path doesn't auto-update when parent changes
 
     // UI
     expanded: boolean;
+}
+
+interface PageContentBlock {
+    type: 'heading' | 'paragraph' | 'table';
+    text?: string;
+    title?: string; // For tables
+    headers?: string[]; // For tables
+    rows?: any[]; // For tables
+    style?: string; // Original style reference
+}
+
+interface CodexPageDraft {
+    name: string;
+    path_components: string[];
+    content: PageContentBlock[];
+    type: 'page';
 }
 
 @Component({
@@ -45,6 +62,7 @@ interface ImportNode {
     .dropdown-list { max-height: 200px; overflow-y: auto; position: absolute; z-index: 50; width: 100%; background: #1f2937; border: 1px solid #4b5563; border-radius: 0.25rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
     .dropdown-item { padding: 0.5rem; cursor: pointer; color: #d1d5db; }
     .dropdown-item:hover { background-color: #374151; color: white; }
+    .excluded-node { opacity: 0.5; }
   `]
 })
 export class GoogleDocImportComponent implements OnInit {
@@ -62,6 +80,9 @@ export class GoogleDocImportComponent implements OnInit {
 
     // The Tree
     rootNodes = signal<ImportNode[]>([]);
+
+    // Preview Data (Step 3)
+    previewPages = signal<CodexPageDraft[]>([]);
 
     // Search/Autocomplete State
     activeNodeId = signal<string | null>(null);
@@ -151,8 +172,6 @@ export class GoogleDocImportComponent implements OnInit {
                 const parent = getCurrentParent(level);
 
                 // Determine default path
-                // If parent exists, ParentPath/ThisText
-                // If root, just ThisText (or we could default to a "New Import" folder)
                 const parentPath = parent ? parent.pathString : '';
                 const defaultPath = parentPath ? `${parentPath}/${el.text}` : el.text;
 
@@ -162,7 +181,8 @@ export class GoogleDocImportComponent implements OnInit {
                     level: level,
                     content: [],
                     children: [],
-                    isPage: true, // Default to importing headings as pages
+                    isPage: true,
+                    isExcluded: false,
                     pathString: defaultPath,
                     isManual: false,
                     expanded: true
@@ -177,8 +197,6 @@ export class GoogleDocImportComponent implements OnInit {
 
             } else {
                 // Content -> Add to current active node
-                // If no active node (content before first heading), maybe ignore or attach to a dummy?
-                // Let's attach to the last item on stack if exists
                 if (stack.length > 0) {
                     stack[stack.length - 1].content.push({ type: 'paragraph', text: el.text });
                 }
@@ -195,17 +213,21 @@ export class GoogleDocImportComponent implements OnInit {
     }
 
     toggleIsPage(node: ImportNode) {
+        if (node.isExcluded) return;
         node.isPage = !node.isPage;
     }
 
-    // Called when user types in the path input
+    toggleIsExcluded(node: ImportNode) {
+        node.isExcluded = !node.isExcluded;
+        // If excluded, it can't be a page (visually disabled, but logic handled in generatePreview)
+    }
+
     onPathChange(node: ImportNode, newPath: string) {
         node.pathString = newPath;
-        node.isManual = true; // User touched it, stop auto-updates
+        node.isManual = true;
         this.updateChildrenPaths(node);
     }
 
-    // Recursive update for children
     private updateChildrenPaths(parentNode: ImportNode) {
         for (const child of parentNode.children) {
             if (!child.isManual) {
@@ -227,12 +249,6 @@ export class GoogleDocImportComponent implements OnInit {
         this.filterPaths(val);
     }
 
-    handlePathInput(node: ImportNode, event: Event) {
-        const val = (event.target as HTMLInputElement).value;
-        this.onSearchInput(event);
-        this.onPathChange(node, val);
-    }
-
     selectPathSuggestion(node: ImportNode, path: string) {
         this.onPathChange(node, path);
         this.activeNodeId.set(null);
@@ -240,70 +256,83 @@ export class GoogleDocImportComponent implements OnInit {
 
     private filterPaths(query: string) {
         const lower = query.toLowerCase();
-        // Simple filter
         const matches = this.existingPaths()
             .filter(p => p.toLowerCase().includes(lower))
             .slice(0, 20);
         this.filteredPaths.set(matches);
     }
 
-    // --- Save / Export ---
+    // --- Preview Generation (Step 2 -> 3) ---
 
-    async saveImport() {
-        if (!await this.modalService.confirm('Import', 'Import these pages into Codex?')) return;
-        this.isLoading.set(true);
+    generatePreview() {
+        const drafts: CodexPageDraft[] = [];
 
-        try {
-            // Flatten tree into CodexEntries
-            const entriesToSave: any[] = [];
+        // Recursive processor
+        const processNode = (node: ImportNode, activePage: CodexPageDraft | null) => {
+            if (node.isExcluded) return; // Skip excluded subtrees
 
-            const processNode = (node: ImportNode, parentContentCollector: any[] | null) => {
+            let currentPage = activePage;
+
+            if (node.isPage) {
+                // Start a new page
                 const pathParts = node.pathString.split('/').map(p => p.trim()).filter(p => !!p);
                 const name = pathParts[pathParts.length - 1];
 
-                if (node.isPage) {
-                    // It's a Page. Create an Entry.
-                    // Content includes its own content + flattened content of non-page children
-                    const pageContent = [...node.content];
+                const newPage: CodexPageDraft = {
+                    name: name,
+                    path_components: pathParts,
+                    content: [], // Start fresh content
+                    type: 'page'
+                };
 
-                    for (const child of node.children) {
-                        processNode(child, pageContent);
-                    }
+                // Add own content
+                // Use spread syntax which is simpler if node.content is iterable
+                if (node.content && node.content.length > 0) {
+                    newPage.content.push(...node.content);
+                }
 
-                    entriesToSave.push({
-                        name: name,
-                        path_components: pathParts,
-                        content: pageContent,
-                        type: 'page' // or generic
-                    });
-
-                } else {
-                    // Not a page. Append content to parent collector if exists.
-                    if (parentContentCollector) {
-                        // Add heading for visual separation?
-                        parentContentCollector.push({ type: 'heading', text: node.text });
-                        parentContentCollector.push(...node.content);
-
-                        for (const child of node.children) {
-                            processNode(child, parentContentCollector);
-                        }
-                    } else {
-                        // Orphaned non-page content (root level non-page). 
-                        if (node.content.length > 0) {
-                            // Fallback: create page anyway
-                            const pageContent = [...node.content];
-                            for (const child of node.children) processNode(child, pageContent);
-                            entriesToSave.push({ name: name, path_components: pathParts, content: pageContent });
-                        }
+                drafts.push(newPage);
+                currentPage = newPage;
+            } else {
+                // Not a page, append to parent page as a Heading + Content
+                if (currentPage) {
+                    currentPage.content.push({ type: 'heading', text: node.text });
+                    if (node.content && node.content.length > 0) {
+                        currentPage.content.push(...node.content);
                     }
                 }
-            };
-
-            for (const root of this.rootNodes()) {
-                processNode(root, null);
             }
 
-            // Save
+            // Recurse
+            for (const child of node.children) {
+                processNode(child, currentPage);
+            }
+        };
+
+        for (const root of this.rootNodes()) {
+            processNode(root, null);
+        }
+
+        this.previewPages.set(drafts);
+        this.step.set(3);
+    }
+
+    // --- Step 3 Actions ---
+
+    backToMapping() {
+        this.step.set(2);
+    }
+
+    // --- Save / Export ---
+
+    async saveImport() {
+        if (this.previewPages().length === 0) return;
+
+        this.isLoading.set(true);
+
+        try {
+            const entriesToSave = this.previewPages();
+
             await lastValueFrom(this.http.put('api/codex/data', entriesToSave));
             this.modalService.alert('Success', `Imported ${entriesToSave.length} entries.`);
             this.reset();
@@ -320,5 +349,6 @@ export class GoogleDocImportComponent implements OnInit {
         this.step.set(1);
         this.docIdInput.set('');
         this.rootNodes.set([]);
+        this.previewPages.set([]);
     }
 }

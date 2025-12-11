@@ -72,9 +72,9 @@ describe('GoogleDocImportComponent', () => {
 
         // Setup tree manually to skip fetch
         // Root -> Child -> Grandchild
-        const grandchild = { id: '3', text: 'GC', level: 3, content: [], children: [], isPage: true, pathString: 'Root/Child/GC', isManual: false, expanded: true };
-        const child = { id: '2', text: 'Child', level: 2, content: [], children: [grandchild], isPage: true, pathString: 'Root/Child', isManual: false, expanded: true };
-        const root = { id: '1', text: 'Root', level: 1, content: [], children: [child], isPage: true, pathString: 'Root', isManual: false, expanded: true };
+        const grandchild = { id: '3', text: 'GC', level: 3, content: [], children: [], isPage: true, pathString: 'Root/Child/GC', isManual: false, expanded: true, isExcluded: false };
+        const child = { id: '2', text: 'Child', level: 2, content: [], children: [grandchild], isPage: true, pathString: 'Root/Child', isManual: false, expanded: true, isExcluded: false };
+        const root = { id: '1', text: 'Root', level: 1, content: [], children: [child], isPage: true, pathString: 'Root', isManual: false, expanded: true, isExcluded: false };
 
         component.rootNodes.set([root]);
 
@@ -90,8 +90,8 @@ describe('GoogleDocImportComponent', () => {
         fixture.detectChanges();
         httpMock.expectOne('api/codex/data').flush([]);
 
-        const child = { id: '2', text: 'Child', level: 2, content: [], children: [], isPage: true, pathString: 'Root/Child', isManual: true, expanded: true };
-        const root = { id: '1', text: 'Root', level: 1, content: [], children: [child], isPage: true, pathString: 'Root', isManual: false, expanded: true };
+        const child = { id: '2', text: 'Child', level: 2, content: [], children: [], isPage: true, pathString: 'Root/Child', isManual: true, expanded: true, isExcluded: false };
+        const root = { id: '1', text: 'Root', level: 1, content: [], children: [child], isPage: true, pathString: 'Root', isManual: false, expanded: true, isExcluded: false };
 
         component.rootNodes.set([root]);
 
