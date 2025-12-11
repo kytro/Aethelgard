@@ -52,6 +52,10 @@ describe('SessionLoggerComponent', () => {
     it('should create a new session', async () => {
         const emitSpy = jest.spyOn(component.sessionAdded, 'emit');
 
+        // FIX: Clear the input ID so the effect doesn't override our manual selection
+        fixture.componentRef.setInput('currentSessionId', null);
+        fixture.detectChanges();
+
         component.handleAddSession();
 
         const req = httpMock.expectOne('/codex/api/dm-toolkit/sessions');
@@ -59,6 +63,12 @@ describe('SessionLoggerComponent', () => {
 
         const newSession = { _id: 's3', createdAt: new Date() };
         req.flush(newSession);
+
+        // FIX: Verify that the parent component would update the input, or mock it here
+        // Sincle the effect relies on 'sessions' input to validate currentSession, we must manually update the input list
+        // to mimic what the parent would do, otherwise the effect clears 's3'.
+        fixture.componentRef.setInput('sessions', [...mockSessions, newSession]);
+        fixture.detectChanges();
 
         await fixture.whenStable();
 
@@ -71,11 +81,13 @@ describe('SessionLoggerComponent', () => {
         const emitSpy = jest.spyOn(component.sessionDeleted, 'emit');
 
         component.setCurrentSession(mockSessions[0]);
+        // FIX: Clear the input ID so the effect doesn't try to re-select the deleted session
+        fixture.componentRef.setInput('currentSessionId', null);
         fixture.detectChanges();
 
         component.handleDeleteSession('s1');
 
-        // Wait for modal confirm promise to resolve
+        // Wait for modal confirm (async)
         await new Promise(resolve => setTimeout(resolve, 0));
         await fixture.whenStable();
 

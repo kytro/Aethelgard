@@ -2,7 +2,8 @@ import { Component, signal, inject, input, computed, WritableSignal, effect, Out
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
-import { lastValueFrom } from 'rxjs';
+import { lastValueFrom, Observable } from 'rxjs';
+import { tap } from 'rxjs/operators';
 import {
   formatTime, getAbilityModifierAsNumber, calculateCompleteBaseStats, getCaseInsensitiveProp,
   formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP, SIZE_DATA,
@@ -116,7 +117,7 @@ export class CombatManagerComponent {
     effect(() => {
       const fight = this.currentFight();
       if (fight) {
-        this.loadCombatants(fight._id);
+        this.loadCombatants(fight._id).subscribe(); // Subscribe to observable
         this.isCombatActive.set(!!fight.combatStartTime);
         this.roundCounter.set(fight.roundCounter || 1);
         this.currentTurnIndex.set(fight.currentTurnIndex || 0);
@@ -193,11 +194,13 @@ export class CombatManagerComponent {
     return true;
   }
 
-  loadCombatants(fightId: string) {
-    this.http.get<Combatant[]>(`/codex/api/dm-toolkit/fights/${fightId}/combatants`).subscribe({
-      next: (combatants) => this.combatants.set(combatants),
-      error: (e) => console.error(e)
-    });
+  loadCombatants(fightId: string): Observable<Combatant[]> {
+    return this.http.get<Combatant[]>(`/codex/api/dm-toolkit/fights/${fightId}/combatants`).pipe(
+      tap({
+        next: (combatants) => this.combatants.set(combatants),
+        error: (e) => console.error(e)
+      })
+    );
   }
 
   logAction(message: string) {
@@ -420,9 +423,10 @@ export class CombatManagerComponent {
     this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}/end-combat`, {}).subscribe({
       next: (updatedFight) => {
         this.currentFight.set(updatedFight);
-        this.loadCombatants(fight._id);
-        this.logAction('Combat ended.');
-        this.isTogglingCombatState.set(false);
+        this.loadCombatants(fight._id).subscribe(() => {
+          this.logAction('Combat ended.');
+          this.isTogglingCombatState.set(false);
+        });
       },
       error: (e) => {
         console.error(e);
@@ -440,10 +444,15 @@ export class CombatManagerComponent {
         this.currentFight.set(updatedFight);
         this.roundCounter.set(updatedFight.roundCounter || 1);
         this.currentTurnIndex.set(updatedFight.currentTurnIndex || 0);
-        this.loadCombatants(fight._id);
-        const active = this.modifiedCombatants()[updatedFight.currentTurnIndex || 0];
-        if (active) this.logAction(`Turn: ${active.name}.`);
-        this.isAdvancingTurn.set(false);
+
+        this.loadCombatants(fight._id).subscribe({
+          next: () => {
+            const active = this.modifiedCombatants()[updatedFight.currentTurnIndex || 0];
+            if (active) this.logAction(`Turn: ${active.name}.`);
+            this.isAdvancingTurn.set(false);
+          },
+          error: () => this.isAdvancingTurn.set(false)
+        });
       },
       error: (e) => {
         console.error(e);
@@ -461,8 +470,11 @@ export class CombatManagerComponent {
         this.currentFight.set(updatedFight);
         this.roundCounter.set(updatedFight.roundCounter || 1);
         this.currentTurnIndex.set(updatedFight.currentTurnIndex || 0);
-        this.loadCombatants(fight._id);
-        this.isAdvancingTurn.set(false);
+
+        this.loadCombatants(fight._id).subscribe({
+          next: () => this.isAdvancingTurn.set(false),
+          error: () => this.isAdvancingTurn.set(false)
+        });
       },
       error: (e) => {
         console.error(e);

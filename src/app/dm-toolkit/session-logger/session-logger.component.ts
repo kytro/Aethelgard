@@ -102,7 +102,7 @@ export class SessionLoggerComponent {
       if (current && !list.some(s => s._id === current._id)) {
         this.currentSession.set(null);
       }
-    }, { allowSignalWrites: true });
+    });
   }
 
   handleAddSession() {

@@ -2,34 +2,42 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { DataIntegrityComponent } from './data-integrity.component';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { provideZonelessChangeDetection } from '@angular/core';
+import { ModalService } from '../shared/services/modal.service';
 
 describe('DataIntegrityComponent', () => {
     let component: DataIntegrityComponent;
     let fixture: ComponentFixture<DataIntegrityComponent>;
     let httpMock: HttpTestingController;
+    let modalService: ModalService;
 
     beforeEach(async () => {
         await TestBed.configureTestingModule({
             imports: [DataIntegrityComponent, HttpClientTestingModule],
-            providers: [provideZonelessChangeDetection()]
+            providers: [provideZonelessChangeDetection(), ModalService]
         }).compileComponents();
 
         fixture = TestBed.createComponent(DataIntegrityComponent);
         component = fixture.componentInstance;
         httpMock = TestBed.inject(HttpTestingController);
+        modalService = TestBed.inject(ModalService);
 
         // Trigger ngOnInit
         fixture.detectChanges();
 
         // Handle initial status check
-        const req = httpMock.expectOne('/codex/api/data-integrity/status');
-        expect(req.request.method).toBe('GET');
-        req.flush({
-            unlinkedStatblocks: 5,
-            orphanedEntities: 2,
-            brokenRuleLinks: 0,
-            brokenEquipmentLinks: 1
-        });
+        try {
+            const req = httpMock.expectOne('/codex/api/data-integrity/status');
+            expect(req.request.method).toBe('GET');
+            req.flush({
+                unlinkedStatblocks: 5,
+                orphanedEntities: 2,
+                brokenRuleLinks: 0,
+                brokenEquipmentLinks: 1
+            });
+        } catch (e) {
+            console.error('SETUP ERROR:', e);
+            throw e;
+        }
         await fixture.whenStable();
     });
 
@@ -48,10 +56,13 @@ describe('DataIntegrityComponent', () => {
     });
 
     it('should trigger codex migration when confirmed', async () => {
-        jest.spyOn(window, 'confirm').mockReturnValue(true);
+        jest.spyOn(modalService, 'confirm').mockResolvedValue(true);
 
         component.forceMigration.set(true);
         component.migrateCodex();
+
+        // Wait for async modal resolution
+        await fixture.whenStable();
 
         const req = httpMock.expectOne('/codex/api/data-integrity/migrate-codex');
         expect(req.request.method).toBe('POST');
@@ -63,10 +74,13 @@ describe('DataIntegrityComponent', () => {
         expect(component.logs()[0].message).toContain('Migration started');
     });
 
-    it('should NOT trigger codex migration when cancelled', () => {
-        jest.spyOn(window, 'confirm').mockReturnValue(false);
+    it('should NOT trigger codex migration when cancelled', async () => {
+        jest.spyOn(modalService, 'confirm').mockResolvedValue(false);
 
         component.migrateCodex();
+
+        // Wait for async modal resolution
+        await fixture.whenStable();
 
         httpMock.expectNone('/codex/api/data-integrity/migrate-codex');
         expect(component.logs()[0].message).toContain('cancelled');
