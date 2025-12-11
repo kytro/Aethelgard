@@ -17,12 +17,20 @@ interface DocStructureHeader {
     structure: DocElement[];
 }
 
-interface CodexPageDraft {
-    name: string;
-    type: 'page' | 'section';
+interface ImportNode {
+    id: string;
+    text: string;
+    level: number; // 1-6 for Headings, 999 for root context
     content: any[];
-    path: string[];
-    children: CodexPageDraft[];
+    children: ImportNode[];
+
+    // Mapping configuration
+    isPage: boolean;        // If true, this node becomes a codex entry
+    pathString: string;     // Editable path string (e.g. "Locations/City/Tavern")
+    isManual: boolean;      // If true, path doesn't auto-update when parent changes
+
+    // UI
+    expanded: boolean;
 }
 
 @Component({
@@ -31,12 +39,12 @@ interface CodexPageDraft {
     imports: [CommonModule, FormsModule],
     templateUrl: './google-doc-import.component.html',
     styles: [`
-    .step-container { margin-bottom: 2rem; padding: 1rem; border: 1px solid #ccc; border-radius: 4px; }
-    .heading-item { padding: 4px 8px; border-bottom: 1px solid #eee; display: flex; align-items: center; justify-content: space-between; }
-    .preview-node { margin-left: 20px; border-left: 2px solid #ddd; padding-left: 10px; }
-    .dropdown-list { max-height: 200px; overflow-y: auto; position: absolute; z-index: 10; width: 100%; background: white; border: 1px solid #ccc; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-    .dropdown-item { padding: 8px; cursor: pointer; }
-    .dropdown-item:hover { background-color: #f0f0f0; }
+    .step-container { margin-bottom: 2rem; padding: 1rem; border: 1px solid #374151; border-radius: 0.5rem; background-color: #1f2937; }
+    .tree-node { border-left: 1px solid #4b5563; margin-left: 1rem; padding-left: 0.5rem; position: relative; }
+    .tree-node::before { content: ''; position: absolute; top: 1rem; left: -1px; width: 0.5rem; height: 1px; background-color: #4b5563; }
+    .dropdown-list { max-height: 200px; overflow-y: auto; position: absolute; z-index: 50; width: 100%; background: #1f2937; border: 1px solid #4b5563; border-radius: 0.25rem; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); }
+    .dropdown-item { padding: 0.5rem; cursor: pointer; color: #d1d5db; }
+    .dropdown-item:hover { background-color: #374151; color: white; }
   `]
 })
 export class GoogleDocImportComponent implements OnInit {
@@ -48,52 +56,21 @@ export class GoogleDocImportComponent implements OnInit {
     isLoading = signal<boolean>(false);
     docIdInput = signal<string>('');
 
-    // Fetched Data
-    docStructure = signal<DocElement[]>([]);
+    // Data
     docTitle = signal<string>('');
     existingPaths = signal<string[]>([]);
 
-    // Mapping
-    mappingRules = signal<{ level: string }[]>([{ level: 'HEADING_1' }]);
-    selectedParent = signal<string>('');
-    pathSuffix = signal<string>('');
+    // The Tree
+    rootNodes = signal<ImportNode[]>([]);
 
-    // UI State
-    showParentDropdown = signal<boolean>(false);
-
-    // Computed
-    filteredPaths = computed(() => {
-        const query = this.selectedParent().toLowerCase();
-        return this.existingPaths().filter(p => p.toLowerCase().includes(query)).slice(0, 50); // Limit results
-    });
-
-    // Preview
-    previewPages = signal<CodexPageDraft[]>([]);
+    // Search/Autocomplete State
+    activeNodeId = signal<string | null>(null);
+    filteredPaths = signal<string[]>([]);
 
     constructor() { }
 
     ngOnInit() {
         this.fetchExistingPaths();
-    }
-
-    selectPath(path: string) {
-        this.selectedParent.set(path);
-        this.showParentDropdown.set(false);
-    }
-
-    onParentBlur() {
-        // Delay hiding to allow click event to register
-        setTimeout(() => {
-            this.showParentDropdown.set(false);
-        }, 200);
-    }
-
-    addMappingRule() {
-        this.mappingRules.update(rules => [...rules, { level: 'HEADING_2' }]);
-    }
-
-    removeMappingRule(index: number) {
-        this.mappingRules.update(rules => rules.filter((_, i) => i !== index));
     }
 
     async fetchExistingPaths() {
@@ -108,7 +85,6 @@ export class GoogleDocImportComponent implements OnInit {
     extractPaths(nodes: any[], prefix: string = ''): string[] {
         let paths: string[] = [];
         if (!nodes) return paths;
-
         for (const node of nodes) {
             const currentPath = prefix ? `${prefix}/${node.name}` : node.name;
             paths.push(currentPath);
@@ -120,185 +96,221 @@ export class GoogleDocImportComponent implements OnInit {
     }
 
     async fetchDoc() {
-        // Regex defaults to catching ID between /d/ and /
+        // Simple regex to extract ID
         const docId = this.docIdInput().match(/\/d\/([-\w]{25,})/)?.[1] || this.docIdInput().match(/([-\w]{25,})/)?.[0];
 
         if (!docId) {
-            this.modalService.alert('Invalid Link', 'Could not parse Document ID from link.');
+            this.modalService.alert('Invalid Link', 'Could not parse Document ID.');
             return;
         }
 
         this.isLoading.set(true);
         try {
             const res = await lastValueFrom(this.http.get<DocStructureHeader>(`api/google-docs/fetch/${docId}`));
-
             this.docTitle.set(res.title);
-            this.docStructure.set(res.structure);
+
+            // Build the tree
+            const tree = this.buildTree(res.structure);
+            this.rootNodes.set(tree);
+
             this.step.set(2);
         } catch (err: any) {
             console.error(err);
-            this.modalService.alert('Fetch Error', err.error?.error || 'Failed to fetch document. Is it Public?');
+            this.modalService.alert('Fetch Error', err.error?.error || 'Failed to fetch document.');
         } finally {
             this.isLoading.set(false);
         }
     }
 
-    getHeadingLevel(type: string): number {
-        if (type.startsWith('HEADING_')) {
-            return parseInt(type.split('_')[1], 10);
-        }
+    // --- Tree Construction ---
+
+    private getLevel(type: string): number {
+        if (type.startsWith('HEADING_')) return parseInt(type.split('_')[1], 10);
         return 999;
     }
 
-    isMapped(type: string): boolean {
-        return this.mappingRules().some(r => r.level === type);
-    }
+    private buildTree(elements: DocElement[]): ImportNode[] {
+        const roots: ImportNode[] = [];
+        const stack: ImportNode[] = [];
 
-    generatePreview() {
-        const structure = this.docStructure();
-        const rules = this.mappingRules();
+        // Helper to get current context
+        const getCurrentParent = (level: number) => {
+            while (stack.length > 0 && stack[stack.length - 1].level >= level) {
+                stack.pop();
+            }
+            return stack.length > 0 ? stack[stack.length - 1] : null;
+        };
 
-        const pages: CodexPageDraft[] = [];
-        let currentPage: CodexPageDraft | null = null;
+        let idCounter = 0;
 
-        // Stack to track path components from mapped levels
-        let docPathStack: { level: number, text: string }[] = [];
+        for (const el of elements) {
+            const level = this.getLevel(el.type);
 
-        const prefixComponents = [
-            ...(this.selectedParent() ? this.selectedParent().split('/') : []),
-            ...(this.pathSuffix() ? this.pathSuffix().split('/').filter(p => !!p) : [])
-        ];
+            if (level < 999) {
+                // It's a Heading -> New Node
+                const parent = getCurrentParent(level);
 
-        for (const el of structure) {
-            const currentLevel = this.getHeadingLevel(el.type);
-            const isMapped = rules.some(r => r.level === el.type);
+                // Determine default path
+                // If parent exists, ParentPath/ThisText
+                // If root, just ThisText (or we could default to a "New Import" folder)
+                const parentPath = parent ? parent.pathString : '';
+                const defaultPath = parentPath ? `${parentPath}/${el.text}` : el.text;
 
-            if (isMapped) {
-                // Update Stack: Pop anything deeper or equal to current level
-                // Standard hierarchy: H2 is under H1. H1 replaces previous H1.
-                docPathStack = docPathStack.filter(item => item.level < currentLevel);
-
-                // Construct path for THIS page (it sits under the current stack)
-                const pathFromStack = docPathStack.map(i => i.text);
-
-                currentPage = {
-                    name: el.text,
-                    type: 'page',
-                    content: [],  // Content will accumulate here
-                    path: [...prefixComponents, ...pathFromStack, el.text], // Full Path including self
-                    children: []
+                const newNode: ImportNode = {
+                    id: `node-${idCounter++}`,
+                    text: el.text,
+                    level: level,
+                    content: [],
+                    children: [],
+                    isPage: true, // Default to importing headings as pages
+                    pathString: defaultPath,
+                    isManual: false,
+                    expanded: true
                 };
-                pages.push(currentPage);
 
-                // Push THIS page to stack so children can nest under it
-                docPathStack.push({ level: currentLevel, text: el.text });
+                if (parent) {
+                    parent.children.push(newNode);
+                } else {
+                    roots.push(newNode);
+                }
+                stack.push(newNode);
+
             } else {
-                // Content
-                if (currentPage) {
-                    currentPage.content.push({ type: 'paragraph', text: el.text, style: el.type });
+                // Content -> Add to current active node
+                // If no active node (content before first heading), maybe ignore or attach to a dummy?
+                // Let's attach to the last item on stack if exists
+                if (stack.length > 0) {
+                    stack[stack.length - 1].content.push({ type: 'paragraph', text: el.text });
                 }
             }
         }
 
-        this.previewPages.set(pages);
-        this.step.set(3);
+        return roots;
     }
 
-    discardPage(index: number) {
-        this.previewPages.update(pages => pages.filter((_, i) => i !== index));
+    // --- Tree Interaction ---
+
+    toggleNode(node: ImportNode) {
+        node.expanded = !node.expanded;
     }
+
+    toggleIsPage(node: ImportNode) {
+        node.isPage = !node.isPage;
+    }
+
+    // Called when user types in the path input
+    onPathChange(node: ImportNode, newPath: string) {
+        node.pathString = newPath;
+        node.isManual = true; // User touched it, stop auto-updates
+        this.updateChildrenPaths(node);
+    }
+
+    // Recursive update for children
+    private updateChildrenPaths(parentNode: ImportNode) {
+        for (const child of parentNode.children) {
+            if (!child.isManual) {
+                child.pathString = `${parentNode.pathString}/${child.text}`;
+                this.updateChildrenPaths(child);
+            }
+        }
+    }
+
+    // --- Search / Autocomplete ---
+
+    onFocusPath(node: ImportNode) {
+        this.activeNodeId.set(node.id);
+        this.filterPaths(node.pathString);
+    }
+
+    onSearchInput(event: Event) {
+        const val = (event.target as HTMLInputElement).value;
+        this.filterPaths(val);
+    }
+
+    handlePathInput(node: ImportNode, event: Event) {
+        const val = (event.target as HTMLInputElement).value;
+        this.onSearchInput(event);
+        this.onPathChange(node, val);
+    }
+
+    selectPathSuggestion(node: ImportNode, path: string) {
+        this.onPathChange(node, path);
+        this.activeNodeId.set(null);
+    }
+
+    private filterPaths(query: string) {
+        const lower = query.toLowerCase();
+        // Simple filter
+        const matches = this.existingPaths()
+            .filter(p => p.toLowerCase().includes(lower))
+            .slice(0, 20);
+        this.filteredPaths.set(matches);
+    }
+
+    // --- Save / Export ---
 
     async saveImport() {
-        if (this.previewPages().length === 0) return;
-        if (!await this.modalService.confirm('Import', `Import ${this.previewPages().length} pages into Codex?`)) return;
-
+        if (!await this.modalService.confirm('Import', 'Import these pages into Codex?')) return;
         this.isLoading.set(true);
+
         try {
-            // 1. Fetch current Codex Data
-            const currentData = await lastValueFrom(this.http.get<any[]>('api/codex/data')) || [];
+            // Flatten tree into CodexEntries
+            const entriesToSave: any[] = [];
 
-            // 2. Merge pages
-            let updatedData = JSON.parse(JSON.stringify(currentData)); // Deep copy
+            const processNode = (node: ImportNode, parentContentCollector: any[] | null) => {
+                const pathParts = node.pathString.split('/').map(p => p.trim()).filter(p => !!p);
+                const name = pathParts[pathParts.length - 1];
 
-            // Helper to find or create node at path
-            const findOrCreateNode = (nodes: any[], pathStack: string[]): any => {
-                if (pathStack.length === 0) return nodes;
+                if (node.isPage) {
+                    // It's a Page. Create an Entry.
+                    // Content includes its own content + flattened content of non-page children
+                    const pageContent = [...node.content];
 
-                const part = pathStack[0];
-                let existingNode = nodes.find(n => n.name === part);
+                    for (const child of node.children) {
+                        processNode(child, pageContent);
+                    }
 
-                if (!existingNode) {
-                    existingNode = {
-                        name: part,
-                        type: 'page', // Default container type
-                        content: [],
-                        path_components: [], // Should be filled if we were strict, but we let backend/frontend handle it?
-                        // Actually, we usually don't need path_components in the tree data itself if it's implicit
-                        children: []
-                    };
-                    nodes.push(existingNode);
+                    entriesToSave.push({
+                        name: name,
+                        path_components: pathParts,
+                        content: pageContent,
+                        type: 'page' // or generic
+                    });
+
+                } else {
+                    // Not a page. Append content to parent collector if exists.
+                    if (parentContentCollector) {
+                        // Add heading for visual separation?
+                        parentContentCollector.push({ type: 'heading', text: node.text });
+                        parentContentCollector.push(...node.content);
+
+                        for (const child of node.children) {
+                            processNode(child, parentContentCollector);
+                        }
+                    } else {
+                        // Orphaned non-page content (root level non-page). 
+                        if (node.content.length > 0) {
+                            // Fallback: create page anyway
+                            const pageContent = [...node.content];
+                            for (const child of node.children) processNode(child, pageContent);
+                            entriesToSave.push({ name: name, path_components: pathParts, content: pageContent });
+                        }
+                    }
                 }
-
-                if (!existingNode.children) existingNode.children = [];
-
-                if (pathStack.length === 1) {
-                    return existingNode;
-                }
-
-                return findOrCreateNode(existingNode.children, pathStack.slice(1));
             };
 
-            // If we have a selected parent/suffix, we need to graft our pages there
-            const parentPathStr = [
-                ...(this.selectedParent() ? this.selectedParent().split('/') : []),
-                ...(this.pathSuffix() ? this.pathSuffix().split('/').filter(p => !!p) : [])
-            ].join('/');
-
-            // For each preview page, we attach it to the tree
-            for (const page of this.previewPages()) {
-                const destPathParts = page.path.slice(0, -1); // Parent path components
-                // e.g. ['World', 'Locations']
-
-                // Find the parent array to push to
-                // If destPathParts is empty, we push to root (updatedData)
-                // If not empty, we traverse
-                let targetChildren: any[] = updatedData;
-
-                if (destPathParts.length > 0) {
-                    // Find the parent node
-                    // However, `findOrCreateNode` above returns a Node, not an array.
-                    // Let's adjust helper or logic.
-                    // We need to find the *node* that represents the last part of destPathParts
-                    // And then access its .children
-
-                    // Let's do iterative traversal
-                    let currentLevel = updatedData;
-                    for (const part of destPathParts) {
-                        let node = currentLevel.find((n: any) => n.name === part);
-                        if (!node) {
-                            node = { name: part, type: 'page', content: [], children: [] };
-                            currentLevel.push(node);
-                        }
-                        if (!node.children) node.children = [];
-                        currentLevel = node.children;
-                    }
-                    targetChildren = currentLevel;
-                }
-
-                // Now push the page (avoid duplicate names?)
-                // If page with same name exists, we append content or skip?
-                // Let's just push for now, or maybe uniquify name
-                targetChildren.push(page);
+            for (const root of this.rootNodes()) {
+                processNode(root, null);
             }
 
-            // 3. Save back
-            await lastValueFrom(this.http.put('api/codex/data', updatedData));
-
-            this.modalService.alert('Success', 'Pages imported successfully!');
+            // Save
+            await lastValueFrom(this.http.put('api/codex/data', entriesToSave));
+            this.modalService.alert('Success', `Imported ${entriesToSave.length} entries.`);
             this.reset();
-        } catch (err) {
-            console.error(err);
-            this.modalService.alert('Error', 'Failed to save imported pages.');
+
+        } catch (e: any) {
+            console.error(e);
+            this.modalService.alert('Error', 'Failed to save import.');
         } finally {
             this.isLoading.set(false);
         }
@@ -306,11 +318,7 @@ export class GoogleDocImportComponent implements OnInit {
 
     reset() {
         this.step.set(1);
-        this.docStructure.set([]);
-        this.previewPages.set([]);
         this.docIdInput.set('');
-        // Keep selected parent/suffix? Maybe reset them too?
-        // this.selectedParent.set(''); 
-        // this.pathSuffix.set('');
+        this.rootNodes.set([]);
     }
 }

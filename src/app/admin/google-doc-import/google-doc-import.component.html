@@ -1,113 +1,94 @@
-<div class="p-4">
-    <h2 class="text-2xl font-bold mb-4">Google Docs Import (Public)</h2>
+<div class="p-4 bg-gray-900 text-gray-100 min-h-screen">
+    <h2 class="text-2xl font-bold mb-4 text-white">Google Docs Import (Tree Mode)</h2>
 
     <!-- STEP 1: Connect -->
     <div *ngIf="step() === 1" class="step-container">
-        <h3 class="text-xl mb-2">Step 1: Connect Document</h3>
-        <p class="text-sm text-gray-400 mb-2">Note: The document must be publicly accessible (Share > Anyone with the
-            link).</p>
+        <h3 class="text-xl mb-2 text-blue-400">Step 1: Connect Document</h3>
+        <p class="text-sm text-gray-400 mb-2">Note: The document must be publicly accessible.</p>
         <div class="flex gap-2">
-            <input type="text" [(ngModel)]="docIdInput" placeholder="Paste Google Doc Link here..."
-                class="border p-2 rounded flex-1 text-black">
-            <button (click)="fetchDoc()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+            <input type="text" [ngModel]="docIdInput()" (ngModelChange)="docIdInput.set($event)"
+                placeholder="Paste Google Doc Link here..."
+                class="border border-gray-600 bg-gray-800 p-2 rounded flex-1 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none">
+            <button (click)="fetchDoc()"
+                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 disabled:opacity-50"
                 [disabled]="isLoading()">
                 {{ isLoading() ? 'Fetching...' : 'Fetch' }}
             </button>
         </div>
     </div>
 
-    <!-- STEP 2: Configure Mapping -->
+    <!-- STEP 2: Configure Tree -->
     <div *ngIf="step() === 2" class="step-container">
-        <h3 class="text-xl mb-2">Step 2: Map Hierarchy (Doc: {{ docTitle() }})</h3>
-
-        <div class="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div class="col-span-1 md:col-span-2">
-                <label class="block font-semibold mb-2">Mapped Levels:</label>
-                <div *ngFor="let rule of mappingRules(); let i = index" class="flex gap-2 mb-2 items-center">
-                    <select [(ngModel)]="rule.level" class="border p-2 rounded text-black flex-1">
-                        <option value="HEADING_1">Heading 1</option>
-                        <option value="HEADING_2">Heading 2</option>
-                        <option value="HEADING_3">Heading 3</option>
-                        <option value="HEADING_4">Heading 4</option>
-                        <option value="HEADING_5">Heading 5</option>
-                        <option value="HEADING_6">Heading 6</option>
-                    </select>
-                    <button (click)="removeMappingRule(i)"
-                        class="text-red-500 hover:text-red-700 font-bold px-2">X</button>
-                </div>
-                <button (click)="addMappingRule()" class="text-blue-600 hover:text-blue-800 text-sm font-semibold">+
-                    Add Level</button>
-                <p class="text-xs text-gray-500 mt-2">All mapped levels create Pages. Deeper levels sit under shallower
-                    ones.</p>
+        <div class="flex justify-between items-center mb-4">
+            <h3 class="text-xl text-blue-400">Step 2: Review & Import Hierarchy</h3>
+            <div class="flex gap-2">
+                <button (click)="reset()"
+                    class="bg-gray-600 text-white px-3 py-1 rounded hover:bg-gray-700">Back</button>
+                <button (click)="saveImport()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
+                    Import Selected
+                </button>
             </div>
+        </div>
 
-            <div>
-                <div class="relative">
-                    <label class="block font-semibold">Parent Path (Searchable):</label>
-                    <div class="relative">
-                        <input type="text" [ngModel]="selectedParent()"
-                            (ngModelChange)="selectedParent.set($event); showParentDropdown.set(true)"
-                            (focus)="showParentDropdown.set(true)" (blur)="onParentBlur()"
-                            placeholder="Search existing paths..." class="border p-2 rounded text-black w-full"
-                            autocomplete="off">
-                        <div *ngIf="showParentDropdown() && filteredPaths().length > 0"
-                            class="dropdown-list text-black">
-                            <div *ngFor="let path of filteredPaths()" (click)="selectPath(path)" class="dropdown-item">
-                                {{ path }}
+        <div class="bg-gray-800 border border-gray-700 rounded p-4 overflow-x-auto">
+            <!-- Recursive Tree Template -->
+            <ng-template #nodeTemplate let-nodes="nodes">
+                <div *ngFor="let node of nodes" class="mb-1">
+                    <div class="flex items-center gap-2 py-1 hover:bg-gray-700 rounded px-1 transition-colors">
+
+                        <!-- Expand/Collapse -->
+                        <button (click)="toggleNode(node)"
+                            class="w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white">
+                            <span *ngIf="node.children.length > 0">
+                                {{ node.expanded ? '▼' : '▶' }}
+                            </span>
+                        </button>
+
+                        <!-- Import Checkbox -->
+                        <input type="checkbox" [checked]="node.isPage" (change)="toggleIsPage(node)"
+                            class="w-4 h-4 rounded border-gray-600 text-blue-600 focus:ring-blue-500 bg-gray-700">
+
+                        <!-- Node Path/Name Input -->
+                        <!-- If importing as page, show Path Input. Else just show text (as content). -->
+                        <div class="relative flex-1 mx-2" *ngIf="node.isPage">
+                            <input type="text" [value]="node.pathString" (input)="handlePathInput(node, $event)"
+                                (focus)="onFocusPath(node)" (blur)="activeNodeId.set(null)"
+                                class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-green-300 focus:border-yellow-500 focus:outline-none">
+
+                            <!-- Autosuggest Dropdown -->
+                            <div *ngIf="activeNodeId() === node.id && filteredPaths().length > 0" class="dropdown-list">
+                                <div *ngFor="let path of filteredPaths()" (mousedown)="selectPathSuggestion(node, path)"
+                                    class="dropdown-item text-sm">
+                                    {{ path }}
+                                </div>
                             </div>
                         </div>
+
+                        <span *ngIf="!node.isPage" class="flex-1 text-gray-500 italic text-sm">
+                            {{ node.text }} (Merged into parent)
+                        </span>
+
+                        <!-- Manual Indicator -->
+                        <span *ngIf="node.isManual" class="text-xs text-yellow-500 mx-2" title="Manually edited path">
+                            [M]
+                        </span>
+
+                        <!-- Level Badge -->
+                        <span class="text-xs text-gray-600 px-1 border border-gray-700 rounded">
+                            H{{ node.level }}
+                        </span>
+                    </div>
+
+                    <!-- Children recursively -->
+                    <div *ngIf="node.expanded && node.children.length > 0" class="tree-node">
+                        <ng-container
+                            *ngTemplateOutlet="nodeTemplate; context: { nodes: node.children }"></ng-container>
                     </div>
                 </div>
-            </div>
+            </ng-template>
 
-            <div class="col-span-1 md:col-span-2">
-                <label class="block font-semibold">Path Suffix (Optional):</label>
-                <input type="text" [(ngModel)]="pathSuffix" placeholder="e.g. Places/Test"
-                    class="border p-2 rounded text-black w-full">
-                <p class="text-xs text-gray-500">Appended to Parent Path. Use '/' for nested folders.</p>
-            </div>
-        </div>
-
-        <div class="max-h-64 overflow-y-auto border p-2 mb-4 bg-gray-50 text-black">
-            <div *ngFor="let item of docStructure()" class="text-sm">
-                <span [class.font-bold]="isMapped(item.type)" [class.text-blue-600]="isMapped(item.type)">
-                    [{{ item.type }}] {{ item.text | slice:0:50 }}...
-                </span>
-            </div>
-        </div>
-
-        <div class="flex gap-2">
-            <button (click)="reset()" class="bg-gray-500 text-white px-4 py-2 rounded">Back</button>
-            <button (click)="generatePreview()"
-                class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700">Preview Import</button>
-        </div>
-    </div>
-
-    <!-- STEP 3: Preview & Save -->
-    <div *ngIf="step() === 3" class="step-container">
-        <h3 class="text-xl mb-2">Step 3: Preview</h3>
-        <p class="mb-2">Found {{ previewPages().length }} pages to create. (Click 'Discard' to remove)</p>
-
-        <div class="max-h-96 overflow-y-auto border p-2 mb-4 text-black bg-white">
-            <div *ngFor="let page of previewPages(); let i = index" class="mb-4 p-2 border rounded relative group">
-                <button (click)="discardPage(i)"
-                    class="absolute top-2 right-2 bg-red-500 text-white px-2 py-1 text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                    Discard
-                </button>
-                <div class="font-bold text-lg">{{ page.name }}</div>
-                <div class="text-xs text-gray-500 mb-2">Internal Path: {{ page.path.join(' / ') }}</div>
-                <div class="pl-4 border-l-2 border-gray-200">
-                    <div *ngFor="let block of page.content" class="text-sm text-gray-700">
-                        {{ block.text | slice:0:100 }}
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="flex gap-2">
-            <button (click)="step.set(2)" class="bg-gray-500 text-white px-4 py-2 rounded">Back</button>
-            <button (click)="saveImport()" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">Import
-                to Codex</button>
+            <!-- Start Tree -->
+            <ng-container *ngTemplateOutlet="nodeTemplate; context: { nodes: rootNodes() }"></ng-container>
         </div>
     </div>
 </div>
