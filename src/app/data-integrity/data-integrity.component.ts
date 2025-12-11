@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
 import { FormsModule } from '@angular/forms';
+import { ModalService } from '../shared/services/modal.service';
 
 interface LogEntry {
   message: string;
@@ -25,6 +26,7 @@ interface LogEntry {
 })
 export class DataIntegrityComponent {
   private http = inject(HttpClient);
+  private modalService = inject(ModalService);
 
   /* ----------  state  ----------  */
   isLoading = signal<boolean>(false);
@@ -42,7 +44,8 @@ export class DataIntegrityComponent {
 
   /* ----------  public API  ----------  */
   async migrateCodex(): Promise<void> {
-    const confirmed = window.confirm(
+    const confirmed = await this.modalService.confirm(
+      'Migrate Codex',
       'Are you sure you want to migrate the codex data? This is a major, one-way operation. The old codex collection will be backed up.'
     );
     if (!confirmed) {

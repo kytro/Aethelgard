@@ -120,7 +120,8 @@ describe('CombatManagerComponent', () => {
                 content: [],
                 baseStats: { Str: 10 },
                 // stats: { HP: 30 }, // Removed stats
-                entityId: 'entity-001'
+                entityId: 'entity-001',
+                relatedPages: ['Ref/SomePage']
             };
             expect(component['_isNavigable'](nodeWithMetadata)).toBe(false);
         });

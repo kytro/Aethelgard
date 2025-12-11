@@ -4,6 +4,7 @@ import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
 import { MapViewerComponent } from './map-viewer/map-viewer.component';
 import { FormsModule } from '@angular/forms';
+import { ModalService } from '../shared/services/modal.service';
 
 // --- TYPE INTERFACES ---
 interface CodexEntry {
@@ -118,6 +119,8 @@ export class CodexComponent implements OnInit {
   }
   http = inject(HttpClient);
 
+  private activeModal = signal<'new-page' | null>(null);
+  private modalService = inject(ModalService);
   private codexData = signal<CodexEntry[] | null>(null);
   private codexDataBackup = signal<CodexEntry[] | null>(null);  // Backup for cancel
   currentPath = signal<string[]>([]);
@@ -515,7 +518,7 @@ export class CodexComponent implements OnInit {
     const val = parseInt(valueInput.value.trim(), 10);
 
     if (!name || isNaN(val)) {
-      alert('Please enter a valid skill name and numeric value.');
+      this.modalService.alert('Invalid Input', 'Please enter a valid skill name and numeric value.');
       return;
     }
 
@@ -531,9 +534,9 @@ export class CodexComponent implements OnInit {
     valueInput.value = '';
   }
 
-  removeEntitySkill(entity: Pf1eEntity, skillName: string) {
+  async removeEntitySkill(entity: Pf1eEntity, skillName: string) {
     if (!this.isEditMode() || !entity['baseStats']?.skills) return;
-    if (confirm(`Remove skill '${skillName}'?`)) {
+    if (await this.modalService.confirm('Remove Skill', `Remove skill '${skillName}'?`)) {
       delete entity['baseStats']['skills'][skillName];
       this.modifiedEntities.update(set => set.add(entity._id));
       this.linkedEntities.set([...this.linkedEntities()]);
@@ -715,12 +718,12 @@ export class CodexComponent implements OnInit {
     if (type === 'spells') {
       const parts = newItemId.split(':'); // Expect "level:id" format, e.g., "0:sp_detect_magic"
       if (parts.length !== 2) {
-        alert('Invalid format. Use "level:spellId" (e.g., "0:sp_detect_magic")');
+        this.modalService.alert('Invalid Format', 'Invalid format. Use "level:spellId" (e.g., "0:sp_detect_magic")');
         return;
       }
       const [level, spellId] = parts;
       if (!cache.has(spellId)) {
-        alert(`Invalid Spell ID: ${spellId}`);
+        this.modalService.alert('Invalid Spell ID', `Invalid Spell ID: ${spellId}`);
         return;
       }
       if (!entity.spells) {
@@ -747,7 +750,7 @@ export class CodexComponent implements OnInit {
           inputElement.value = '';
         }
       } else {
-        alert(`Invalid ID: ${newItemId}`);
+        this.modalService.alert('Invalid ID', `Invalid ID: ${newItemId}`);
       }
     }
   }

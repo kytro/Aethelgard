@@ -1,6 +1,7 @@
 import { Component, inject, signal, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
+import { ModalService } from '../../shared/services/modal.service';
 import { FormsModule } from '@angular/forms';
 import { lastValueFrom } from 'rxjs';
 
@@ -22,6 +23,7 @@ interface Suggestion {
 })
 export class StoryPlannerComponent {
   http = inject(HttpClient);
+  modalService = inject(ModalService);
   codex = input<any>();
   sessions = input<any[]>([]);
 
@@ -137,6 +139,10 @@ export class StoryPlannerComponent {
     } finally {
       this.savingItem.set(null);
     }
+  }
+
+  async handleDeletePlan(id: string) {
+    if (!await this.modalService.confirm('Delete Plan', 'Are you sure you want to delete this plan?')) return;
   }
 
   private getCodexStructure(node: any, path: string = ''): string[] {

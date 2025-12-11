@@ -1,4 +1,4 @@
-import { Component, signal, inject, input, computed, WritableSignal, effect, Output, EventEmitter } from '@angular/core';
+import { Component, signal, inject, input, computed, WritableSignal, effect, Output, EventEmitter, NgZone } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -9,6 +9,7 @@ import {
   CONSTRUCT_HP_BONUS, calculateSkillBonus, CalculateStatsOptions,
   getArmorMaxDex, getArmorCheckPenalty, classifyNaturalAttack, isLightWeapon, LIGHT_WEAPONS
 } from '../dm-toolkit.utils';
+import { ModalService } from '../../shared/services/modal.service';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
 interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; tempHp?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; }
@@ -38,10 +39,11 @@ export class CombatManagerComponent {
   spellsCache = input<Map<string, any>>(new Map());
   effectsCache = input<Map<string, CacheEntry>>(new Map());
   entitiesCache = input<any[]>([]);
-  foundCreatures = input<FoundCreature[]>([]);
+  foundCreatures = input<any[]>([]);
 
-  http = inject(HttpClient);
-
+  private http = inject(HttpClient);
+  private modalService = inject(ModalService);
+  private ngZone = inject(NgZone);
   currentFight: WritableSignal<Fight | null> = signal(null);
   combatants = signal<Combatant[]>([]);
 
@@ -92,7 +94,7 @@ export class CombatManagerComponent {
     'summary', 'content', 'category', 'isCombatManagerSource',
     'enableCompletionTracking', 'isCompleted', 'path_components',
     'baseStats', 'entityId', 'id', 'rules', 'equipment',
-    'magicItems', 'spells'
+    'magicItems', 'spells', 'relatedPages'
   ];
 
   commonEffects = [
@@ -222,7 +224,8 @@ export class CombatManagerComponent {
   }
 
   async handleDeleteFight(id: string) {
-    if (!confirm('Are you sure you want to delete this fight?')) return;
+    const confirmed = await this.modalService.confirm('Delete Fight', 'Are you sure you want to delete this fight? This cannot be undone.');
+    if (!confirmed) return;
     try {
       await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/fights/${id}`));
       this.fightDeleted.emit(id);
@@ -359,7 +362,7 @@ export class CombatManagerComponent {
 
     } catch (e: any) {
       console.error(e);
-      alert(e.error?.message || e.message);
+      await this.modalService.alert('Error Adding Combatant', e.error?.message || e.message);
     } finally { this.isSavingCombatant.set(false); }
   }
 

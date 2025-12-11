@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
+import { ModalComponent } from './shared/components/modal/modal.component';
 
 // Declare the 'google' variable provided by the GSI script
 declare const google: any;
@@ -16,7 +17,7 @@ interface User {
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [CommonModule, RouterLink, RouterLinkActive, RouterOutlet],
+  imports: [CommonModule, RouterLink, RouterLinkActive, RouterOutlet, ModalComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './app.html',
   styleUrls: ['./app.css']
@@ -78,7 +79,7 @@ export class AppComponent implements AfterViewInit {
         if (retries >= maxRetries) {
           clearInterval(interval);
           this.ngZone.run(() => {
-              this.setAuthMessage('Google Sign-In failed to load. Check your connection or ad blocker.', true);
+            this.setAuthMessage('Google Sign-In failed to load. Check your connection or ad blocker.', true);
           });
         }
       }
@@ -96,7 +97,7 @@ export class AppComponent implements AfterViewInit {
     });
     google.accounts.id.renderButton(
       document.getElementById('google-btn')!,
-      { theme: 'outline', size: 'large', width: '280' } 
+      { theme: 'outline', size: 'large', width: '280' }
     );
   }
 
@@ -125,7 +126,7 @@ export class AppComponent implements AfterViewInit {
 
   handleLogout(): void {
     if (typeof google !== 'undefined') {
-        google.accounts.id.disableAutoSelect();
+      google.accounts.id.disableAutoSelect();
     }
     localStorage.removeItem('app_token');
     localStorage.removeItem('app_user');
@@ -133,7 +134,7 @@ export class AppComponent implements AfterViewInit {
     this.user.set(null);
     this.waitForGoogleLibrary();
   }
-  
+
   private setAuthMessage(message: string, isError: boolean = false) {
     this.authMessage.set(message);
     this.isAuthError.set(isError);

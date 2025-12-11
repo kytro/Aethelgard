@@ -4,6 +4,7 @@ import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import { lastValueFrom } from 'rxjs';
 import { formatTime } from '../dm-toolkit.utils';
+import { ModalService } from '../../shared/services/modal.service';
 
 interface Session { _id: string; title: string; notes: string; createdAt: any; }
 
@@ -67,7 +68,8 @@ interface Session { _id: string; title: string; notes: string; createdAt: any; }
 })
 export class SessionLoggerComponent {
   http = inject(HttpClient);
-  
+  modalService = inject(ModalService);
+
   @Output() sessionAdded = new EventEmitter<Session>();
   @Output() sessionUpdated = new EventEmitter<Session>();
   @Output() sessionDeleted = new EventEmitter<string>();
@@ -81,28 +83,28 @@ export class SessionLoggerComponent {
   formatTime = formatTime;
 
   constructor() {
-      // Sync current selection if list updates
-      effect(() => {
-          const current = this.currentSession();
-          const list = this.sessions();
-          if (current && !list.some(s => s._id === current._id)) {
-              this.currentSession.set(null);
-          }
-      });
+    // Sync current selection if list updates
+    effect(() => {
+      const current = this.currentSession();
+      const list = this.sessions();
+      if (current && !list.some(s => s._id === current._id)) {
+        this.currentSession.set(null);
+      }
+    });
   }
 
   async handleAddSession() {
-      const newSession = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit/sessions', {}));
-      const session: Session = { ...newSession, _id: newSession._id, title: '', notes: '', createdAt: new Date() };
-      this.sessionAdded.emit(session);
-      this.setCurrentSession(session);
+    const newSession = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit/sessions', {}));
+    const session: Session = { ...newSession, _id: newSession._id, title: '', notes: '', createdAt: new Date() };
+    this.sessionAdded.emit(session);
+    this.setCurrentSession(session);
   }
 
   async handleDeleteSession(id: string) {
-      if (!confirm('Are you sure you want to delete this session?')) return;
-      await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/sessions/${id}`));
-      this.sessionDeleted.emit(id);
-      if (this.currentSession()?._id === id) this.currentSession.set(null);
+    if (!await this.modalService.confirm('Delete Session', 'Are you sure you want to delete this session?')) return;
+    await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/sessions/${id}`));
+    this.sessionDeleted.emit(id);
+    if (this.currentSession()?._id === id) this.currentSession.set(null);
   }
 
   setCurrentSession(session: Session) {

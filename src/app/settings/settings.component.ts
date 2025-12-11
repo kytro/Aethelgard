@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { lastValueFrom } from 'rxjs';
 import { FormsModule } from '@angular/forms';
+import { ModalService } from '../shared/services/modal.service';
 
 // Interfaces to match the backend data structure
 export interface ApiKey {
@@ -19,8 +20,8 @@ export interface ApiKeysDoc {
 
 // NEW: Interface for a general settings document
 export interface GeneralSettingsDoc {
-    _id: 'general';
-    default_ai_model: string;
+  _id: 'general';
+  default_ai_model: string;
 }
 
 @Component({
@@ -32,6 +33,7 @@ export interface GeneralSettingsDoc {
 })
 export class SettingsComponent {
   http = inject(HttpClient);
+  modalService = inject(ModalService);
 
   apiKeysDoc: WritableSignal<ApiKeysDoc | null> = signal(null);
   generalSettingsDoc: WritableSignal<GeneralSettingsDoc | null> = signal(null); // NEW
@@ -64,7 +66,7 @@ export class SettingsComponent {
       const [keysDoc, generalDoc, modelsResult] = await Promise.all([
         lastValueFrom(this.http.get<ApiKeysDoc>('/codex/api/admin/settings/api-keys')),
         lastValueFrom(this.http.get<GeneralSettingsDoc>('/codex/api/admin/settings/general')),
-        lastValueFrom(this.http.get<{models: string[]}>('/codex/api/ai-assistant/models'))
+        lastValueFrom(this.http.get<{ models: string[] }>('/codex/api/ai-assistant/models'))
       ]);
 
       this.apiKeysDoc.set(keysDoc);
@@ -81,22 +83,22 @@ export class SettingsComponent {
 
   async addApiKey() {
     if (!this.newKeyName() || !this.newKeyValue()) {
-        this.message.set({ text: 'Key Name and Key Value cannot be empty.', isError: true });
-        return;
+      this.message.set({ text: 'Key Name and Key Value cannot be empty.', isError: true });
+      return;
     }
     this.isLoading.set(true);
     this.message.set(null);
     try {
-      const newKey = await lastValueFrom(this.http.post<ApiKey>('/codex/api/admin/settings/api-keys', { 
-        name: this.newKeyName(), 
-        key: this.newKeyValue() 
+      const newKey = await lastValueFrom(this.http.post<ApiKey>('/codex/api/admin/settings/api-keys', {
+        name: this.newKeyName(),
+        key: this.newKeyValue()
       }));
-      
+
       this.apiKeysDoc.update(doc => {
         if (!doc) return null;
         doc.keys.push(newKey);
         if (doc.keys.length === 1) {
-            doc.active_key_id = newKey.id;
+          doc.active_key_id = newKey.id;
         }
         return { ...doc };
       });
@@ -114,13 +116,14 @@ export class SettingsComponent {
   }
 
   async deleteApiKey(id: string) {
-    if (!confirm('Are you sure you want to delete this API key?')) return;
+    const confirmed = await this.modalService.confirm('Delete API Key', 'Are you sure you want to delete this API key? This action cannot be undone.');
+    if (!confirmed) return;
 
     this.isLoading.set(true);
     this.message.set(null);
     try {
       await lastValueFrom(this.http.delete(`/codex/api/admin/settings/api-keys/${id}`));
-      
+
       // After deletion, reload all settings to get the new active key if it changed
       await this.loadAllSettings();
 
@@ -151,10 +154,10 @@ export class SettingsComponent {
       this.message.set({ text: 'Settings saved successfully.', isError: false });
       this.isDirty.set(false);
     } catch (err: any) {
-        this.message.set({ text: err.error?.error || 'Failed to save settings.', isError: true });
-        await this.loadAllSettings(); // Revert on failure
+      this.message.set({ text: err.error?.error || 'Failed to save settings.', isError: true });
+      await this.loadAllSettings(); // Revert on failure
     } finally {
-        this.isLoading.set(false);
+      this.isLoading.set(false);
     }
   }
 
