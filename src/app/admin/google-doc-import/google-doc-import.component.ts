@@ -17,7 +17,7 @@ interface DocStructureHeader {
     structure: DocElement[];
 }
 
-interface ImportNode {
+export interface ImportNode {
     id: string;
     text: string;
     level: number; // 1-6 for Headings, 999 for root context
@@ -35,22 +35,29 @@ interface ImportNode {
     isNew?: boolean;
 }
 
-interface PageContentBlock {
+export interface PageContentBlock {
     type: 'heading' | 'paragraph' | 'table';
     text?: string;
-    title?: string; // For tables
-    headers?: string[]; // For tables
-    rows?: any[]; // For tables
-    style?: string; // Original style reference
+    title?: string;
+    headers?: string[];
+    rows?: any[];
+    style?: string;
+    html?: string;
+    isExcluded?: boolean; // NEW
 }
 
-interface CodexPageDraft {
+export interface CodexPageDraft {
     name: string;
     path_components: string[];
     content: PageContentBlock[];
     type: 'page';
-    isNew?: boolean;
+    isNew: boolean;
 }
+
+// ... existing code ...
+
+// --- Preview Generation (Step 2 -> 3) ---
+
 
 @Component({
     selector: 'app-google-doc-import',
@@ -302,9 +309,8 @@ export class GoogleDocImportComponent implements OnInit {
                 };
 
                 // Add own content
-                // Use spread syntax which is simpler if node.content is iterable
                 if (node.content && node.content.length > 0) {
-                    newPage.content.push(...node.content);
+                    this.processContentForPreview(newPage.content, node.content);
                 }
 
                 drafts.push(newPage);
@@ -312,9 +318,9 @@ export class GoogleDocImportComponent implements OnInit {
             } else {
                 // Not a page, append to parent page as a Heading + Content
                 if (currentPage) {
-                    currentPage.content.push({ type: 'heading', text: node.text });
+                    currentPage.content.push({ type: 'heading', text: node.text, isExcluded: false });
                     if (node.content && node.content.length > 0) {
-                        currentPage.content.push(...node.content);
+                        this.processContentForPreview(currentPage.content, node.content);
                     }
                 }
             }
@@ -347,7 +353,11 @@ export class GoogleDocImportComponent implements OnInit {
         this.isLoading.set(true);
 
         try {
-            const entriesToSave = this.previewPages();
+            // Filter excluded content blocks
+            const entriesToSave = this.previewPages().map(page => ({
+                ...page,
+                content: page.content.filter(block => !block.isExcluded)
+            }));
 
             await lastValueFrom(this.http.put('api/codex/data', entriesToSave));
             this.modalService.alert('Success', `Imported ${entriesToSave.length} entries.`);
@@ -366,5 +376,44 @@ export class GoogleDocImportComponent implements OnInit {
         this.docIdInput.set('');
         this.rootNodes.set([]);
         this.previewPages.set([]);
+    }
+    private processContentForPreview(targetArray: PageContentBlock[], sourceContent: any[]) {
+        for (const block of sourceContent) {
+            // Check for Bold List Pattern in Paragraphs
+            // Pattern: Starts with <b>Text</b> or <strong>Text</strong>
+            if (block.type === 'paragraph' && block.text) {
+                const boldMatch = block.text.match(/^(\*\*|<b>|<strong>)(.*?)(\*\*|<\/b>|<\/strong>)(.*)/);
+                if (boldMatch) {
+                    const headingText = boldMatch[2].replace(/:$/, '').trim(); // Remove trailing colon
+                    const remainingText = boldMatch[4].trim();
+
+                    // Add as heading
+                    targetArray.push({ type: 'heading', text: headingText, isExcluded: false });
+
+                    // If there is substantial text after the bold part, add it as a paragraph
+                    if (remainingText.length > 0) {
+                        targetArray.push({ type: 'paragraph', text: remainingText, isExcluded: false });
+                    }
+                    continue; // Skip adding the original block
+                }
+            }
+
+            // Default add
+            targetArray.push({ ...block, isExcluded: false });
+        }
+    }
+
+    // --- Preview Actions ---
+
+    toggleBlockType(block: PageContentBlock) {
+        if (block.type === 'heading') {
+            block.type = 'paragraph';
+        } else if (block.type === 'paragraph') {
+            block.type = 'heading';
+        }
+    }
+
+    toggleBlockExclusion(block: PageContentBlock) {
+        block.isExcluded = !block.isExcluded;
     }
 }

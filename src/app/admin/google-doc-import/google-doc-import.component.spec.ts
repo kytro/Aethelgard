@@ -1,5 +1,5 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { GoogleDocImportComponent } from './google-doc-import.component';
+import { GoogleDocImportComponent, ImportNode } from './google-doc-import.component';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
 import { ModalService } from '../../shared/services/modal.service';
 import { provideZonelessChangeDetection } from '@angular/core';
@@ -144,5 +144,68 @@ describe('GoogleDocImportComponent', () => {
 
         expect(existingDraft?.isNew).toBe(false); // Should be existing
         expect(newDraft?.isNew).toBe(true);  // Should be new
+    });
+
+    // Moved inside main suite
+    describe('Preview Generation (Step 3)', () => {
+        it('should detect bold starts and convert to headings', () => {
+            const rootNode: ImportNode = {
+                id: 'root', text: 'Root', level: 0, content: [], children: [],
+                isPage: true, isExcluded: false, pathString: 'Root', isManual: false, expanded: true
+            };
+
+            // Simulating content that comes from the parser
+            rootNode.content = [
+                { type: 'paragraph', text: 'Normal text' },
+                { type: 'paragraph', text: '<b>Bold Title:</b> Description follows.' },
+                { type: 'paragraph', text: '<strong>Strong Title</strong>' }
+            ];
+
+            component.rootNodes.set([rootNode]);
+            component.existingPaths.set([]);
+
+            component.generatePreview();
+
+            const drafts = component.previewPages();
+            expect(drafts.length).toBe(1);
+            const content = drafts[0].content;
+
+            expect(content.length).toBe(4); // Normal, Title (H), Description (P), Strong Title (H)
+
+            expect(content[0].type).toBe('paragraph');
+            expect(content[0].text).toBe('Normal text');
+
+            // Split 1
+            expect(content[1].type).toBe('heading');
+            expect(content[1].text).toBe('Bold Title'); // Colon removed
+
+            expect(content[2].type).toBe('paragraph');
+            expect(content[2].text).toBe('Description follows.');
+
+            // Split 2
+            expect(content[3].type).toBe('heading');
+            expect(content[3].text).toBe('Strong Title');
+        });
+
+        it('should exclude blocks from saved data', async () => {
+            const rootNode: ImportNode = {
+                id: 'root', text: 'Root', level: 0, content: [{ type: 'paragraph', text: 'To be excluded' }], children: [],
+                isPage: true, isExcluded: false, pathString: 'Root', isManual: false, expanded: true
+            };
+            component.rootNodes.set([rootNode]);
+            component.generatePreview();
+
+            // Manually exclude the block
+            const block = component.previewPages()[0].content[0];
+            component.toggleBlockExclusion(block);
+            expect(block.isExcluded).toBe(true);
+
+            // Save
+            const putSpy = jest.spyOn(component.http, 'put').mockReturnValue(Promise.resolve({}) as any);
+            await component.saveImport();
+
+            const savedPayload = putSpy.mock.calls[0][1] as any[];
+            expect(savedPayload[0].content.length).toBe(0);
+        });
     });
 });
