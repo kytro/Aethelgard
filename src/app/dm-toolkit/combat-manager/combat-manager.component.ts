@@ -193,44 +193,51 @@ export class CombatManagerComponent {
     return true;
   }
 
-  async loadCombatants(fightId: string) {
-    try {
-      const combatants = await lastValueFrom(this.http.get<Combatant[]>(`/codex/api/dm-toolkit/fights/${fightId}/combatants`));
-      this.combatants.set(combatants);
-    } catch (e) { console.error(e); }
+  loadCombatants(fightId: string) {
+    this.http.get<Combatant[]>(`/codex/api/dm-toolkit/fights/${fightId}/combatants`).subscribe({
+      next: (combatants) => this.combatants.set(combatants),
+      error: (e) => console.error(e)
+    });
   }
 
-  async logAction(message: string) {
+  logAction(message: string) {
     const fight = this.currentFight();
     if (!fight) return;
     const timestamp = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     const entry = `[${timestamp}] ${message}`;
     const updatedLog = [...(fight.log || []), entry];
     this.currentFight.update(f => f ? ({ ...f, log: updatedLog }) : null);
-    try {
-      await lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/fights/${fight._id}`, { log: updatedLog }));
-    } catch (e) { console.error("Failed to save log entry:", e); }
+    this.http.patch(`/codex/api/dm-toolkit/fights/${fight._id}`, { log: updatedLog }).subscribe({
+      error: (e) => console.error("Failed to save log entry:", e)
+    });
   }
 
-  async handleAddFight() {
+  handleAddFight() {
     if (!this.newFightName.trim()) return;
     this.isSavingFight.set(true);
-    try {
-      const newFight = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit/fights', { name: this.newFightName }));
-      this.fightAdded.emit(newFight);
-      this.newFightName = '';
-    } catch (e) { console.error(e); }
-    finally { this.isSavingFight.set(false); }
+    this.http.post<any>('/codex/api/dm-toolkit/fights', { name: this.newFightName }).subscribe({
+      next: (newFight) => {
+        this.fightAdded.emit(newFight);
+        this.newFightName = '';
+        this.isSavingFight.set(false);
+      },
+      error: (e) => {
+        console.error(e);
+        this.isSavingFight.set(false);
+      }
+    });
   }
 
   async handleDeleteFight(id: string) {
     const confirmed = await this.modalService.confirm('Delete Fight', 'Are you sure you want to delete this fight? This cannot be undone.');
     if (!confirmed) return;
-    try {
-      await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/fights/${id}`));
-      this.fightDeleted.emit(id);
-      if (this.currentFight()?._id === id) this.currentFight.set(null);
-    } catch (e) { console.error(e); }
+    this.http.delete(`/codex/api/dm-toolkit/fights/${id}`).subscribe({
+      next: () => {
+        this.fightDeleted.emit(id);
+        if (this.currentFight()?._id === id) this.currentFight.set(null);
+      },
+      error: (e) => console.error(e)
+    });
   }
 
   setCurrentFight(fight: Fight) {
@@ -366,76 +373,102 @@ export class CombatManagerComponent {
     } finally { this.isSavingCombatant.set(false); }
   }
 
-  async handleRemoveCombatant(id: string) {
+  handleRemoveCombatant(id: string) {
     const combatant = this.combatants().find(c => c._id === id);
     if (!combatant) return;
     this.logAction(`${combatant.name} removed.`);
-    await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/combatants/${id}`));
-    this.combatants.update(c => c.filter(cb => cb._id !== id));
+    this.http.delete(`/codex/api/dm-toolkit/combatants/${id}`).subscribe({
+      next: () => this.combatants.update(c => c.filter(cb => cb._id !== id)),
+      error: (e) => console.error(e)
+    });
   }
 
-  async handleUpdateCombatant(id: string, field: keyof Combatant, val: any) {
+  handleUpdateCombatant(id: string, field: keyof Combatant, val: any) {
     const combatant = this.combatants().find(c => c._id === id);
     if (!combatant) return;
     const valueToPatch = (typeof val === 'number' || !isNaN(+val)) && field !== 'effects' ? +val : val;
-    await lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/combatants/${id}`, { [field]: valueToPatch }));
+    this.http.patch(`/codex/api/dm-toolkit/combatants/${id}`, { [field]: valueToPatch }).subscribe({
+      error: (e) => console.error(e)
+    });
     this.combatants.update(c => c.map(cb => cb._id === id ? { ...cb, [field]: valueToPatch } : cb));
 
-    // Log the action
+    // Log the action (optimistic)
     const combatantName = combatant.name;
     const action = `Updated ${field} for ${combatantName} to ${valueToPatch}`;
     this.logAction(action);
   }
 
-  async handleStartCombat() {
+  handleStartCombat() {
     const fight = this.currentFight(); if (!fight) return;
     this.isTogglingCombatState.set(true);
-    const updatedFight = await lastValueFrom(this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}`, { combatStartTime: new Date() }));
-    this.currentFight.set(updatedFight);
-    this.logAction('Combat started.');
-    this.isTogglingCombatState.set(false);
+    this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}`, { combatStartTime: new Date() }).subscribe({
+      next: (updatedFight) => {
+        this.currentFight.set(updatedFight);
+        this.logAction('Combat started.');
+        this.isTogglingCombatState.set(false);
+      },
+      error: (e) => {
+        console.error(e);
+        this.isTogglingCombatState.set(false);
+      }
+    });
   }
 
-  async handleEndCombat() {
+  handleEndCombat() {
     const fight = this.currentFight(); if (!fight) return;
     this.isTogglingCombatState.set(true);
-    const updatedFight = await lastValueFrom(this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}/end-combat`, {}));
-    this.currentFight.set(updatedFight);
-    this.loadCombatants(fight._id);
-    this.logAction('Combat ended.');
-    this.isTogglingCombatState.set(false);
+    this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}/end-combat`, {}).subscribe({
+      next: (updatedFight) => {
+        this.currentFight.set(updatedFight);
+        this.loadCombatants(fight._id);
+        this.logAction('Combat ended.');
+        this.isTogglingCombatState.set(false);
+      },
+      error: (e) => {
+        console.error(e);
+        this.isTogglingCombatState.set(false);
+      }
+    });
   }
 
-  async handleNextTurn() {
+  handleNextTurn() {
     if (this.isAdvancingTurn()) return;
     const fight = this.currentFight(); if (!fight) return;
     this.isAdvancingTurn.set(true);
-    try {
-      const updatedFight = await lastValueFrom(this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}/next-turn`, {}));
-      this.currentFight.set(updatedFight);
-      this.roundCounter.set(updatedFight.roundCounter || 1);
-      this.currentTurnIndex.set(updatedFight.currentTurnIndex || 0);
-      await this.loadCombatants(fight._id);
-      const active = this.modifiedCombatants()[updatedFight.currentTurnIndex || 0];
-      if (active) this.logAction(`Turn: ${active.name}.`);
-    } finally {
-      this.isAdvancingTurn.set(false);
-    }
+    this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}/next-turn`, {}).subscribe({
+      next: (updatedFight) => {
+        this.currentFight.set(updatedFight);
+        this.roundCounter.set(updatedFight.roundCounter || 1);
+        this.currentTurnIndex.set(updatedFight.currentTurnIndex || 0);
+        this.loadCombatants(fight._id);
+        const active = this.modifiedCombatants()[updatedFight.currentTurnIndex || 0];
+        if (active) this.logAction(`Turn: ${active.name}.`);
+        this.isAdvancingTurn.set(false);
+      },
+      error: (e) => {
+        console.error(e);
+        this.isAdvancingTurn.set(false);
+      }
+    });
   }
 
-  async handlePreviousTurn() {
+  handlePreviousTurn() {
     if (this.isAdvancingTurn()) return;
     const fight = this.currentFight(); if (!fight) return;
     this.isAdvancingTurn.set(true);
-    try {
-      const updatedFight = await lastValueFrom(this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}/previous-turn`, {}));
-      this.currentFight.set(updatedFight);
-      this.roundCounter.set(updatedFight.roundCounter || 1);
-      this.currentTurnIndex.set(updatedFight.currentTurnIndex || 0);
-      await this.loadCombatants(fight._id);
-    } finally {
-      this.isAdvancingTurn.set(false);
-    }
+    this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}/previous-turn`, {}).subscribe({
+      next: (updatedFight) => {
+        this.currentFight.set(updatedFight);
+        this.roundCounter.set(updatedFight.roundCounter || 1);
+        this.currentTurnIndex.set(updatedFight.currentTurnIndex || 0);
+        this.loadCombatants(fight._id);
+        this.isAdvancingTurn.set(false);
+      },
+      error: (e) => {
+        console.error(e);
+        this.isAdvancingTurn.set(false);
+      }
+    });
   }
 
   // --- UPDATED: Swap Logic for cleaner integers ---

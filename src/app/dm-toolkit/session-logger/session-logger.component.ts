@@ -75,6 +75,7 @@ export class SessionLoggerComponent {
   @Output() sessionDeleted = new EventEmitter<string>();
 
   sessions = input<Session[]>([]);
+  currentSessionId = input<string | null>(null);
   currentSession: WritableSignal<Session | null> = signal(null);
   sessionNotes = signal('');
   saveStatus = signal<'Idle' | 'Unsaved' | 'Saving' | 'Saved' | 'Error'>('Idle');
@@ -83,28 +84,48 @@ export class SessionLoggerComponent {
   formatTime = formatTime;
 
   constructor() {
-    // Sync current selection if list updates
+    // Sync current selection if list updates or input ID changes
     effect(() => {
-      const current = this.currentSession();
       const list = this.sessions();
+      const inputId = this.currentSessionId();
+
+      // If input ID matches a session, select it
+      if (inputId && list.length > 0) {
+        const found = list.find(s => s._id === inputId);
+        if (found && this.currentSession()?._id !== found._id) {
+          this.setCurrentSession(found);
+        }
+      }
+
+      // Cleanup if removed
+      const current = this.currentSession();
       if (current && !list.some(s => s._id === current._id)) {
         this.currentSession.set(null);
       }
-    });
+    }, { allowSignalWrites: true });
   }
 
-  async handleAddSession() {
-    const newSession = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit/sessions', {}));
-    const session: Session = { ...newSession, _id: newSession._id, title: '', notes: '', createdAt: new Date() };
-    this.sessionAdded.emit(session);
-    this.setCurrentSession(session);
+  handleAddSession() {
+    this.saveStatus.set('Saving');
+    this.http.post<any>('/codex/api/dm-toolkit/sessions', {}).subscribe({
+      next: (newSession) => {
+        const session: Session = { ...newSession, _id: newSession._id, title: '', notes: '', createdAt: new Date() };
+        this.sessionAdded.emit(session);
+        this.setCurrentSession(session);
+      },
+      error: (e) => console.error(e)
+    });
   }
 
   async handleDeleteSession(id: string) {
     if (!await this.modalService.confirm('Delete Session', 'Are you sure you want to delete this session?')) return;
-    await lastValueFrom(this.http.delete(`/codex/api/dm-toolkit/sessions/${id}`));
-    this.sessionDeleted.emit(id);
-    if (this.currentSession()?._id === id) this.currentSession.set(null);
+    this.http.delete(`/codex/api/dm-toolkit/sessions/${id}`).subscribe({
+      next: () => {
+        this.sessionDeleted.emit(id);
+        if (this.currentSession()?._id === id) this.currentSession.set(null);
+      },
+      error: (e) => console.error(e)
+    });
   }
 
   setCurrentSession(session: Session) {
@@ -122,21 +143,23 @@ export class SessionLoggerComponent {
     }, 5000);
   }
 
-  async saveCurrentSession() {
+  saveCurrentSession() {
     const session = this.currentSession();
     const notes = this.sessionNotes();
     if (!session || this.saveStatus() !== 'Unsaved' || notes === (session.notes || '')) return;
 
     this.saveStatus.set('Saving');
-    try {
-      const updatedSession = await lastValueFrom(this.http.patch<Session>(`/codex/api/dm-toolkit/sessions/${session._id}`, { notes }));
-      this.saveStatus.set('Saved');
-      this.currentSession.set(updatedSession);
-      this.sessionUpdated.emit(updatedSession);
-    } catch (e) {
-      console.error("Failed to save session:", e);
-      this.saveStatus.set('Error');
-    }
+    this.http.patch<Session>(`/codex/api/dm-toolkit/sessions/${session._id}`, { notes }).subscribe({
+      next: (updatedSession) => {
+        this.saveStatus.set('Saved');
+        this.currentSession.set(updatedSession);
+        this.sessionUpdated.emit(updatedSession);
+      },
+      error: (e) => {
+        console.error("Failed to save session:", e);
+        this.saveStatus.set('Error');
+      }
+    });
   }
 
   @HostListener('window:beforeunload')

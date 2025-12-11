@@ -60,12 +60,12 @@
                             </label>
                         </div>
 
-                        <div class="relative flex-1 mx-2" *ngIf="node.isPage && !node.isExcluded">
+                        <div class="relative flex-1 mx-2" *ngIf="!node.isExcluded">
                             <input type="text" [value]="node.pathString"
                                 (input)="onSearchInput($event); onPathChange(node, $event.target.value)"
                                 (focus)="onFocusPath(node)" (blur)="activeNodeId.set(null)"
                                 class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-green-300 focus:border-yellow-500 focus:outline-none placeholder-gray-600"
-                                placeholder="Codex Path...">
+                                [placeholder]="node.isPage ? 'Codex Path...' : 'Base Path for Children...'">
 
                             <div *ngIf="activeNodeId() === node.id && filteredPaths().length > 0" class="dropdown-list">
                                 <div *ngFor="let path of filteredPaths()" (mousedown)="selectPathSuggestion(node, path)"
@@ -75,9 +75,15 @@
                             </div>
                         </div>
 
-                        <span *ngIf="node.isPage && !node.isExcluded" class="text-xs px-2 py-0.5 rounded"
+                        <span *ngIf="!node.isExcluded" class="text-xs px-2 py-0.5 rounded"
                             [ngClass]="node.isManual ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-700 text-gray-400'">
                             {{ node.isManual ? 'Manual' : 'Auto' }}
+                        </span>
+
+                        <span *ngIf="!node.isExcluded && node.isPage"
+                            class="text-xs px-1.5 py-0.5 rounded font-bold border ml-2"
+                            [ngClass]="node.isNew ? 'bg-green-900 text-green-300 border-green-700' : 'bg-blue-900 text-blue-300 border-blue-700'">
+                            {{ node.isNew ? 'NEW' : 'UPDATE' }}
                         </span>
                     </div>
 
@@ -116,7 +122,13 @@
             <div *ngFor="let page of previewPages(); let i = index"
                 class="bg-gray-800 border border-gray-700 rounded-lg p-6">
                 <div class="mb-4 pb-2 border-b border-gray-700">
-                    <div class="text-sm text-yellow-500 font-mono mb-1">{{ page.path_components.join(' / ') }}</div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-sm text-yellow-500 font-mono">{{ page.path_components.join(' / ') }}</span>
+                        <span *ngIf="page.isNew"
+                            class="text-xs px-1.5 py-0.5 rounded bg-green-900 text-green-300 font-bold border border-green-700">NEW</span>
+                        <span *ngIf="!page.isNew"
+                            class="text-xs px-1.5 py-0.5 rounded bg-blue-900 text-blue-300 font-bold border border-blue-700">UPDATE</span>
+                    </div>
                     <input [(ngModel)]="page.name"
                         class="bg-transparent text-xl font-bold text-white border-none focus:ring-0 w-full" />
                 </div>

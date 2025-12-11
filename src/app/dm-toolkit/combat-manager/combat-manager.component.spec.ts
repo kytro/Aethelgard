@@ -227,12 +227,10 @@ describe('CombatManagerComponent', () => {
             expect(req.request.body).toEqual({ name: 'Epic Battle' });
 
             req.flush(mockFight);
-            await fixture.whenStable();
-            fixture.detectChanges();
-
-            httpMock.match(req => true);
 
             expect(component.newFightName).toBe('');
+            // With subscribe, this might happen immediately or need a tick
+            // In zoneless + sync flush, likely immediate.
             expect(component.isSavingFight()).toBe(false);
         });
 
@@ -244,16 +242,26 @@ describe('CombatManagerComponent', () => {
         });
 
         it('should delete a fight', async () => {
-            jest.spyOn(window, 'confirm').mockReturnValue(true);
+            const mockFight = createMockFight();
+            component.setCurrentFight(mockFight);
+            fixture.detectChanges();
 
-            component.handleDeleteFight('fight-001');
+            jest.spyOn(component['modalService'], 'confirm').mockResolvedValue(true);
 
-            const req = httpMock.expectOne('/codex/api/dm-toolkit/fights/fight-001');
+            component.handleDeleteFight(mockFight._id);
+
+            // Wait for modal confirm (async)
+            await new Promise(resolve => setTimeout(resolve, 0));
+            await fixture.whenStable();
+
+            const req = httpMock.expectOne(`/codex/api/dm-toolkit/fights/${mockFight._id}`);
             expect(req.request.method).toBe('DELETE');
             req.flush({});
-            await fixture.whenStable(); fixture.detectChanges();
 
-            httpMock.match(req => true);
+            await fixture.whenStable(); // update signals
+
+            expect(component.currentFight()).toBeNull();
+            httpMock.match(req => true); // clear others if any
         });
 
         it('should set current fight and load combatants', async () => {
@@ -477,6 +485,9 @@ describe('CombatManagerComponent', () => {
                     createMockCombatant({ _id: 'c2', name: 'C2', initiative: 10 })
                 ]);
             });
+
+            fixture.detectChanges();
+            await fixture.whenStable();
 
             await Promise.resolve();
             await Promise.resolve();

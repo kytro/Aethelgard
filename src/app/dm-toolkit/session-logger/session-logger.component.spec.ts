@@ -1,6 +1,7 @@
 import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { SessionLoggerComponent } from './session-logger.component';
 import { HttpClientTestingModule, HttpTestingController } from '@angular/common/http/testing';
+import { HttpClient } from '@angular/common/http';
 import { provideZonelessChangeDetection } from '@angular/core';
 
 describe('SessionLoggerComponent', () => {
@@ -25,6 +26,9 @@ describe('SessionLoggerComponent', () => {
 
         // Set initial input
         fixture.componentRef.setInput('sessions', mockSessions);
+        fixture.componentRef.setInput('currentSessionId', 's1'); // Also set ID as I added the input
+        fixture.detectChanges();
+        await fixture.whenStable();
         fixture.detectChanges();
     });
 
@@ -34,10 +38,15 @@ describe('SessionLoggerComponent', () => {
     });
 
     it('should create and list sessions', () => {
-        expect(component).toBeTruthy();
-        const sessionButtons = fixture.nativeElement.querySelectorAll('button.text-left');
-        expect(sessionButtons.length).toBe(2);
-        expect(sessionButtons[0].textContent).toContain('Session 1');
+        try {
+            expect(component).toBeTruthy();
+            const sessionButtons = fixture.nativeElement.querySelectorAll('button.text-left');
+            expect(sessionButtons.length).toBe(2);
+            expect(sessionButtons[0].textContent).toContain('Session 1');
+        } catch (e) {
+            console.error('ASSERTION FAILED:', e);
+            throw e;
+        }
     });
 
     it('should create a new session', async () => {
@@ -58,13 +67,17 @@ describe('SessionLoggerComponent', () => {
     });
 
     it('should delete a session', async () => {
-        jest.spyOn(window, 'confirm').mockReturnValue(true);
+        const confirmSpy = jest.spyOn(component.modalService, 'confirm').mockResolvedValue(true);
         const emitSpy = jest.spyOn(component.sessionDeleted, 'emit');
 
         component.setCurrentSession(mockSessions[0]);
         fixture.detectChanges();
 
         component.handleDeleteSession('s1');
+
+        // Wait for modal confirm promise to resolve
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await fixture.whenStable();
 
         const req = httpMock.expectOne('/codex/api/dm-toolkit/sessions/s1');
         expect(req.request.method).toBe('DELETE');

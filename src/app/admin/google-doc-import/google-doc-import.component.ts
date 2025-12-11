@@ -32,6 +32,7 @@ interface ImportNode {
 
     // UI
     expanded: boolean;
+    isNew?: boolean;
 }
 
 interface PageContentBlock {
@@ -48,6 +49,7 @@ interface CodexPageDraft {
     path_components: string[];
     content: PageContentBlock[];
     type: 'page';
+    isNew?: boolean;
 }
 
 @Component({
@@ -103,17 +105,18 @@ export class GoogleDocImportComponent implements OnInit {
         }
     }
 
-    extractPaths(nodes: any[], prefix: string = ''): string[] {
-        let paths: string[] = [];
-        if (!nodes) return paths;
-        for (const node of nodes) {
-            const currentPath = prefix ? `${prefix}/${node.name}` : node.name;
-            paths.push(currentPath);
-            if (node.children && Array.isArray(node.children)) {
-                paths = paths.concat(this.extractPaths(node.children, currentPath));
-            }
-        }
-        return paths.sort();
+    extractPaths(entries: any[]): string[] {
+        if (!entries || !Array.isArray(entries)) return [];
+
+        return entries
+            .map(entry => {
+                if (Array.isArray(entry.path_components) && entry.path_components.length > 0) {
+                    return entry.path_components.join('/');
+                }
+                return entry.name || '';
+            })
+            .filter(p => !!p)
+            .sort();
     }
 
     async fetchDoc() {
@@ -144,6 +147,12 @@ export class GoogleDocImportComponent implements OnInit {
     }
 
     // --- Tree Construction ---
+
+    private checkIsNew(path: string): boolean {
+        // Normalize path: split by /, trim, join by /
+        const normalized = path.split('/').map(p => p.trim()).filter(p => !!p).join('/');
+        return !this.existingPaths().includes(normalized);
+    }
 
     private getLevel(type: string): number {
         if (type.startsWith('HEADING_')) return parseInt(type.split('_')[1], 10);
@@ -185,7 +194,8 @@ export class GoogleDocImportComponent implements OnInit {
                     isExcluded: false,
                     pathString: defaultPath,
                     isManual: false,
-                    expanded: true
+                    expanded: true,
+                    isNew: this.checkIsNew(defaultPath)
                 };
 
                 if (parent) {
@@ -225,13 +235,17 @@ export class GoogleDocImportComponent implements OnInit {
     onPathChange(node: ImportNode, newPath: string) {
         node.pathString = newPath;
         node.isManual = true;
+        node.isNew = this.checkIsNew(newPath);
         this.updateChildrenPaths(node);
+        // Force signal update to ensure UI reflects changes in children
+        this.rootNodes.update(nodes => [...nodes]);
     }
 
     private updateChildrenPaths(parentNode: ImportNode) {
         for (const child of parentNode.children) {
             if (!child.isManual) {
                 child.pathString = `${parentNode.pathString}/${child.text}`;
+                child.isNew = this.checkIsNew(child.pathString);
                 this.updateChildrenPaths(child);
             }
         }
@@ -277,12 +291,14 @@ export class GoogleDocImportComponent implements OnInit {
                 // Start a new page
                 const pathParts = node.pathString.split('/').map(p => p.trim()).filter(p => !!p);
                 const name = pathParts[pathParts.length - 1];
+                const fullPath = pathParts.join('/');
 
                 const newPage: CodexPageDraft = {
                     name: name,
                     path_components: pathParts,
                     content: [], // Start fresh content
-                    type: 'page'
+                    type: 'page',
+                    isNew: !this.existingPaths().includes(fullPath)
                 };
 
                 // Add own content

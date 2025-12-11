@@ -32,7 +32,7 @@ describe('GoogleDocImportComponent', () => {
         fixture.detectChanges();
         const req = httpMock.expectOne('api/codex/data');
         req.flush([
-            { name: 'World', children: [{ name: 'Locations' }] }
+            { name: 'Locations', path_components: ['World', 'Locations'] }
         ]);
         await fixture.whenStable();
         expect(component.existingPaths()).toContain('World/Locations');
@@ -100,5 +100,49 @@ describe('GoogleDocImportComponent', () => {
 
         expect(root.pathString).toBe('NewRoot');
         expect(child.pathString).toBe('Root/Child'); // Should not change
+    });
+
+    it('should propagate path updates even if parent is NOT a page', async () => {
+        fixture.detectChanges();
+        httpMock.expectOne('api/codex/data').flush([]);
+
+        // Root is NOT a page, but has a custom path set acting as a folder/base
+        const child = { id: '2', text: 'Child', level: 2, content: [], children: [], isPage: true, pathString: 'OriginalRoot/Child', isManual: false, expanded: true, isExcluded: false };
+        const root = { id: '1', text: 'Root', level: 1, content: [], children: [child], isPage: false, pathString: 'OriginalRoot', isManual: false, expanded: true, isExcluded: false };
+
+        component.rootNodes.set([root]);
+
+        // Change Root path (e.g. user sets a specific folder for this section)
+        component.onPathChange(root, 'NewBaseFolder');
+
+        expect(root.pathString).toBe('NewBaseFolder');
+        expect(child.pathString).toBe('NewBaseFolder/Child');
+    });
+
+    it('should correctly identify NEW vs EXISTING pages in preview', async () => {
+        fixture.detectChanges();
+        // Setup existing paths
+        httpMock.expectOne('api/codex/data').flush([
+            { name: 'ExistingPage', path_components: ['ExistingPage'] }
+        ]);
+        await fixture.whenStable();
+
+        // Setup tree: One existing, one new
+        const nodeExisting = { id: '1', text: 'ExistingPage', level: 1, content: [], children: [], isPage: true, pathString: 'ExistingPage', isManual: false, expanded: true, isExcluded: false };
+        const nodeNew = { id: '2', text: 'NewPage', level: 1, content: [], children: [], isPage: true, pathString: 'NewPage', isManual: false, expanded: true, isExcluded: false };
+
+        component.rootNodes.set([nodeExisting, nodeNew]);
+
+        // Generate Preview
+        component.generatePreview();
+
+        const drafts = component.previewPages();
+        expect(drafts.length).toBe(2);
+
+        const existingDraft = drafts.find(d => d.name === 'ExistingPage');
+        const newDraft = drafts.find(d => d.name === 'NewPage');
+
+        expect(existingDraft?.isNew).toBe(false); // Should be existing
+        expect(newDraft?.isNew).toBe(true);  // Should be new
     });
 });
