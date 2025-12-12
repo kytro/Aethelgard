@@ -557,6 +557,7 @@ export class NpcGeneratorComponent {
 
         // Add all stats
         if (npc.type) entity.baseStats.type = npc.type;
+        if (npc.race) entity.baseStats.race = npc.race;
         if (npc.class) entity.baseStats.Class = npc.class;
         if (npc.level) entity.baseStats.Level = npc.level;
         if (npc.gender) entity.baseStats.Gender = npc.gender;
@@ -744,6 +745,7 @@ export class NpcGeneratorComponent {
                 };
 
                 if (npc.type) entity.baseStats.type = npc.type;
+                if (npc.race) entity.baseStats.race = npc.race;
                 if (npc.class) entity.baseStats.Class = npc.class;
                 if (npc.level) entity.baseStats.Level = npc.level;
                 if (npc.gender) entity.baseStats.Gender = npc.gender;

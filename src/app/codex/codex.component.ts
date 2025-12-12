@@ -16,7 +16,7 @@ interface CodexEntry {
 }
 interface Pf1eRule { name: string; description: string; }
 interface Pf1eEquipment { name: string; description: string; cost: string; weight: string; }
-interface Pf1eSpell { name: string; description: string; }
+interface Pf1eSpell { name: string; description: string; level?: { [key: string]: number } }
 interface Pf1eEntity {
   _id: string;
   name: string;
@@ -716,16 +716,54 @@ export class CodexComponent implements OnInit {
     }
 
     if (type === 'spells') {
-      const parts = newItemId.split(':'); // Expect "level:id" format, e.g., "0:sp_detect_magic"
-      if (parts.length !== 2) {
-        this.modalService.alert('Invalid Format', 'Invalid format. Use "level:spellId" (e.g., "0:sp_detect_magic")');
-        return;
+      let level = '';
+      let spellId = '';
+
+      if (newItemId.includes(':')) {
+        const parts = newItemId.split(':');
+        if (parts.length === 2) {
+          level = parts[0];
+          spellId = parts[1];
+        }
+      } else {
+        spellId = newItemId;
       }
-      const [level, spellId] = parts;
+
       if (!cache.has(spellId)) {
         this.modalService.alert('Invalid Spell ID', `Invalid Spell ID: ${spellId}`);
         return;
       }
+
+      if (!level) {
+        // Try to infer level
+        const spell = cache.get(spellId);
+        const entityClass = (this.getCaseInsensitiveProp(entity, 'class')
+          || this.getCaseInsensitiveProp(entity['baseStats'], 'class')
+          || '').toLowerCase();
+
+        if (spell.level) {
+          // 1. Try exact class match
+          const classMatch = Object.keys(spell.level).find(k => k.toLowerCase() === entityClass);
+          if (classMatch) {
+            level = String(spell.level[classMatch]);
+          } else {
+            // 2. Try common classes if not specific (sorcerer/wizard usually good fallback)
+            const sorcWiz = Object.keys(spell.level).find(k => k.toLowerCase().includes('sorcerer') || k.toLowerCase().includes('wizard'));
+            if (sorcWiz) {
+              level = String(spell.level[sorcWiz]);
+            } else {
+              // 3. Fallback to lowest level found
+              const levels = Object.values(spell.level);
+              if (levels.length > 0) {
+                level = String(Math.min(...(levels as number[])));
+              }
+            }
+          }
+        }
+
+        if (!level) level = '0'; // Ultimate fallback
+      }
+
       if (!entity.spells) {
         entity.spells = {};
       }

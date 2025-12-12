@@ -256,6 +256,10 @@
                     [attr.contenteditable]="isEditMode()"
                     (blur)="handleEntityUpdate(entity, 'baseStats.class', $event)">{{
                     getCaseInsensitiveProp(entity['baseStats'], 'class') ?? 'N/A' }}</span></p>
+                <p><strong class="font-semibold text-gray-400">Race:</strong> <span
+                    [attr.contenteditable]="isEditMode()"
+                    (blur)="handleEntityUpdate(entity, 'baseStats.race', $event)">{{
+                    getCaseInsensitiveProp(entity['baseStats'], 'race') ?? 'N/A' }}</span></p>
                 <p><strong class="font-semibold text-gray-400">Alignment:</strong> <span
                     [attr.contenteditable]="isEditMode()"
                     (blur)="handleEntityUpdate(entity, 'baseStats.alignment', $event)">{{
