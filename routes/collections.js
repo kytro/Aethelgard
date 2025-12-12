@@ -75,20 +75,54 @@ module.exports = function (db) {
 
         if (!db) return res.status(503).json({ error: 'Database not ready' });
 
-        const queryId = ObjectId.isValid(docId) ? new ObjectId(docId) : docId;
-
-        if (docToUpdate._id && ObjectId.isValid(docToUpdate._id)) {
-            docToUpdate._id = new ObjectId(docToUpdate._id);
-        } else if (docToUpdate._id) {
-            if (docToUpdate._id !== docId) {
-                return res.status(400).json({ error: 'Document _id in body does not match _id in URL.' });
+        // Helper to perform update with specific query ID
+        const performUpdate = async (queryId) => {
+            // If body has _id, it must match or be consistent
+            if (docToUpdate._id) {
+                const bodyIdStr = docToUpdate._id.toString();
+                const urlIdStr = docId.toString();
+                if (bodyIdStr !== urlIdStr) {
+                    // Allow mismatch if one is ObjectId and other is string repr of same hex
+                    // But effectively if they differ in string form, reject.
+                    return { error: 'Document _id in body does not match _id in URL.', status: 400 };
+                }
+                // Ensure body _id matches the type of queryId if possible, or leave as is?
+                // Safer to let it be whatever it is, but Mongo might error if _id changes type.
+                // For replaceOne, _id is immutable. 
+                // If we are replacing, we should probably ensure _id in body matches queryId type.
+                if (queryId instanceof ObjectId) {
+                    docToUpdate._id = queryId;
+                } else {
+                    docToUpdate._id = bodyIdStr;
+                }
+            } else {
+                docToUpdate._id = queryId;
             }
-        } else {
-            docToUpdate._id = queryId;
-        }
+
+            const result = await db.collection(collectionName).replaceOne({ _id: queryId }, docToUpdate);
+            return { result };
+        };
 
         try {
-            const result = await db.collection(collectionName).replaceOne({ _id: queryId }, docToUpdate);
+            let result;
+            let errorResp;
+
+            // 1. Try as ObjectId if valid
+            if (ObjectId.isValid(docId)) {
+                const oid = new ObjectId(docId);
+                const attempt = await performUpdate(oid);
+                if (attempt.error) return res.status(attempt.status).json({ error: attempt.error });
+                result = attempt.result;
+            }
+
+            // 2. If no match (or invalid ObjectId), try as String
+            if (!result || result.matchedCount === 0) {
+                const attempt = await performUpdate(docId);
+                if (attempt.error && !result) return res.status(attempt.status).json({ error: attempt.error });
+                // If we had a result (matchedCount=0) and this attempt also fails or errors, usage logic applies
+                if (attempt.result) result = attempt.result;
+            }
+
             if (result.matchedCount === 0) {
                 return res.status(404).json({ error: 'Document not found.' });
             }

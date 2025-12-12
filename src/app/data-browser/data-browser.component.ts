@@ -119,20 +119,45 @@ export class DataBrowserComponent {
 
     try {
       const updatedDoc = JSON.parse(this.editedJson());
-      const docId = docToSave._id;
+      const originalId = docToSave._id;
+      const newId = updatedDoc._id;
 
-      await lastValueFrom(this.http.put(`api/admin/collections/${collectionName}/${docId}`, updatedDoc));
+      if (newId !== originalId) {
+        // ID changed: Treat as Rename (Create New + Delete Old)
 
-      // Update local state
-      this.documents.update(docs => docs.map(d => d._id === docId ? updatedDoc : d));
-      this.selectDocument(updatedDoc); // Reselect the doc to show the updated, non-edit view
-      this.cancelEdit(); // Exit edit mode
+        // 1. Create New
+        await lastValueFrom(this.http.post<{ message: string, insertedId: string }>(
+          `api/admin/collections/${collectionName}`,
+          updatedDoc
+        ));
+
+        // 2. Delete Old
+        await lastValueFrom(this.http.delete(`api/admin/collections/${collectionName}/${originalId}`));
+
+        // 3. Update Local State: Remove old, Add new
+        this.documents.update(docs => {
+          const filetered = docs.filter(d => d._id !== originalId);
+          return [...filetered, updatedDoc];
+        });
+
+        this.selectDocument(updatedDoc); // Select the new doc
+        this.cancelEdit();
+
+      } else {
+        // ID unchanged: Standard Update
+        await lastValueFrom(this.http.put(`api/admin/collections/${collectionName}/${originalId}`, updatedDoc));
+
+        // Update local state
+        this.documents.update(docs => docs.map(d => d._id === originalId ? updatedDoc : d));
+        this.selectDocument(updatedDoc); // Reselect the doc to show the updated, non-edit view
+        this.cancelEdit(); // Exit edit mode
+      }
 
     } catch (err: any) {
       if (err instanceof SyntaxError) {
         this.error.set('Invalid JSON format.');
       } else {
-        this.error.set(err.error?.error || `Failed to save document ${docToSave._id}.`);
+        this.error.set(err.error?.error || `Failed to save document. ${err.message || ''}`);
       }
     } finally {
       this.isLoading.set(false);

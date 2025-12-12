@@ -263,6 +263,55 @@ IMPORTANT: Be accurate to PF1e Core Rulebook rules. Include all standard racial 
     }
   });
 
+  // NEW: Bulk create entries endpoint (used by NPC Generator)
+  router.post('/create-entries', async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database not ready' });
+    try {
+      const entries = req.body;
+      if (!Array.isArray(entries)) {
+        return res.status(400).json({ error: 'Request body must be an array.' });
+      }
+
+      if (entries.length === 0) {
+        return res.status(200).json({ message: 'No entries to save.', insertedIds: [] });
+      }
+
+      const bulkOps = entries.map(entry => {
+        // Ensure path_components is array
+        const path = Array.isArray(entry.path_components) ? entry.path_components : [];
+
+        // Remove _id to let Mongo generate one (or upsert by path)
+        // If we want to upsert by path_components (logical ID):
+        const filter = { path_components: path };
+
+        // Clone entry to avoid modifying original
+        const doc = { ...entry };
+        delete doc._id; // Let mongo handle ID or keep existing if replacing
+
+        // For NPC generation, we generally want to overwrite or create.
+        // Using replaceOne with upsert=true ensures we update if exists or create if new.
+        return {
+          replaceOne: {
+            filter: filter,
+            replacement: doc,
+            upsert: true
+          }
+        };
+      });
+
+      const result = await db.collection('codex_entries').bulkWrite(bulkOps);
+      res.status(201).json({
+        message: 'Entries processed successfully.',
+        upsertedCount: result.upsertedCount,
+        modifiedCount: result.modifiedCount
+      });
+
+    } catch (error) {
+      console.error('Failed to create entries:', error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // This endpoint fetches specific entities by their IDs. (No change)
   router.post('/get-entities', async (req, res) => {
     const { entityIds } = req.body;

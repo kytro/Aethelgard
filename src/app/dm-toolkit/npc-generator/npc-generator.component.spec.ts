@@ -229,4 +229,83 @@ describe('NpcGeneratorComponent', () => {
             expect(component.npcSaveSuccessMessage()).toContain('1 NPCs saved');
         });
     });
+    describe('Detail Generation', () => {
+        it('should pass extended context (description, backstory, etc.) to generate-npc-details API', async () => {
+            component.lastGeneratedNpcs.set([
+                createMockGeneratedNpc({
+                    name: 'Cleric',
+                    race: 'Human',
+                    class: 'Cleric',
+                    description: 'Has a mechanical arm',
+                    backstory: 'Exiled from the city of brass',
+                    gender: 'Female',
+                    alignment: 'Lawful Neutral',
+                    deity: 'Brigh'
+                })
+            ]);
+            await fixture.whenStable();
+
+            component.handleGenerateDetails(0);
+
+            const req = httpMock.expectOne('/codex/api/dm-toolkit-ai/generate-npc-details');
+            expect(req.request.method).toBe('POST');
+
+            const body = req.request.body;
+            expect(body.options.npc).toEqual(expect.objectContaining({
+                name: 'Cleric',
+                description: 'Has a mechanical arm',
+                backstory: 'Exiled from the city of brass',
+                gender: 'Female',
+                alignment: 'Lawful Neutral',
+                deity: 'Brigh'
+            }));
+
+            req.flush({ baseStats: { Str: 14 } });
+        });
+    });
+
+    describe('Individual Save', () => {
+        beforeEach(async () => {
+            component.lastGeneratedNpcs.set([
+                createMockGeneratedNpc({ name: 'Loner' })
+            ]);
+            component.lastGeneratedGroupName.set('People/Deep/Cave');
+            await fixture.whenStable();
+        });
+
+        it('should create parent paths and save valid entity/entry when saving individual NPC', async () => {
+            component.handleSaveNpc(0);
+
+            const entityReq = httpMock.expectOne('/codex/api/admin/collections/entities_pf1e');
+            expect(entityReq.request.method).toBe('POST');
+
+            const entityBody = entityReq.request.body;
+            // Validate Entity Payload
+            expect(entityBody.name).toBe('Loner');
+            expect(entityBody.baseStats.HP).toBe('10 (1d10)');
+
+            entityReq.flush({ insertedId: 'loner-id' });
+            await fixture.whenStable();
+
+            const createReq = httpMock.expectOne('/codex/api/codex/create-entries');
+            expect(createReq.request.method).toBe('POST');
+
+            const entries = createReq.request.body;
+            expect(entries.length).toBeGreaterThan(1);
+
+            const deepEntry = entries.find((e: any) => e.name === 'Deep');
+            const caveEntry = entries.find((e: any) => e.name === 'Cave');
+            const npcEntry = entries.find((e: any) => e.name === 'Loner');
+
+            expect(deepEntry).toBeTruthy();
+            expect(caveEntry).toBeTruthy();
+            expect(npcEntry).toBeTruthy();
+            expect(npcEntry.entity_id).toBe('loner-id');
+            // Validate Codex Entry Content
+            expect(npcEntry.content).toEqual(expect.arrayContaining([
+                { type: 'heading', text: 'Loner' },
+                { type: 'paragraph', text: 'A test npc.' }
+            ]));
+        });
+    });
 });

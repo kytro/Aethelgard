@@ -229,14 +229,14 @@ interface GeneratedNpc {
                         @if (npc.equipment && npc.equipment.length > 0) {
                             <div>
                                 <h5 class="font-semibold text-gray-300">Equipment</h5>
-                                <p class="text-gray-400">{{ npc.equipment.join(', ') }}</p>
+                                <p class="text-gray-400">{{ formatItems(npc.equipment) }}</p>
                             </div>
                         }
             
                         @if (npc.magicItems && npc.magicItems.length > 0) {
                             <div>
                                 <h5 class="font-semibold text-gray-300">Magic Items</h5>
-                                <p class="text-gray-400">{{ npc.magicItems.join(', ') }}</p>
+                                <p class="text-gray-400">{{ formatItems(npc.magicItems) }}</p>
                             </div>
                         }
             
@@ -248,6 +248,17 @@ interface GeneratedNpc {
                                         <p class="text-gray-400"><b class="text-gray-300">Level {{level}}:</b> {{ npc.spells[level].join(', ') }}</p>
                                     }
                                 }
+                            </div>
+                        }
+
+                        @if (npc.spellSlots && objectKeys(npc.spellSlots).length > 0) {
+                            <div class="mt-2">
+                                <h5 class="font-semibold text-gray-300">Spell Slots</h5>
+                                <div class="flex flex-wrap gap-2">
+                                    @for(level of objectKeys(npc.spellSlots); track level) {
+                                        <span class="text-gray-400">L{{level}}: <span class="text-blue-400 font-bold">{{ npc.spellSlots[level] }}</span></span>
+                                    }
+                                </div>
                             </div>
                         }
                     </div>
@@ -302,6 +313,10 @@ export class NpcGeneratorComponent {
 
     objectKeys = Object.keys;
 
+    formatItems(items: (string | EquipmentItem)[]): string {
+        return items.map(item => typeof item === 'string' ? item : item.name).join(', ');
+    }
+
     private mapToIds(items: (string | EquipmentItem)[], cache: Map<string, any>, idPrefix: string): string[] {
         if (!items || !Array.isArray(items)) return [];
         return items.map(item => {
@@ -344,7 +359,12 @@ export class NpcGeneratorComponent {
                         type: npc.type,
                         class: npc.class,
                         level: npc.level,
-                        size: npc.size
+                        size: npc.size,
+                        description: npc.description,
+                        backstory: npc.backstory,
+                        gender: npc.gender,
+                        alignment: npc.alignment,
+                        deity: npc.deity
                     }
                 }
             }));
@@ -397,19 +417,114 @@ export class NpcGeneratorComponent {
     private async saveIndividualNpc(npc: GeneratedNpc) {
         const pathString = this.lastGeneratedGroupName();
         const basePath = pathString.replace(/\\/g, '/').split('/').filter(p => p.trim() !== '').map(p => p.trim().replace(/ /g, '_'));
+        const entriesToSave: any[] = [];
+
+        // Create parent folder entries if they don't exist
+        const codex = this.codex();
+        if (codex) {
+            for (let i = 0; i < basePath.length; i++) {
+                const currentPath = basePath.slice(0, i + 1);
+
+                let node = codex;
+                let pathExists = true;
+                for (const component of currentPath) {
+                    if (node && typeof node === 'object' && node.hasOwnProperty(component)) {
+                        node = node[component];
+                    } else {
+                        pathExists = false;
+                        break;
+                    }
+                }
+
+                if (!pathExists) {
+                    const pathName = currentPath[currentPath.length - 1];
+                    const parentEntry = {
+                        path_components: currentPath,
+                        name: pathName.replace(/_/g, ' '),
+                        content: null,
+                        category: null,
+                        summary: null
+                    };
+                    entriesToSave.push(parentEntry);
+
+                    // Simulate the creation in the local codex object to prevent duplicates
+                    let tempNode = codex;
+                    for (const p of currentPath) {
+                        if (!tempNode[p]) tempNode[p] = {};
+                        tempNode = tempNode[p];
+                    }
+                }
+            }
+        }
 
         // Link to database items
+        // Link to database items
         const linkedRules = this.mapToIds(npc.feats || [], this.rulesCache(), 'feat-');
-        const linkedEquipment = this.mapToIds(npc.equipment || [], this.equipmentCache(), 'eq-');
-        const linkedMagicItems = this.mapToIds(npc.magicItems || [], this.magicItemsCache(), 'mi-');
-        const linkedSpells = npc.spells
-            ? Object.values(npc.spells).flat().map(spellName => {
+
+        // Handle Equipment (string array, object array, or comma-separated string)
+        let equipmentList: string[] = [];
+        if (Array.isArray(npc.equipment)) {
+            equipmentList = npc.equipment.map(e => typeof e === 'string' ? e : e.name);
+        } else if (typeof npc.equipment === 'string') {
+            equipmentList = (npc.equipment as string).split(',').map(s => s.trim()).filter(s => s !== '');
+        }
+        const linkedEquipment = this.mapToIds(equipmentList, this.equipmentCache(), 'eq-');
+
+        // Handle Magic Items
+        let magicItemsList: string[] = [];
+        if (Array.isArray(npc.magicItems)) {
+            magicItemsList = npc.magicItems.map(m => typeof m === 'string' ? m : m.name);
+        } else if (typeof npc.magicItems === 'string') {
+            magicItemsList = (npc.magicItems as string).split(',').map(s => s.trim()).filter(s => s !== '');
+        }
+        const linkedMagicItems = this.mapToIds(magicItemsList, this.magicItemsCache(), 'mi-');
+
+        // Handle Spells - Preserve Levels
+        let linkedSpells: any = {}; // Default to object structure
+
+        if (npc.spells) {
+            // Helper to find ID and Level from cache
+            const findSpellInfo = (name: string): { id: string, level: string } | null => {
+                const searchName = name.trim().toLowerCase();
                 for (const [id, spell] of this.spellsCache().entries()) {
-                    if (spell.name.toLowerCase() === spellName.toLowerCase()) return id;
+                    if (spell.name.toLowerCase() === searchName) {
+                        let lvl = '0';
+                        if (spell.level && typeof spell.level === 'object') {
+                            const levels = Object.values(spell.level);
+                            if (levels.length > 0) lvl = String(levels[0]);
+                        }
+                        return { id, level: lvl };
+                    }
                 }
-                return '';
-            }).filter(id => id !== '')
-            : [];
+                return null;
+            };
+
+            if (typeof npc.spells === 'object' && !Array.isArray(npc.spells)) {
+                Object.entries(npc.spells).forEach(([level, spells]) => {
+                    if (Array.isArray(spells)) {
+                        const ids = spells.map(name => {
+                            const info = findSpellInfo(name);
+                            return info ? info.id : '';
+                        }).filter(id => id !== '');
+                        if (ids.length > 0) linkedSpells[level] = ids;
+                    }
+                });
+            } else if (Array.isArray(npc.spells)) {
+                npc.spells.forEach((name: string) => {
+                    const info = findSpellInfo(name);
+                    if (info) {
+                        if (!linkedSpells[info.level]) linkedSpells[info.level] = [];
+                        if (!linkedSpells[info.level].includes(info.id)) linkedSpells[info.level].push(info.id);
+                    }
+                });
+            } else if (typeof npc.spells === 'string') {
+                const info = findSpellInfo(npc.spells);
+                if (info) {
+                    if (!linkedSpells[info.level]) linkedSpells[info.level] = [];
+                    linkedSpells[info.level].push(info.id);
+                }
+            }
+        }
 
         const sanitizedName = npc.name.replace(/ /g, '_');
         const fullPath = [...basePath, sanitizedName];
@@ -423,6 +538,11 @@ export class NpcGeneratorComponent {
                 { type: 'paragraph', text: npc.description }
             ]
         };
+
+        if (npc.backstory) {
+            newEntry.content.push({ type: 'heading', text: 'Backstory' });
+            newEntry.content.push({ type: 'paragraph', text: npc.backstory });
+        }
 
         // Create linked entity
         const entity: any = {
@@ -484,12 +604,13 @@ export class NpcGeneratorComponent {
         if (npc.specialAbilities?.length) entity.special_abilities = npc.specialAbilities;
 
         // Save entity first
-        const entityResult = await lastValueFrom(this.http.post<any>('/codex/api/codex/entities', entity));
+        const entityResult = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
         const newEntityId = entityResult._id || entityResult.insertedId;
 
         // Save codex entry with entity link
         (newEntry as any).entity_id = newEntityId;
-        await lastValueFrom(this.http.post('/codex/api/codex/create-entries', [newEntry]));
+        entriesToSave.push(newEntry);
+        await lastValueFrom(this.http.post('/codex/api/codex/create-entries', entriesToSave));
     }
 
 
@@ -651,7 +772,7 @@ export class NpcGeneratorComponent {
                 if (npc.refSave !== undefined) entity.baseStats.saves.reflex = npc.refSave;
                 if (npc.willSave !== undefined) entity.baseStats.saves.will = npc.willSave;
 
-                if (npc.spellSlots) entity.spellSlots = npc.spellSlots;
+                if (npc.spellSlots) entity.spell_slots = npc.spellSlots;
                 if (npc.spellSaveDc !== undefined) entity.baseStats.spellSaveDc = npc.spellSaveDc;
 
                 // Defenses

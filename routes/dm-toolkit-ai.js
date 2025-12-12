@@ -86,6 +86,15 @@ Type: ${npc.type || 'NPC'}
 Class: ${npc.class || 'Commoner'}
 Level/CR: ${npc.level || 1}
 Size: ${npc.size || 'Medium'}
+Gender: ${npc.gender || 'Not specified'}
+Alignment: ${npc.alignment || 'Neutral'}
+Deity: ${npc.deity || 'None'}
+
+Context:
+Description: "${npc.description || ''}"
+Backstory: "${npc.backstory || ''}"
+
+Important: Incorporate specific details from the description and backstory (such as domains, prepared spells, signature items, or physical traits) into the generated stats. For example, if the description mentions a mechanical arm, include it in equipment or special abilities. If it mentions specific spells, include them. If deity/domains are implied, use them.
 
 Generate accurate PF1e stats. Return a JSON object:
 {
