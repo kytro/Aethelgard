@@ -91,11 +91,22 @@ function parseDocStructure(html) {
             // Matches: **Text**, **Text:**, ** Text **
             const fullBoldRegex = /^\s*\*\*([^*]+)\*\*[:\s]*$/;
 
+            // Heuristic 2: "List Title" - List item STARTS with bold text
+            // Matches: **The Salt-Barrels** (Canteen)
+            const listStartBoldRegex = /^\s*\*\*([^*]+)\*\*/;
+
             if (fullBoldRegex.test(text)) {
                 // Promote to HEADING (Level 6 acts as "General Content Heading")
                 type = 'HEADING_6';
                 text = text.replace(/\*\*/g, '').replace(/:$/, '').trim();
-            } else {
+            }
+            else if (tag === 'li' && listStartBoldRegex.test(text)) {
+                // Promote list items starting with bold to headings
+                type = 'HEADING_6';
+                // Remove bold markers but keep the rest of the text (e.g. "(Canteen)")
+                text = text.replace(/\*\*/g, '').trim();
+            }
+            else {
                 type = 'NORMAL_TEXT';
             }
         }
