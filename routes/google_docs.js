@@ -6,8 +6,6 @@ const router = express.Router();
 async function fetchDocHandler(req, res) {
     const { docId } = req.params;
 
-    // No auth header check needed for public docs
-
     try {
         const exportUrl = `https://docs.google.com/document/d/${docId}/export?format=html`;
         const response = await fetch(exportUrl);
@@ -24,7 +22,6 @@ async function fetchDocHandler(req, res) {
         const html = await response.text();
         const structure = parseDocStructure(html);
 
-        // Attempt to extract title from HTML
         const $ = cheerio.load(html);
         const title = $('title').text().replace(' - Google Docs', '') || 'Untitled Document';
 
@@ -49,36 +46,77 @@ function parseDocStructure(html) {
     const $ = cheerio.load(html);
     const simplified = [];
 
-    // Google Docs HTML export puts the content in the body, often with inline styles
-    // We look for h1-h6 and p tags
-    $('body').children().each((i, el) => {
+    // Helper: Recursively extract text, wrapping BOLD segments in markdown **text**
+    const extractText = (el) => {
+        let text = '';
+        $(el).contents().each((_, node) => {
+            if (node.type === 'text') {
+                text += node.data;
+            } else if (node.type === 'tag') {
+                const $node = $(node);
+                const innerText = extractText(node);
+
+                // Detect bold via tag or style
+                const style = $node.attr('style') || '';
+                const isBold = ['b', 'strong'].includes(node.tagName) ||
+                    /font-weight:\s*(700|bold)/i.test(style);
+
+                if (isBold && innerText.trim()) {
+                    text += `**${innerText}**`;
+                } else {
+                    text += innerText;
+                }
+            }
+        });
+        return text;
+    };
+
+    const processElement = (el) => {
         const tag = el.tagName.toLowerCase();
-        const text = $(el).text().trim();
+        let text = extractText(el).trim();
 
         if (!text) return;
 
         let type = 'NORMAL_TEXT';
 
+        // 1. Explicit HTML Headings
         if (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(tag)) {
-            type = 'HEADING_' + tag[1]; // e.g. HEADING_1
-        } else if (tag === 'p') {
-            type = 'NORMAL_TEXT';
-            // Check for class-based titles/subtitles if needed, but for now stick to basics
-            // Sometimes Google uses classes for headings (e.g. .c0) 
-            // but the export format usually respects semantic tags compared to the API
-        } else if (tag === 'ul' || tag === 'ol') {
-            // Handle lists - treat each li as a paragraph for now or handle blocks
-            // For simplicity in this key pass, we'll just extract text for now
-            // This logic might need refinement
-            type = 'NORMAL_TEXT'; // Lists are context
+            type = 'HEADING_' + tag[1];
+            // Strip markdown bold markers from headings as they are redundant
+            text = text.replace(/\*\*/g, '');
+        }
+        // 2. Lists and Paragraphs - Check heuristics
+        else if (tag === 'p' || tag === 'li') {
+            // Heuristic 1: "Bold Heading" - Entire line is bold (ignoring colon/whitespace)
+            // Matches: **Text**, **Text:**, ** Text **
+            const fullBoldRegex = /^\s*\*\*([^*]+)\*\*[:\s]*$/;
+
+            if (fullBoldRegex.test(text)) {
+                // Promote to HEADING (Level 6 acts as "General Content Heading")
+                type = 'HEADING_6';
+                text = text.replace(/\*\*/g, '').replace(/:$/, '').trim();
+            } else {
+                type = 'NORMAL_TEXT';
+            }
         }
 
         if (type) {
             simplified.push({
                 type: type,
                 text: text,
-                style: {} // Placeholder for potential style extraction
+                style: {}
             });
+        }
+    };
+
+    $('body').children().each((i, el) => {
+        const tag = el.tagName.toLowerCase();
+
+        // Handle Lists: Process each <li> individually so they can be Headings
+        if (['ul', 'ol'].includes(tag)) {
+            $(el).children('li').each((j, li) => processElement(li));
+        } else {
+            processElement(el);
         }
     });
 

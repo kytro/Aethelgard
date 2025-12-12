@@ -21,9 +21,7 @@
                 <button (click)="reset()"
                     class="bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded text-sm">Cancel</button>
                 <button (click)="generatePreview()"
-                    class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded font-bold text-white">
-                    Next: Preview
-                </button>
+                    class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded font-bold text-white">Next: Preview</button>
             </div>
         </div>
 
@@ -44,13 +42,11 @@
                         </span>
 
                         <div class="flex items-center gap-4 border-l border-gray-600 pl-4">
-                            <label class="flex items-center gap-1 cursor-pointer select-none"
-                                title="Skip this section and children">
+                            <label class="flex items-center gap-1 cursor-pointer select-none" title="Skip this section">
                                 <input type="checkbox" [checked]="node.isExcluded" (change)="toggleIsExcluded(node)"
                                     class="form-checkbox h-4 w-4 text-red-500 rounded border-gray-500 bg-gray-700">
                                 <span class="text-xs text-gray-400">Exclude</span>
                             </label>
-
                             <label class="flex items-center gap-1 cursor-pointer select-none"
                                 [class.opacity-50]="node.isExcluded">
                                 <input type="checkbox" [checked]="node.isPage" (change)="toggleIsPage(node)"
@@ -66,39 +62,27 @@
                                 (focus)="onFocusPath(node)" (blur)="activeNodeId.set(null)"
                                 class="w-full bg-gray-900 border border-gray-600 rounded px-2 py-1 text-sm text-green-300 focus:border-yellow-500 focus:outline-none placeholder-gray-600"
                                 [placeholder]="node.isPage ? 'Codex Path...' : 'Base Path for Children...'">
-
                             <div *ngIf="activeNodeId() === node.id && filteredPaths().length > 0" class="dropdown-list">
                                 <div *ngFor="let path of filteredPaths()" (mousedown)="selectPathSuggestion(node, path)"
-                                    class="dropdown-item">
-                                    {{ path }}
-                                </div>
+                                    class="dropdown-item">{{ path }}</div>
                             </div>
                         </div>
 
                         <span *ngIf="!node.isExcluded" class="text-xs px-2 py-0.5 rounded"
-                            [ngClass]="node.isManual ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-700 text-gray-400'">
-                            {{ node.isManual ? 'Manual' : 'Auto' }}
-                        </span>
-
+                            [ngClass]="node.isManual ? 'bg-blue-900/50 text-blue-300' : 'bg-gray-700 text-gray-400'">{{
+                            node.isManual ? 'Manual' : 'Auto' }}</span>
                         <span *ngIf="!node.isExcluded && node.isPage"
                             class="text-xs px-1.5 py-0.5 rounded font-bold border ml-2"
-                            [ngClass]="node.isNew ? 'bg-green-900 text-green-300 border-green-700' : 'bg-blue-900 text-blue-300 border-blue-700'">
-                            {{ node.isNew ? 'NEW' : 'UPDATE' }}
-                        </span>
+                            [ngClass]="node.isNew ? 'bg-green-900 text-green-300 border-green-700' : 'bg-blue-900 text-blue-300 border-blue-700'">{{
+                            node.isNew ? 'NEW' : 'UPDATE' }}</span>
                     </div>
-
                     <div *ngIf="node.expanded && node.children.length > 0" class="tree-node">
                         <ng-container
                             *ngTemplateOutlet="nodeTemplate; context: { nodes: node.children }"></ng-container>
                     </div>
                 </div>
             </ng-template>
-
             <ng-container *ngTemplateOutlet="nodeTemplate; context: { nodes: rootNodes() }"></ng-container>
-
-            <div *ngIf="rootNodes().length === 0" class="text-gray-500 text-center py-8">
-                No headings found in document.
-            </div>
         </div>
     </div>
 
@@ -109,16 +93,12 @@
                 <button (click)="backToMapping()"
                     class="bg-gray-600 hover:bg-gray-500 px-4 py-2 rounded text-sm">Back</button>
                 <button (click)="saveImport()" [disabled]="isLoading()"
-                    class="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-bold text-white disabled:opacity-50">
-                    {{ isLoading() ? 'Saving...' : 'Confirm Import' }}
-                </button>
+                    class="bg-green-600 hover:bg-green-500 px-6 py-2 rounded font-bold text-white disabled:opacity-50">{{
+                    isLoading() ? 'Saving...' : 'Confirm Import' }}</button>
             </div>
         </div>
 
         <div class="flex-1 overflow-y-auto space-y-6 pr-2">
-            <p class="text-gray-400 text-sm">Review the pages to be created. You can edit text blocks here before
-                saving.</p>
-
             <div *ngFor="let page of previewPages(); let i = index"
                 class="bg-gray-800 border border-gray-700 rounded-lg p-6">
                 <div class="mb-4 pb-2 border-b border-gray-700">
@@ -135,36 +115,27 @@
 
                 <div class="space-y-4">
                     <div *ngFor="let block of page.content; let j = index"
-                        class="group relative transition-all duration-200" [class.opacity-40]="block.isExcluded"
+                        class="group relative pl-8 transition-all duration-200" [class.opacity-40]="block.isExcluded"
                         [class.grayscale]="block.isExcluded">
 
-                        <!-- Toolbar -->
-                        <div
-                            class="absolute -left-20 top-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <div class="absolute -left-1 top-1 flex flex-col gap-1 z-10">
                             <button (click)="toggleBlockType(block)"
-                                class="p-1 rounded bg-gray-700 hover:bg-blue-600 text-xs text-white"
+                                class="p-1 rounded bg-gray-700 hover:bg-blue-600 text-white border border-gray-600 shadow-md font-bold text-xs w-6 h-6 flex items-center justify-center"
                                 title="Toggle Heading/Paragraph">
                                 {{ block.type === 'heading' ? '¶' : 'H' }}
                             </button>
                             <button (click)="toggleBlockExclusion(block)"
-                                class="p-1 rounded bg-gray-700 hover:bg-red-600 text-xs text-white"
+                                class="p-1 rounded bg-gray-700 hover:bg-red-600 text-white border border-gray-600 shadow-md font-bold text-xs w-6 h-6 flex items-center justify-center"
                                 title="Exclude from Import">
-                                {{ block.isExcluded ? 'INCL' : 'EXCL' }}
+                                {{ block.isExcluded ? '+' : 'x' }}
                             </button>
                         </div>
 
-                        <span
-                            class="absolute -left-10 top-2 text-xs text-gray-600 w-8 text-right uppercase font-mono">{{
-                            block.type[0] }}</span>
-
                         <ng-container [ngSwitch]="block.type">
-
                             <input *ngSwitchCase="'heading'" [(ngModel)]="block.text"
-                                class="w-full bg-gray-900/50 border-l-4 border-blue-500 p-2 text-lg font-semibold text-white focus:outline-none focus:bg-gray-900">
-
+                                class="w-full bg-gray-900/50 border-l-4 border-blue-500 p-2 text-lg font-semibold text-white focus:outline-none focus:bg-gray-900 transition-colors">
                             <textarea *ngSwitchCase="'paragraph'" [(ngModel)]="block.text" rows="3"
-                                class="w-full bg-gray-900/30 border border-transparent focus:border-gray-600 rounded p-2 text-gray-300 focus:outline-none focus:bg-gray-900 resize-y"></textarea>
-
+                                class="w-full bg-gray-900/30 border border-transparent focus:border-gray-600 rounded p-2 text-gray-300 focus:outline-none focus:bg-gray-900 resize-y transition-colors"></textarea>
                             <div *ngSwitchCase="'table'" class="overflow-x-auto bg-gray-900/50 p-2 rounded">
                                 <div class="text-xs text-gray-500 mb-1">Table (Read-only preview)</div>
                                 <table class="w-full text-sm text-left">
@@ -180,13 +151,10 @@
                                     </tbody>
                                 </table>
                             </div>
-
                         </ng-container>
                     </div>
-
-                    <div *ngIf="page.content.length === 0" class="text-gray-500 italic p-4 text-center">
-                        (No content in this page)
-                    </div>
+                    <div *ngIf="page.content.length === 0" class="text-gray-500 italic p-4 text-center">(No content in
+                        this page)</div>
                 </div>
             </div>
         </div>
