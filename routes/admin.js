@@ -4,9 +4,9 @@ const multer = require('multer');
 const JSZip = require('jszip');
 
 const upload = multer({ storage: multer.memoryStorage() });
-const router = express.Router();
 
 module.exports = function (db) {
+    const router = express.Router();
 
     router.get('/dashboard-stats', async (req, res) => {
         if (!db) return res.status(503).json({ error: 'Database not ready' });
@@ -38,8 +38,9 @@ module.exports = function (db) {
         console.log('[BACKUP] Backup generation initiated (ZIP Mode).');
         try {
             const collections = await db.listCollections().toArray();
-            const dataJson = {}; // Stores all collections EXCEPT entities_pf1e
+            const dataJson = {}; // Stores all collections EXCEPT entities_pf1e and codex_entries
             let beastiaryData = []; // Stores separate entities_pf1e data
+            let codexData = []; // Stores separate codex_entries data
 
             for (const collectionInfo of collections) {
                 const collectionName = collectionInfo.name;
@@ -50,12 +51,12 @@ module.exports = function (db) {
                     // Store separately
                     beastiaryData = documents.map(({ _id, ...rest }) => ({ _id: _id.toString(), ...rest }));
                 }
-                else if (collectionName === 'codex_entries' && documents.length > 0) {
-                    // Store as array, PRESERVING _id for integrity
-                    const entriesArray = documents.map(({ _id, ...rest }) => ({ _id: _id.toString(), ...rest }));
-                    dataJson['codex_entries.json'] = entriesArray;
+                else if (collectionName === 'codex_entries') {
+                    // Store separately, PRESERVING _id for integrity
+                    codexData = documents.map(({ _id, ...rest }) => ({ _id: _id.toString(), ...rest }));
                 } else {
                     // Standard Key-Value storage for other collections
+                    // Maintain backward compatibility logic where needed, typically object format
                     const collectionObject = {};
                     documents.forEach(doc => {
                         const { _id, ...docContent } = doc;
@@ -68,6 +69,7 @@ module.exports = function (db) {
             // Create ZIP
             const zip = new JSZip();
             zip.file('beastiary.json', JSON.stringify(beastiaryData, null, 2));
+            zip.file('codex.json', JSON.stringify(codexData, null, 2));
             zip.file('data.json', JSON.stringify(dataJson, null, 2));
 
             const zipContent = await zip.generateAsync({ type: 'nodebuffer' });
@@ -94,9 +96,9 @@ module.exports = function (db) {
             const buffer = req.file.buffer;
             let backupData = {};
             let beastiaryData = null;
+            let codexData = null;
 
             // Check if ZIP or JSON
-            // We can try to load as ZIP
             try {
                 const zip = await JSZip.loadAsync(buffer);
 
@@ -104,6 +106,12 @@ module.exports = function (db) {
                 if (zip.file('beastiary.json')) {
                     const bContent = await zip.file('beastiary.json').async('string');
                     beastiaryData = JSON.parse(bContent);
+                }
+
+                // Load codex.json
+                if (zip.file('codex.json')) {
+                    const cContent = await zip.file('codex.json').async('string');
+                    codexData = JSON.parse(cContent);
                 }
 
                 // Load data.json
@@ -116,7 +124,7 @@ module.exports = function (db) {
                 }
 
             } catch (zipErr) {
-                // Not a valid zip, maybe it's the old single-file JSON
+                // Not a valid zip, fallback to legacy JSON support
                 console.warn('[RESTORE] Failed to load as ZIP, processing as legacy JSON file.');
                 try {
                     const jsonContent = buffer.toString('utf-8');
@@ -155,27 +163,13 @@ module.exports = function (db) {
 
                 if (docsToInsert.length > 0) {
                     if (isPartialRestore) {
-                        // Upsert one by one
-                        const bulkOps = docsToInsert.map(doc => {
-                            // If _id is missing (e.g. codex_entries legacy), we insert?
-                            // But bulkWrite requires filter. If _id is missing, we can't match?
-                            // Legacy codex_entries logic removed _id on backup.
-                            // If we don't have _id, we can't upsert reliably unless there's another key.
-                            // Assuming for now if _id exists.
-                            if (!doc._id) {
-                                // Fallback for docs without ID (insert/replace?)
-                                // For codex entries without IDs, maybe just insert?
-                                // But partial implied merging.
-                                return { insertOne: { document: doc } };
+                        const bulkOps = docsToInsert.map(doc => ({
+                            replaceOne: {
+                                filter: { _id: doc._id },
+                                replacement: doc,
+                                upsert: true
                             }
-                            return {
-                                replaceOne: {
-                                    filter: { _id: doc._id },
-                                    replacement: doc,
-                                    upsert: true
-                                }
-                            };
-                        });
+                        }));
                         const bulkResult = await collection.bulkWrite(bulkOps);
                         report.push(`${restoreMode}: ${collectionName} (${bulkResult.upsertedCount + bulkResult.modifiedCount} updated).`);
                     } else {
@@ -190,12 +184,15 @@ module.exports = function (db) {
                 await restoreCollection('entities_pf1e', beastiaryData);
             }
 
-            // 2. Restore Others (From data.json or legacy root object)
+            // 2. Restore Codex (Separate File)
+            if (codexData) {
+                await restoreCollection('codex_entries', codexData);
+            }
+
+            // 3. Restore Others
             for (const filename in backupData) {
                 if (!filename.endsWith('.json')) continue;
                 const collectionName = filename.replace('.json', '');
-
-                // Use specific restore logic?
                 // The new logic separates beastiary. If the ZIP contained beastiary.json manually, we handled it.
                 // If backupData contains 'entities_pf1e.json' (legacy), current loop handles it.
                 await restoreCollection(collectionName, backupData[filename]);
