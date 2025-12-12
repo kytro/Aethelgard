@@ -308,4 +308,35 @@ describe('NpcGeneratorComponent', () => {
             ]));
         });
     });
+    describe('Normalization', () => {
+        it('should normalize HP object to string', () => {
+            const input = { hp: { value: 45, type: 'hp' } };
+            const result = component.normalizeNpcDetails(input);
+            expect(result.hp).toBe('45');
+        });
+
+        it('should normalize AC object to number', () => {
+            const input = { ac: { total: 18, touch: 12 } };
+            const result = component.normalizeNpcDetails(input);
+            expect(result.ac).toBe(18);
+        });
+
+        it('should normalize Special Abilities objects to strings', () => {
+            const input = { specialAbilities: [{ name: 'Darkvision' }, 'Scent'] };
+            const result = component.normalizeNpcDetails(input);
+            expect(result.specialAbilities).toEqual(['Darkvision', 'Scent']);
+        });
+
+        it('should fix double plus in BAB', () => {
+            const input = { bab: '++5' };
+            const result = component.normalizeNpcDetails(input);
+            expect(result.bab).toBe(5);
+        });
+
+        it('should fix double plus in CMB', () => {
+            const input = { cmb: '++6' };
+            const result = component.normalizeNpcDetails(input);
+            expect(result.cmb).toBe(6);
+        });
+    });
 });

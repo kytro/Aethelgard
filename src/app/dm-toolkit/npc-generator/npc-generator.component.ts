@@ -370,10 +370,11 @@ export class NpcGeneratorComponent {
             }));
 
             // Merge details into NPC
+            const normalizedDetails = this.normalizeNpcDetails(details);
             const updatedNpcs = [...this.lastGeneratedNpcs()];
             updatedNpcs[index] = {
                 ...updatedNpcs[index],
-                ...details,
+                ...normalizedDetails,
                 detailsGenerated: true,
                 isGeneratingDetails: false
             };
@@ -820,5 +821,50 @@ export class NpcGeneratorComponent {
         } finally {
             this.isSavingNpcs.set(false);
         }
+    }
+
+    public normalizeNpcDetails(details: any): any {
+        const normalized = { ...details };
+
+        // Helper to extract value from object
+        const extractValue = (val: any): any => {
+            if (val && typeof val === 'object' && !Array.isArray(val)) {
+                return val.value || val.total || val.text || JSON.stringify(val);
+            }
+            return val;
+        };
+
+        // Normalize HP
+        if (normalized.hp) normalized.hp = String(extractValue(normalized.hp));
+
+        // Normalize AC
+        if (normalized.ac) {
+            const val = extractValue(normalized.ac);
+            normalized.ac = typeof val === 'number' ? val : parseInt(val) || 0;
+        }
+
+        // Normalize Special Abilities
+        if (normalized.specialAbilities && Array.isArray(normalized.specialAbilities)) {
+            normalized.specialAbilities = normalized.specialAbilities.map((ab: any) => {
+                if (typeof ab === 'string') return ab;
+                return ab.name || ab.value || JSON.stringify(ab);
+            });
+        }
+
+        // Normalize BAB/CMB/CMD - Fix double '+'
+        const cleanSign = (val: any) => {
+            if (typeof val === 'string') {
+                return val.replace(/\+\+/g, '+').replace(/^\++/, '+');
+            }
+            return val;
+        };
+
+        if (normalized.bab !== undefined) normalized.bab = typeof normalized.bab === 'string' ? parseInt(cleanSign(normalized.bab)) : normalized.bab;
+        if (normalized.cmb !== undefined) normalized.cmb = typeof normalized.cmb === 'string' ? parseInt(cleanSign(normalized.cmb)) : normalized.cmb;
+        // Note: CMB/CMD often come as string "X" or "+X", but entity typically wants number. 
+        // If the AI sends "+6/16", we might need to handle grapple/trip variants? 
+        // For now, simpler number extraction.
+
+        return normalized;
     }
 }
