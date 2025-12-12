@@ -142,6 +142,8 @@ export class GoogleDocImportComponent implements OnInit {
             return stack.length > 0 ? stack[stack.length - 1] : null;
         };
 
+        const sanitize = (str: string) => str.trim().replace(/\s+/g, '_');
+
         let idCounter = 0;
 
         for (const el of elements) {
@@ -150,7 +152,7 @@ export class GoogleDocImportComponent implements OnInit {
             if (level < 999) {
                 const parent = getCurrentParent(level);
                 const parentPath = parent ? parent.pathString : '';
-                const defaultPath = parentPath ? `${parentPath}/${el.text}` : el.text;
+                const defaultPath = parentPath ? `${parentPath}/${sanitize(el.text)}` : sanitize(el.text);
 
                 const newNode: ImportNode = {
                     id: `node-${idCounter++}`,
@@ -192,9 +194,13 @@ export class GoogleDocImportComponent implements OnInit {
     }
 
     private updateChildrenPaths(parentNode: ImportNode) {
+        // Simple local sanitizer just for consistency or reuse the logic if extracted
+        // Since we didn't make sanitize a class method, we can just inline the replace here
+        const sanitize = (str: string) => str.trim().replace(/\s+/g, '_');
+
         for (const child of parentNode.children) {
             if (!child.isManual) {
-                child.pathString = `${parentNode.pathString}/${child.text}`;
+                child.pathString = `${parentNode.pathString}/${sanitize(child.text)}`;
                 child.isNew = this.checkIsNew(child.pathString);
                 this.updateChildrenPaths(child);
             }
@@ -234,7 +240,8 @@ export class GoogleDocImportComponent implements OnInit {
                 currentPage = newPage;
             } else {
                 if (currentPage) {
-                    currentPage.content.push({ type: 'heading', text: node.text, isExcluded: false });
+                    // Added as paragraph instead of heading as requested
+                    currentPage.content.push({ type: 'paragraph', text: node.text, isExcluded: false });
                     if (node.content && node.content.length > 0) {
                         this.processContentForPreview(currentPage.content, node.content);
                     }

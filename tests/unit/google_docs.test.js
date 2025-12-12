@@ -32,6 +32,94 @@ describe('Google Docs Controller (Public Access)', () => {
                 { type: 'NORMAL_TEXT', text: 'Chapter content', style: {} }
             ]);
         });
+
+        it('should detect bold text via CSS classes', () => {
+            const html = `
+        <html>
+          <head>
+            <style>
+              .c1 { font-weight: 700; }
+              .c2 { font-weight: bold; }
+              .c3 { color: red; }
+            </style>
+          </head>
+          <body>
+            <p>Prefix <span class="c1">Bold Class 700</span> Suffix</p>
+            <p>Start <span class="c2">Bold Class Named</span> End</p>
+            <p><span class="c3">Not Bold</span></p>
+          </body>
+        </html>
+      `;
+            const result = parseDocStructure(html);
+            // Mixed content should remain NORMAL_TEXT and keep markers
+            expect(result[0].text).toBe('Prefix **Bold Class 700** Suffix');
+            expect(result[1].text).toBe('Start **Bold Class Named** End');
+            expect(result[2].text).toBe('Not Bold');
+        });
+
+        it('should promote list items starting with bold to HEADING_6', () => {
+            const html = `
+        <html>
+          <head><style>.s1 { font-weight: 700 }</style></head>
+          <body>
+            <ul>
+                <li><span class="s1">Item Title</span>: Description</li>
+                <li>1. <span class="s1">Numbered Title</span> - Content</li>
+                <li>- <span class="s1">Dash Title</span></li>
+                <li>Plain item</li>
+            </ul>
+          </body>
+        </html>
+      `;
+            const result = parseDocStructure(html);
+
+            // Item 1: "**Item Title**: Description" -> Heading "Item Title" (colon removed)
+            // Wait, logic is: matches regex -> converts to HEADING_6, removes bold markers.
+
+            // Expected:
+            // 1. HEADING_6 "Item Title: Description" ? 
+            // The regex is: /^\s*\*\*([^*]+)\*\*[:\s]*$/ (Full line) OR /^[\s\-\u2022\d\.]*\*\*([^*]+)\*\*/ (Start)
+
+            // Item 1: "**Item Title**: Description" -> Matches Start Bold
+            // Logic: text = text.replace(/\*\*/g, '').trim(); 
+            // Result: "Item Title: Description"
+
+            expect(result[0].type).toBe('HEADING_6');
+            expect(result[0].text).toBe('Item Title: Description');
+
+            // Item 2: "1. **Numbered Title** - Content"
+            // Matches Start Bold
+            // Result: "1. Numbered Title - Content"
+            expect(result[1].type).toBe('HEADING_6');
+            expect(result[1].text).toBe('1. Numbered Title - Content');
+
+            // Item 3: "- **Dash Title**" -> Matches Full Bold regex?
+            // Full regex: /^\s*\*\*([^*]+)\*\*[:\s]*$/ -> No, because of leading dash?
+            // Start regex: /^[\s\-\u2022\d\.]*\*\*([^*]+)\*\*/ -> Yes
+            // Result: "- Dash Title"
+            expect(result[2].type).toBe('HEADING_6');
+            expect(result[2].text).toBe('- Dash Title');
+
+            expect(result[3].type).toBe('NORMAL_TEXT');
+        });
+
+        it('should promote Paragraphs that look like headings (Full Bold)', () => {
+            const html = `
+        <html>
+          <body>
+            <p><strong>Actual Heading</strong></p>
+            <p><strong>Heading with Colon:</strong></p>
+          </body>
+        </html>
+      `;
+            const result = parseDocStructure(html);
+
+            expect(result[0].type).toBe('HEADING_6');
+            expect(result[0].text).toBe('Actual Heading'); // Markers removed
+
+            expect(result[1].type).toBe('HEADING_6');
+            expect(result[1].text).toBe('Heading with Colon'); // Colon removed by Full Bold Logic
+        });
     });
 
     describe('fetchDocHandler', () => {

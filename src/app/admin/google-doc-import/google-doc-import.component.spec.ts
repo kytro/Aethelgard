@@ -58,12 +58,12 @@ describe('GoogleDocImportComponent', () => {
         const roots = component.rootNodes();
         expect(roots.length).toBe(1); // One root: Chapter 1
         expect(roots[0].text).toBe('Chapter 1');
-        expect(roots[0].pathString).toBe('Chapter 1');
+        expect(roots[0].pathString).toBe('Chapter_1');
         expect(roots[0].children.length).toBe(1); // Section A
 
         const child = roots[0].children[0];
         expect(child.text).toBe('Section A');
-        expect(child.pathString).toBe('Chapter 1/Section A'); // Default path
+        expect(child.pathString).toBe('Chapter_1/Section_A'); // Default path
     });
 
     it('should update child paths when parent path changes (unless manual)', async () => {
@@ -206,6 +206,33 @@ describe('GoogleDocImportComponent', () => {
 
             const savedPayload = putSpy.mock.calls[0][1] as any[];
             expect(savedPayload[0].content.length).toBe(0);
+        });
+        it('should add non-page items as paragraphs (not headings) to parent page', () => {
+            const rootNode: ImportNode = {
+                id: 'root', text: 'Page Title', level: 1, content: [], children: [],
+                isPage: true, isExcluded: false, pathString: 'PageTitle', isManual: false, expanded: true
+            };
+
+            // Child node that is NOT a page (e.g. just a list item acting as content)
+            const contentNode: ImportNode = {
+                id: 'c1', text: 'Some content item', level: 2, content: [], children: [],
+                isPage: false, isExcluded: false, pathString: 'PageTitle/Content', isManual: false, expanded: true
+            };
+
+            rootNode.children.push(contentNode);
+
+            component.rootNodes.set([rootNode]);
+            component.generatePreview();
+
+            const drafts = component.previewPages();
+            expect(drafts.length).toBe(1);
+
+            const page = drafts[0];
+            expect(page.content.length).toBe(1);
+
+            // THE CRITICAL CHECK: Type should be 'paragraph', not 'heading'
+            expect(page.content[0].text).toBe('Some content item');
+            expect(page.content[0].type).toBe('paragraph');
         });
     });
 });
