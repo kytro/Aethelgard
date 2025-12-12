@@ -32,13 +32,16 @@ export class BackupRestoreComponent {
     this.isBackupError.set(false);
     try {
       const data = await lastValueFrom(this.http.get('api/admin/backup', { responseType: 'blob' }));
-      const blob = new Blob([data], { type: 'application/json' });
+
+      // Update blob type to zip
+      const blob = new Blob([data], { type: 'application/zip' });
 
       // Create a temporary link to trigger the download
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `codex_backup_${new Date().toISOString().slice(0, 10)}.json`;
+      // [UPDATE] Use .zip extension
+      a.download = `codex_backup_${new Date().toISOString().slice(0, 10)}.zip`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

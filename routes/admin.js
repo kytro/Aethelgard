@@ -51,22 +51,11 @@ module.exports = function (db) {
                     beastiaryData = documents.map(({ _id, ...rest }) => ({ _id: _id.toString(), ...rest }));
                 }
                 else if (collectionName === 'codex_entries' && documents.length > 0) {
-                    // For codex entries, we often map ID to string, but generally just storing as array is fine
-                    // The original logic mapped _id away but let's keep consistent ID handling if possible
-                    // Original logic: documents.map(({ _id, ...rest }) => rest); losing IDs? 
-                    // Wait, previous logic lost IDs for codex_entries? "documents.map(({ _id, ...rest }) => rest);"
-                    // Let's preserve IDs properly for all to ensure restore works better
-
-                    // ACTUALLY: The previous logic for codex_entries was: 
-                    // backupData['codex_entries.json'] = entriesArray; (where entriesArray was rest without _id)
-                    // If we want to support restore, losing IDs might be intended if they are re-generated?
-                    // But for restore, we usually need IDs or unique keys.
-                    // Let's stick to the previous pattern for 'codex_entries' if that was specific,
-                    // BUT 'entities_pf1e' definitely needs IDs.
-
-                    const entriesArray = documents.map(({ _id, ...rest }) => rest);
+                    // Store as array, PRESERVING _id for integrity
+                    const entriesArray = documents.map(({ _id, ...rest }) => ({ _id: _id.toString(), ...rest }));
                     dataJson['codex_entries.json'] = entriesArray;
                 } else {
+                    // Standard Key-Value storage for other collections
                     const collectionObject = {};
                     documents.forEach(doc => {
                         const { _id, ...docContent } = doc;
