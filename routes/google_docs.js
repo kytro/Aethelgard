@@ -100,7 +100,7 @@ function parseDocStructure(html) {
                 type = 'HEADING_6';
                 text = text.replace(/\*\*/g, '').replace(/:$/, '').trim();
             }
-            else if (tag === 'li' && listStartBoldRegex.test(text)) {
+            else if (listStartBoldRegex.test(text)) {
                 // Promote list items starting with bold to headings
                 type = 'HEADING_6';
                 // Remove bold markers but keep the rest of the text (e.g. "(Canteen)")
