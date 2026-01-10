@@ -231,6 +231,9 @@ describe('NpcGeneratorComponent', () => {
     });
     describe('Detail Generation', () => {
         it('should pass extended context (description, backstory, etc.) to generate-npc-details API', async () => {
+            component.npcGenQuery = 'Two clerics with mechanical augments';
+            component.npcGenContext = 'City of brass setting, steampunk elements';
+
             component.lastGeneratedNpcs.set([
                 createMockGeneratedNpc({
                     name: 'Cleric',
@@ -259,6 +262,10 @@ describe('NpcGeneratorComponent', () => {
                 alignment: 'Lawful Neutral',
                 deity: 'Brigh'
             }));
+
+            // Verify generation prompt and context are passed
+            expect(body.options.generationPrompt).toBe('Two clerics with mechanical augments');
+            expect(body.options.generationContext).toBe('City of brass setting, steampunk elements');
 
             req.flush({ baseStats: { Str: 14 } });
         });
@@ -337,6 +344,40 @@ describe('NpcGeneratorComponent', () => {
             const input = { cmb: '++6' };
             const result = component.normalizeNpcDetails(input);
             expect(result.cmb).toBe(6);
+        });
+
+        it('should normalize deep baseStats objects (Ability Scores)', () => {
+            const input = {
+                baseStats: {
+                    Str: { value: 18 },
+                    Dex: { total: 14 },
+                    Con: 16
+                }
+            };
+            const result = component.normalizeNpcDetails(input);
+            expect(result.baseStats.Str).toBe(18);
+            expect(result.baseStats.Dex).toBe(14);
+            expect(result.baseStats.Con).toBe(16);
+        });
+
+        it('should normalize complex AC object and extract components', () => {
+            const input = {
+                ac: {
+                    total: 22,
+                    touch: 12,
+                    flatFooted: 22
+                }
+            };
+            const result = component.normalizeNpcDetails(input);
+            expect(result.ac).toBe(22);
+            expect(result.acTouch).toBe(12);
+            expect(result.acFlatFooted).toBe(22);
+        });
+
+        it('should fallback normalize AC if no total/value present', () => {
+            const input = { ac: { unknownKey: 15 } };
+            const result = component.normalizeNpcDetails(input);
+            expect(result.ac).toBe(15);
         });
     });
 });

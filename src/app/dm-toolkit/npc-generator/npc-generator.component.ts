@@ -1,4 +1,4 @@
-import { Component, signal, inject, input } from '@angular/core';
+import { Component, signal, inject, input, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
@@ -59,6 +59,8 @@ interface GeneratedNpc {
     sr?: number;
     resist?: string;
     immune?: string;
+    attacks?: { name: string; bonus: string; damage: string; type?: string }[];
+    vulnerabilities?: string[];
     spellSaveDc?: number;
     // UI state flags
     detailsGenerated?: boolean;
@@ -87,6 +89,28 @@ interface GeneratedNpc {
             <div class="mb-4">
               <label class="block text-sm font-medium text-gray-400 mb-1">Context</label>
               <textarea [(ngModel)]="npcGenContext" placeholder="e.g., They are operating in the Whisperwood Forest, known for their ruthless ambushes." class="w-full h-32 bg-gray-900 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"></textarea>
+            </div>
+            <div class="mb-4 relative">
+              <label class="block text-sm font-medium text-gray-400 mb-1">Context Page (Optional)</label>
+              <input type="text" 
+                     [ngModel]="npcGenContextSource"
+                     (input)="searchContextPaths($event)"
+                     (focus)="searchContextPaths($event)"
+                     (blur)="closeDropdown()"
+                     placeholder="Search Codex for context..." 
+                     class="w-full bg-gray-900 border border-gray-600 rounded-md p-2 text-white focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                     autocomplete="off">
+              
+              @if (showContextDropdown) {
+                <ul class="absolute z-10 w-full bg-gray-800 border border-gray-600 rounded-md mt-1 max-h-48 overflow-y-auto shadow-lg">
+                    @for (path of filteredPaths; track path) {
+                        <li (click)="selectContextPath(path)" class="p-2 hover:bg-gray-700 cursor-pointer text-gray-200 text-sm border-b border-gray-700 last:border-b-0">
+                            {{ path }}
+                        </li>
+                    }
+                </ul>
+              }
+              <p class="text-xs text-gray-500 mt-1">Select a Codex page to include its content and links as context.</p>
             </div>
             <button (click)="handleGenerateNpcs()" [disabled]="isGeneratingNpcs()" class="bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:bg-gray-500">
               {{ isGeneratingNpcs() ? 'Generating...' : 'Generate NPCs' }}
@@ -304,6 +328,13 @@ export class NpcGeneratorComponent {
 
     npcGenQuery = '';
     npcGenContext = '';
+    npcGenContextSource = '';
+
+    // Type-ahead state
+    codexPaths: string[] = [];
+    filteredPaths: string[] = [];
+    showContextDropdown = false;
+
     npcGenGroupName = 'People/';
     isGeneratingNpcs = signal(false);
     isSavingNpcs = signal(false);
@@ -312,6 +343,14 @@ export class NpcGeneratorComponent {
     npcSaveSuccessMessage = signal('');
 
     objectKeys = Object.keys;
+
+    constructor() {
+        effect(() => {
+            if (this.codex()) {
+                this.updateCodexPaths();
+            }
+        });
+    }
 
     formatItems(items: (string | EquipmentItem)[]): string {
         return items.map(item => typeof item === 'string' ? item : item.name).join(', ');
@@ -365,7 +404,9 @@ export class NpcGeneratorComponent {
                         gender: npc.gender,
                         alignment: npc.alignment,
                         deity: npc.deity
-                    }
+                    },
+                    generationPrompt: this.npcGenQuery,
+                    generationContext: this.npcGenContext
                 }
             }));
 
@@ -588,10 +629,10 @@ export class NpcGeneratorComponent {
             };
         }
 
-        if (npc.dr) entity.baseStats.dr = npc.dr;
-        if (npc.sr) entity.baseStats.sr = npc.sr;
-        if (npc.resist) entity.baseStats.resist = npc.resist;
-        if (npc.immune) entity.baseStats.immune = npc.immune;
+        if (npc.dr && npc.dr !== '-') entity.baseStats.DR = npc.dr;
+        if (npc.sr) entity.baseStats.SR = npc.sr;
+        if (npc.resist && npc.resist !== '-') entity.baseStats.Resist = npc.resist;
+        if (npc.immune && npc.immune !== '-') entity.baseStats.Immune = npc.immune;
 
         if (npc.skills && Object.keys(npc.skills).length > 0) {
             entity.baseStats.skills = npc.skills;
@@ -604,6 +645,8 @@ export class NpcGeneratorComponent {
 
         if (npc.spellSlots) entity.spell_slots = npc.spellSlots;
         if (npc.specialAbilities?.length) entity.special_abilities = npc.specialAbilities;
+        if (npc.attacks?.length) entity.attacks = npc.attacks;
+        if (npc.vulnerabilities?.length) entity.vulnerabilities = npc.vulnerabilities;
 
         // Save entity first
         const entityResult = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
@@ -630,42 +673,173 @@ export class NpcGeneratorComponent {
         this.npcSaveSuccessMessage.set('');
 
         try {
-            const codexData = this.codex();
-
-            // Build broader world context from multiple codex sections
-            const worldContext: any = {
-                userContext: this.npcGenContext,
-                targetPath: this.npcGenGroupName // Where the NPCs will be placed
-            };
-
-            // Include key world-building sections if they exist
-            if (codexData) {
-                if (codexData['Places']) worldContext.places = codexData['Places'];
-                if (codexData['Factions']) worldContext.factions = codexData['Factions'];
-                if (codexData['Organizations']) worldContext.organizations = codexData['Organizations'];
-                if (codexData['History']) worldContext.history = codexData['History'];
-                if (codexData['Lore']) worldContext.lore = codexData['Lore'];
-                if (codexData['Religions']) worldContext.religions = codexData['Religions'];
-                if (codexData['Deities']) worldContext.deities = codexData['Deities'];
-                if (codexData['People']) worldContext.existingPeople = codexData['People'];
+            // Build broader world context
+            let smartContext = '';
+            if (this.npcGenContextSource.trim()) {
+                smartContext = this.buildSmartContext(this.npcGenContextSource.trim(), this.codex());
             }
+
+            const worldContext: any = {
+                userContext: this.npcGenContext + (smartContext ? `\n\n--- EXTRACTED KNOWLEDGE ---\n${smartContext}` : ''),
+                targetPath: this.npcGenGroupName
+            };
 
             const npcs = await lastValueFrom(this.http.post<GeneratedNpc[]>('/codex/api/dm-toolkit-ai/generate-npcs', {
                 query: this.npcGenQuery,
-                options: {
-                    codex: worldContext,
-                    existingEntityNames: this.existingEntityNames()
-                }
+                options: worldContext
             }));
 
             this.lastGeneratedNpcs.set(npcs);
             this.lastGeneratedGroupName.set(this.npcGenGroupName);
-        } catch (e: any) {
-            console.error("Error generating NPCs:", e);
-            this.npcSaveSuccessMessage.set(`Error: ${e.error?.error || e.message}`);
-        } finally {
             this.isGeneratingNpcs.set(false);
+            this.npcSaveSuccessMessage.set(`Generated ${npcs.length} NPCs.`);
+
+        } catch (error) {
+            console.error('Error generating NPCs:', error);
+            this.isGeneratingNpcs.set(false);
+            this.npcSaveSuccessMessage.set('Error generating NPCs. See console.');
         }
+    }
+
+    // --- Smart Context Builder ---
+    private buildSmartContext(sourcePath: string, codex: any): string {
+        const rootNode = this.findNodeByPath(sourcePath, codex);
+        if (!rootNode) return `Could not find context source: ${sourcePath}`;
+
+        const visited = new Set<string>();
+        const contextParts: string[] = [];
+
+        this.traverseContext(rootNode, sourcePath, visited, contextParts, 0);
+
+        return contextParts.join('\n\n');
+    }
+
+    private findNodeByPath(path: string, codex: any): any {
+        // Handle "Category/Item" or "Category" paths
+        const parts = path.split('/').filter(p => p);
+        let node = codex;
+        for (const part of parts) {
+            if (node && node[part]) {
+                node = node[part];
+            } else {
+                return null;
+            }
+        }
+        return node;
+    }
+
+    private traverseContext(node: any, path: string, visited: Set<string>, output: string[], depth: number) {
+        if (!node || visited.has(path) || depth > 2) return; // Limit depth to 2 (Page -> Linked Page -> Nothing else)
+        visited.add(path);
+
+        // 1. Add this node's description/content
+        let summary = node.description || node.summary || node.content || '';
+        if (typeof summary !== 'string') summary = String(summary);
+
+        if (summary) {
+            output.push(`[Source: ${path}]\n${summary.substring(0, 1000)}...`); // Limit length per item
+        }
+
+        // 2. Find WikiLinks [[Link]]
+        // Regex to find [[Link]] inside the content
+        const linkRegex = /\[\[(.*?)\]\]/g;
+        let match;
+        while ((match = linkRegex.exec(summary)) !== null) {
+            const linkName = match[1];
+            // Try to find this linked item in the codex (Basic search)
+            const linkedPath = this.findPathForName(linkName, this.codex());
+            if (linkedPath) {
+                const linkedNode = this.findNodeByPath(linkedPath, this.codex());
+                if (linkedNode && !visited.has(linkedPath)) {
+                    this.traverseContext(linkedNode, linkedPath, visited, output, depth + 1);
+                }
+            }
+        }
+
+        // 3. Go down the branch (Children) - Only if it's the Root or depth 0
+        if (depth === 0) {
+            const children = Object.keys(node).filter(k => typeof node[k] === 'object' && k !== 'baseStats' && k !== 'rules');
+            for (const childKey of children) {
+                this.traverseContext(node[childKey], `${path}/${childKey}`, visited, output, depth + 1);
+            }
+        }
+    }
+
+    private findPathForName(name: string, node: any, currentPath: string = ''): string | null {
+        // DFS search for a node with matching key (name)
+        if (!node) return null;
+        for (const key of Object.keys(node)) {
+            if (key.toLowerCase() === name.toLowerCase()) return currentPath ? `${currentPath}/${key}` : key;
+            if (typeof node[key] === 'object') {
+                const found = this.findPathForName(name, node[key], currentPath ? `${currentPath}/${key}` : key);
+                if (found) return found;
+            }
+        }
+        return null;
+    }
+
+    // --- Type-ahead Logic ---
+
+    // Call this when codex input changes or on init
+    updateCodexPaths() {
+        if (this.codex()) {
+            this.codexPaths = this.flattenCodexPaths(this.codex());
+        }
+    }
+
+    private flattenCodexPaths(node: any, currentPath = ''): string[] {
+        let paths: string[] = [];
+        if (!node) return paths;
+
+        for (const key of Object.keys(node)) {
+            // Skip system keys
+            if (key === 'baseStats' || key === 'rules' || key === 'spells' || key === 'equipment') continue;
+
+            // Null check - skip if node[key] is null or undefined
+            if (!node[key]) continue;
+
+            const newPath = currentPath ? `${currentPath}/${key}` : key;
+
+            // If it has content/description/summary, it's a valid page
+            if (node[key].description || node[key].content || node[key].summary) {
+                paths.push(newPath);
+            }
+
+            // Recurse regardless (categories might not have content but contain pages)
+            if (typeof node[key] === 'object') {
+                paths = [...paths, ...this.flattenCodexPaths(node[key], newPath)];
+            }
+        }
+        return paths;
+    }
+
+    searchContextPaths(event: Event) {
+        const query = (event.target as HTMLInputElement).value.toLowerCase();
+        this.npcGenContextSource = (event.target as HTMLInputElement).value;
+
+        if (!query) {
+            this.filteredPaths = [];
+            this.showContextDropdown = false;
+            return;
+        }
+
+        if (this.codexPaths.length === 0) this.updateCodexPaths();
+
+        this.filteredPaths = this.codexPaths
+            .filter(path => path.toLowerCase().includes(query))
+            .slice(0, 10); // Limit results
+
+        this.showContextDropdown = this.filteredPaths.length > 0;
+    }
+
+    selectContextPath(path: string) {
+        this.npcGenContextSource = path;
+        this.showContextDropdown = false;
+    }
+
+    closeDropdown() {
+        // Small delay to allow click event to register
+        setTimeout(() => this.showContextDropdown = false, 200);
     }
 
     async handleSaveNpcsToCodex() {
@@ -784,6 +958,9 @@ export class NpcGeneratorComponent {
                 if (npc.resist && npc.resist !== '-') entity.baseStats.Resist = npc.resist;
                 if (npc.immune && npc.immune !== '-') entity.baseStats.Immune = npc.immune;
                 if (npc.skills) entity.baseStats.skills = npc.skills;
+                if (npc.specialAbilities?.length) entity.special_abilities = npc.specialAbilities;
+                if (npc.attacks?.length) entity.attacks = npc.attacks;
+                if (npc.vulnerabilities?.length) entity.vulnerabilities = npc.vulnerabilities;
 
                 const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
 
@@ -826,21 +1003,63 @@ export class NpcGeneratorComponent {
     public normalizeNpcDetails(details: any): any {
         const normalized = { ...details };
 
-        // Helper to extract value from object
+        // Recursive helper to extract values
         const extractValue = (val: any): any => {
-            if (val && typeof val === 'object' && !Array.isArray(val)) {
-                return val.value || val.total || val.text || JSON.stringify(val);
+            if (val === null || val === undefined) return val;
+            if (Array.isArray(val)) return val.map(extractValue);
+            if (typeof val === 'object') {
+                // Known specific keys to prefer
+                if (val.total !== undefined) return val.total;
+                if (val.value !== undefined) return val.value;
+                if (val.text !== undefined) return val.text;
+                // If it's just a wrapper (e.g. { Str: { value: 18 } })
+                const keys = Object.keys(val);
+                if (keys.length === 1 && (keys[0] === 'value' || keys[0] === 'total')) return val[keys[0]];
+
+                // Otherwise return object as is (it might be a map like spells)
+                return val;
             }
             return val;
         };
 
-        // Normalize HP
+        // Normalize Base Stats (Ability Scores often come as objects)
+        if (normalized.baseStats) {
+            Object.keys(normalized.baseStats).forEach(key => {
+                const val = normalized.baseStats[key];
+                if (key === 'hp' || key === 'HP') {
+                    // HP might be a string "45 (5d8...)" or object { value: 45, formula: "..." }
+                    normalized.baseStats[key] = String(extractValue(val));
+                } else if (typeof val === 'object') {
+                    // Try to extract primitive for things like Str, Dex
+                    const extracted = extractValue(val);
+                    if (typeof extracted !== 'object') {
+                        normalized.baseStats[key] = extracted;
+                    }
+                }
+            });
+        }
+
+        // Normalize HP (root level if exists)
         if (normalized.hp) normalized.hp = String(extractValue(normalized.hp));
 
         // Normalize AC
         if (normalized.ac) {
-            const val = extractValue(normalized.ac);
-            normalized.ac = typeof val === 'number' ? val : parseInt(val) || 0;
+            if (typeof normalized.ac === 'object') {
+                const acObj = normalized.ac;
+                // Extract main value
+                normalized.ac = extractValue(acObj);
+
+                // Preserve side components if they exist in the object
+                if (acObj.touch !== undefined) normalized.acTouch = extractValue(acObj.touch);
+                if (acObj.flatFooted !== undefined) normalized.acFlatFooted = extractValue(acObj.flatFooted);
+
+                // Fallback: If extractValue returned an object (no total/value), try parsing or default
+                if (typeof normalized.ac === 'object') {
+                    normalized.ac = parseInt(String(Object.values(normalized.ac)[0])) || 10;
+                }
+            } else {
+                normalized.ac = parseInt(String(normalized.ac)) || 10;
+            }
         }
 
         // Normalize Special Abilities
@@ -861,9 +1080,6 @@ export class NpcGeneratorComponent {
 
         if (normalized.bab !== undefined) normalized.bab = typeof normalized.bab === 'string' ? parseInt(cleanSign(normalized.bab)) : normalized.bab;
         if (normalized.cmb !== undefined) normalized.cmb = typeof normalized.cmb === 'string' ? parseInt(cleanSign(normalized.cmb)) : normalized.cmb;
-        // Note: CMB/CMD often come as string "X" or "+X", but entity typically wants number. 
-        // If the AI sends "+6/16", we might need to handle grapple/trip variants? 
-        // For now, simpler number extraction.
 
         return normalized;
     }

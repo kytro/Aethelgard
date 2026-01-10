@@ -588,4 +588,176 @@ describe('CodexComponent', () => {
             expect(component.isAddingPage()).toBe(false);
         });
     });
+
+    describe('Special Abilities', () => {
+        beforeEach(async () => {
+            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
+            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
+            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
+            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            await fixture.whenStable();
+            fixture.detectChanges();
+        });
+
+        it('should return empty array when entity has no special abilities', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            delete entity['special_abilities'];
+
+            const abilities = component.getSpecialAbilities(entity);
+
+            expect(abilities).toEqual([]);
+        });
+
+        it('should return special abilities from entity', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['special_abilities'] = ['Darkvision 60 ft.', 'Scent'];
+
+            const abilities = component.getSpecialAbilities(entity);
+
+            expect(abilities).toEqual(['Darkvision 60 ft.', 'Scent']);
+        });
+
+        it('should add a new special ability', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['special_abilities'] = [];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            const mockInput = { value: 'Tremorsense 30 ft.' } as HTMLTextAreaElement;
+            component.addSpecialAbility(entity, mockInput);
+
+            expect(entity['special_abilities']).toContain('Tremorsense 30 ft.');
+            expect(component.modifiedEntities().has(entity._id)).toBe(true);
+            expect(mockInput.value).toBe('');
+        });
+
+        it('should create special_abilities array if not exists', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            delete entity['special_abilities'];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            const mockInput = { value: 'Blindsense 20 ft.' } as HTMLTextAreaElement;
+            component.addSpecialAbility(entity, mockInput);
+
+            expect(entity['special_abilities']).toEqual(['Blindsense 20 ft.']);
+        });
+
+        it('should not add empty special ability', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['special_abilities'] = [];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            const mockInput = { value: '   ' } as HTMLTextAreaElement;
+            component.addSpecialAbility(entity, mockInput);
+
+            expect(entity['special_abilities'].length).toBe(0);
+        });
+
+        it('should remove special ability by index', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['special_abilities'] = ['Darkvision 60 ft.', 'Scent', 'Tremorsense 30 ft.'];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            component.removeSpecialAbility(entity, 1);
+
+            expect(entity['special_abilities']).toEqual(['Darkvision 60 ft.', 'Tremorsense 30 ft.']);
+            expect(component.modifiedEntities().has(entity._id)).toBe(true);
+        });
+
+        it('should update special ability text', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['special_abilities'] = ['Old Ability Text'];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            const mockEvent = { target: { innerText: 'New Ability Text' } };
+            component.handleSpecialAbilityUpdate(entity, 0, mockEvent);
+
+            expect(entity['special_abilities'][0]).toBe('New Ability Text');
+            expect(component.modifiedEntities().has(entity._id)).toBe(true);
+        });
+    });
+
+    describe('Vulnerabilities', () => {
+        beforeEach(async () => {
+            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
+            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
+            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
+            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            await fixture.whenStable();
+            fixture.detectChanges();
+        });
+
+        it('should return empty array when entity has no vulnerabilities', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            delete entity['vulnerabilities'];
+
+            const vulns = component.getVulnerabilities(entity);
+
+            expect(vulns).toEqual([]);
+        });
+
+        it('should return vulnerabilities from entity', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['vulnerabilities'] = ['Cold', 'Fire'];
+
+            const vulns = component.getVulnerabilities(entity);
+
+            expect(vulns).toEqual(['Cold', 'Fire']);
+        });
+
+        it('should add a new vulnerability', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['vulnerabilities'] = [];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            const mockInput = { value: 'Electricity' } as HTMLInputElement;
+            component.addVulnerability(entity, mockInput);
+
+            expect(entity['vulnerabilities']).toContain('Electricity');
+            expect(component.modifiedEntities().has(entity._id)).toBe(true);
+            expect(mockInput.value).toBe('');
+        });
+
+        it('should create vulnerabilities array if not exists', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            delete entity['vulnerabilities'];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            const mockInput = { value: 'Sonic' } as HTMLInputElement;
+            component.addVulnerability(entity, mockInput);
+
+            expect(entity['vulnerabilities']).toEqual(['Sonic']);
+        });
+
+        it('should remove vulnerability by index', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['vulnerabilities'] = ['Cold', 'Fire', 'Acid'];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            component.removeVulnerability(entity, 1);
+
+            expect(entity['vulnerabilities']).toEqual(['Cold', 'Acid']);
+            expect(component.modifiedEntities().has(entity._id)).toBe(true);
+        });
+
+        it('should update vulnerability text', () => {
+            const entity = JSON.parse(JSON.stringify(MOCK_ENTITY));
+            entity['vulnerabilities'] = ['Cold'];
+            component.linkedEntities.set([entity]);
+            component.isEditMode.set(true);
+
+            const mockEvent = { target: { innerText: 'Cold (double damage)' } };
+            component.handleVulnerabilityUpdate(entity, 0, mockEvent);
+
+            expect(entity['vulnerabilities'][0]).toBe('Cold (double damage)');
+            expect(component.modifiedEntities().has(entity._id)).toBe(true);
+        });
+    });
 });

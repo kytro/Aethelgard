@@ -17,7 +17,7 @@ interface Combatant { _id: string; fightId: string; name: string; initiative: nu
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
-interface CombatantWithModifiers extends Combatant { baseStats: any; modifiedStats: any; initiativeMod: number; attacks: ParsedAttack[]; allFeats: any[]; equipment: any[]; magicItems: any[]; spells: Spell[]; skills: { [key: string]: number }; }
+interface CombatantWithModifiers extends Combatant { baseStats: any; modifiedStats: any; initiativeMod: number; attacks: ParsedAttack[]; allFeats: any[]; equipment: any[]; magicItems: any[]; spells: Spell[]; skills: { [key: string]: number }; specialAbilities: string[]; vulnerabilities: string[]; }
 interface FoundCreature { id: string; name: string; cr: string; stats: string; hp: string; }
 interface CacheEntry { status: 'idle' | 'loading' | 'loaded' | 'error'; data: any; }
 interface CascadingDropdown { level: number; options: string[]; }
@@ -963,7 +963,10 @@ export class CombatManagerComponent {
       }
 
 
-      return { ...c, baseStats, modifiedStats, initiativeMod, attacks: allAttacks, allFeats, equipment, magicItems, spells, skills };
+      const specialAbilities = entity?.special_abilities || [];
+      const vulnerabilities = entity?.vulnerabilities || [];
+
+      return { ...c, baseStats, modifiedStats, initiativeMod, attacks: allAttacks, allFeats, equipment, magicItems, spells, skills, specialAbilities, vulnerabilities };
     }).sort((a, b) => {
       const initA = a.initiative || 0;
       const initB = b.initiative || 0;

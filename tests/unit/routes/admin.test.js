@@ -62,33 +62,41 @@ describe('Admin Routes (Backup/Restore)', () => {
     });
 
     describe('GET /admin/backup', () => {
-        it('should generate a ZIP file containing beastiary.json, codex.json and data.json', async () => {
-            // ... setup ...
+        it('should generate a ZIP file containing main.json, bestiary.json and data.json', async () => {
+            // Setup mock collections
             mockDb._listCollectionsToArrayMock.mockResolvedValue([
                 { name: 'entities_pf1e' },
                 { name: 'codex_entries' },
-                { name: 'rules_pf1e' }
+                { name: 'rules_pf1e' },
+                { name: 'dm_toolkit_fights' },
+                { name: 'dm_toolkit_sessions' }
             ]);
 
-
-            const mockBeastiary = [{ _id: 'b1', name: 'Beast 1' }];
-            const mockCodex = [{ _id: 'c1', title: 'Codex 1' }]; // Mock data
+            const mockEntities = [{ _id: 'e1', name: 'Goblin' }];
+            const mockCodex = [
+                { _id: 'c1', title: 'World Lore', path_components: ['Lore', 'World'] },
+                { _id: 'c2', title: 'Goblin', path_components: ['Bestiary', 'Humanoid', 'Goblin'] }
+            ];
             const mockRules = [{ _id: 'r1', name: 'Rule 1' }];
+            const mockFights = [{ _id: 'f1', name: 'Ambush', combatants: [] }];
+            const mockSessions = [{ _id: 's1', title: 'Session 1', notes: 'Started adventure' }];
 
-            // Mock implementation for different collections
-            // We need to add codex_entries to mock collections or ensure default handles it
-            // Current setup in beforeEach has specific mocks for entities and rules, others get default.
-            // Let's rely on default or add specific if we want to spy.
-
-            // Add specific spy for codex_entries
+            // Mock collections
             const mockCodexCollection = {
                 find: jest.fn().mockReturnThis(),
                 toArray: jest.fn().mockResolvedValue(mockCodex)
             };
+            const mockFightsCollection = {
+                find: jest.fn().mockReturnThis(),
+                toArray: jest.fn().mockResolvedValue(mockFights)
+            };
+            const mockSessionsCollection = {
+                find: jest.fn().mockReturnThis(),
+                toArray: jest.fn().mockResolvedValue(mockSessions)
+            };
             mockDb.collection.mockImplementation((name) => {
                 if (name === 'entities_pf1e') {
-                    // Override find/toArray but keep others just in case
-                    mockCollections.entities_pf1e.toArray.mockResolvedValue(mockBeastiary);
+                    mockCollections.entities_pf1e.toArray.mockResolvedValue(mockEntities);
                     return mockCollections.entities_pf1e;
                 }
                 if (name === 'rules_pf1e') {
@@ -96,6 +104,8 @@ describe('Admin Routes (Backup/Restore)', () => {
                     return mockCollections.rules_pf1e;
                 }
                 if (name === 'codex_entries') return mockCodexCollection;
+                if (name === 'dm_toolkit_fights') return mockFightsCollection;
+                if (name === 'dm_toolkit_sessions') return mockSessionsCollection;
                 return { find: jest.fn().mockReturnThis(), toArray: jest.fn().mockResolvedValue([]) };
             });
 
@@ -119,49 +129,60 @@ describe('Admin Routes (Backup/Restore)', () => {
             const zipBuffer = response.body;
             const zip = await JSZip.loadAsync(zipBuffer);
 
-            expect(Object.keys(zip.files)).toContain('beastiary.json');
-            expect(Object.keys(zip.files)).toContain('codex.json'); // Verify new file
+            expect(Object.keys(zip.files)).toContain('main.json');
+            expect(Object.keys(zip.files)).toContain('bestiary.json');
             expect(Object.keys(zip.files)).toContain('data.json');
 
-            const beastiaryContent = await zip.file('beastiary.json').async('string');
-            expect(JSON.parse(beastiaryContent)).toEqual(mockBeastiary);
+            // Verify main.json contains non-Bestiary codex entries, fights, and sessions
+            const mainContent = await zip.file('main.json').async('string');
+            const mainData = JSON.parse(mainContent);
+            expect(mainData.codex).toHaveLength(1);
+            expect(mainData.codex[0].path_components[0]).toBe('Lore');
+            expect(mainData.fights).toHaveLength(1);
+            expect(mainData.fights[0].name).toBe('Ambush');
+            expect(mainData.sessions).toHaveLength(1);
+            expect(mainData.sessions[0].title).toBe('Session 1');
 
-            const codexContent = await zip.file('codex.json').async('string');
-            expect(JSON.parse(codexContent)).toEqual(mockCodex);
+            // Verify bestiary.json contains Bestiary codex entries and entities
+            const bestiaryContent = await zip.file('bestiary.json').async('string');
+            const bestiaryData = JSON.parse(bestiaryContent);
+            expect(bestiaryData.codex).toHaveLength(1);
+            expect(bestiaryData.codex[0].path_components[0]).toBe('Bestiary');
+            expect(bestiaryData.entities).toHaveLength(1);
+            expect(bestiaryData.entities[0].name).toBe('Goblin');
 
+            // Verify data.json contains other collections
             const dataContent = await zip.file('data.json').async('string');
             const dataObj = JSON.parse(dataContent);
-            expect(dataObj).toHaveProperty('rules_pf1e.json');
-
-            // data.json structure is Object with ID keys
-            const rulesData = dataObj['rules_pf1e.json'];
-            expect(rulesData['r1']).toEqual({ name: 'Rule 1' }); // _id stripped in non-beastiary default logic?
-            // Re-checking implementation: 
-            // "documents.forEach(doc => { const { _id, ...docContent } = doc; collectionObject[_id.toString()] = docContent; });"
-            // Yes, _id is key, content is value.
+            expect(Object.keys(dataObj)).toContain('rules_pf1e.json');
+            expect(dataObj['rules_pf1e.json']['r1']).toEqual({ name: 'Rule 1' });
         });
     });
 
     // NOTE: Testing POST with file upload via supertest works well
     describe('POST /admin/restore', () => {
-        it('should restore from a valid ZIP file', async () => {
-            // Create a real ZIP buffer
+        it('should restore from new format ZIP file (main.json + bestiary.json)', async () => {
+            // Create a real ZIP buffer with NEW format
             const zip = new JSZip();
-            const mockBeastiary = [{ _id: 'b1', name: 'Beast 1' }];
-            const mockCodex = [{ _id: 'c1', title: 'Codex 1' }];
-            const mockRules = [{ _id: 'r1', name: 'Rule 1' }];
 
-            zip.file('beastiary.json', JSON.stringify(mockBeastiary));
-            zip.file('codex.json', JSON.stringify(mockCodex));
-
-            const backupData = {
-                'rules_pf1e.json': { 'r1': { name: 'Rule 1' } } // Matches format inside data.json -> rules_pf1e.json
+            const mainData = {
+                codex: [{ _id: 'c1', title: 'World Lore', path_components: ['Lore', 'World'] }]
             };
-            zip.file('data.json', JSON.stringify(backupData));
+            const bestiaryData = {
+                codex: [{ _id: 'c2', title: 'Goblin', path_components: ['Bestiary', 'Humanoid', 'Goblin'] }],
+                entities: [{ _id: 'e1', name: 'Goblin' }]
+            };
+            const dataJson = {
+                'rules_pf1e.json': { 'r1': { name: 'Rule 1' } }
+            };
+
+            zip.file('main.json', JSON.stringify(mainData));
+            zip.file('bestiary.json', JSON.stringify(bestiaryData));
+            zip.file('data.json', JSON.stringify(dataJson));
 
             const buffer = await zip.generateAsync({ type: 'nodebuffer' });
 
-            // Setup Mocks for Codex Restore
+            // Setup Mocks
             const defaultResult = { insertedCount: 1, upsertedCount: 0, modifiedCount: 0 };
             const mockCodexCollection = {
                 deleteMany: jest.fn().mockResolvedValue({}),
@@ -183,24 +204,69 @@ describe('Admin Routes (Backup/Restore)', () => {
                 .attach('backupFile', buffer, 'backup.zip')
                 .expect(200);
 
-            // Verify Beastiary Restore
-            expect(mockCollections.entities_pf1e.deleteMany).toHaveBeenCalled(); // Default full restore
+            // Verify Entities Restore
+            expect(mockCollections.entities_pf1e.deleteMany).toHaveBeenCalled();
             expect(mockCollections.entities_pf1e.insertMany).toHaveBeenCalledWith([
-                expect.objectContaining({ _id: 'b1', name: 'Beast 1' }) // String ID converted to string or ObjID?
-                // Logic: (doc._id && ObjectId.isValid(doc._id)) ? new ObjectId(doc._id) : doc._id
-                // 'b2' is not valid ObjectId hex, so it remains string 'b2'
+                expect.objectContaining({ _id: 'e1', name: 'Goblin' })
             ]);
 
-            // Verify Codex Restore
+            // Verify Codex Restore (both main and bestiary codex entries)
             expect(mockCodexCollection.deleteMany).toHaveBeenCalled();
-            expect(mockCodexCollection.insertMany).toHaveBeenCalledWith([
-                expect.objectContaining({ _id: 'c1', title: 'Codex 1' })
-            ]);
+            // insertMany called twice: once for main codex, once for bestiary codex
+            expect(mockCodexCollection.insertMany).toHaveBeenCalledTimes(2);
 
             // Verify Rules Restore
             expect(mockCollections.rules_pf1e.deleteMany).toHaveBeenCalled();
-            expect(mockCollections.rules_pf1e.insertMany).toHaveBeenCalledWith([
-                expect.objectContaining({ _id: expect.anything(), name: 'Rule 1' })
+            expect(mockCollections.rules_pf1e.insertMany).toHaveBeenCalled();
+        });
+
+        it('should restore from legacy format ZIP file (beastiary.json + codex.json)', async () => {
+            // Create a ZIP buffer with LEGACY format
+            const zip = new JSZip();
+            const mockBeastiary = [{ _id: 'b1', name: 'Beast 1' }];
+            const mockCodex = [{ _id: 'c1', title: 'Codex 1' }];
+            const backupData = {
+                'rules_pf1e.json': { 'r1': { name: 'Rule 1' } }
+            };
+
+            zip.file('beastiary.json', JSON.stringify(mockBeastiary));
+            zip.file('codex.json', JSON.stringify(mockCodex));
+            zip.file('data.json', JSON.stringify(backupData));
+
+            const buffer = await zip.generateAsync({ type: 'nodebuffer' });
+
+            // Setup Mocks
+            const defaultResult = { insertedCount: 1, upsertedCount: 0, modifiedCount: 0 };
+            const mockCodexCollection = {
+                deleteMany: jest.fn().mockResolvedValue({}),
+                insertMany: jest.fn().mockResolvedValue(defaultResult),
+                bulkWrite: jest.fn()
+            };
+            mockDb.collection.mockImplementation((name) => {
+                if (name === 'entities_pf1e') return mockCollections.entities_pf1e;
+                if (name === 'rules_pf1e') return mockCollections.rules_pf1e;
+                if (name === 'codex_entries') return mockCodexCollection;
+                return { deleteMany: jest.fn(), insertMany: jest.fn() };
+            });
+
+            mockCollections.entities_pf1e.insertMany.mockResolvedValue({ insertedCount: 1 });
+            mockCollections.rules_pf1e.insertMany.mockResolvedValue({ insertedCount: 1 });
+
+            await request(app)
+                .post('/admin/restore')
+                .attach('backupFile', buffer, 'backup.zip')
+                .expect(200);
+
+            // Verify legacy Beastiary Restore
+            expect(mockCollections.entities_pf1e.deleteMany).toHaveBeenCalled();
+            expect(mockCollections.entities_pf1e.insertMany).toHaveBeenCalledWith([
+                expect.objectContaining({ _id: 'b1', name: 'Beast 1' })
+            ]);
+
+            // Verify legacy Codex Restore
+            expect(mockCodexCollection.deleteMany).toHaveBeenCalled();
+            expect(mockCodexCollection.insertMany).toHaveBeenCalledWith([
+                expect.objectContaining({ _id: 'c1', title: 'Codex 1' })
             ]);
         });
 

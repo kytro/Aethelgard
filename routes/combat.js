@@ -227,5 +227,96 @@ module.exports = function (db) {
         }
     });
 
+    // PATCH /fights/:fightId/next-turn
+    router.patch('/fights/:fightId/next-turn', async (req, res) => {
+        const { fightId } = req.params;
+        try {
+            const query = ObjectId.isValid(fightId) ? { _id: new ObjectId(fightId) } : { _id: fightId };
+            const fight = await db.collection('dm_toolkit_fights').findOne(query);
+            if (!fight) return res.status(404).json({ message: 'Fight not found' });
+
+            const combatants = await db.collection('dm_toolkit_combatants').find({ fightId }).toArray();
+            // Sort by initiative desc
+            combatants.sort((a, b) => (b.initiative || 0) - (a.initiative || 0) || a.name.localeCompare(b.name));
+
+            let nextIndex = (fight.currentTurnIndex || 0) + 1;
+            let nextRound = fight.roundCounter || 1;
+
+            if (nextIndex >= combatants.length) {
+                nextIndex = 0;
+                nextRound++;
+            }
+
+            const updates = {
+                currentTurnIndex: nextIndex,
+                roundCounter: nextRound
+            };
+
+            await db.collection('dm_toolkit_fights').updateOne(query, { $set: updates });
+            const updatedFight = await db.collection('dm_toolkit_fights').findOne(query);
+            res.status(200).json(updatedFight);
+
+        } catch (err) {
+            console.error('[Combat Routes] Error advancing turn:', err);
+            res.status(500).json({ message: 'Failed to advance turn', error: err.message });
+        }
+    });
+
+    // PATCH /fights/:fightId/previous-turn
+    router.patch('/fights/:fightId/previous-turn', async (req, res) => {
+        const { fightId } = req.params;
+        try {
+            const query = ObjectId.isValid(fightId) ? { _id: new ObjectId(fightId) } : { _id: fightId };
+            const fight = await db.collection('dm_toolkit_fights').findOne(query);
+            if (!fight) return res.status(404).json({ message: 'Fight not found' });
+
+            const combatants = await db.collection('dm_toolkit_combatants').find({ fightId }).toArray();
+
+            let prevIndex = (fight.currentTurnIndex || 0) - 1;
+            let prevRound = fight.roundCounter || 1;
+
+            if (prevIndex < 0) {
+                prevRound = Math.max(1, prevRound - 1);
+                prevIndex = Math.max(0, combatants.length - 1);
+            }
+
+            const updates = {
+                currentTurnIndex: prevIndex,
+                roundCounter: prevRound
+            };
+
+            await db.collection('dm_toolkit_fights').updateOne(query, { $set: updates });
+            const updatedFight = await db.collection('dm_toolkit_fights').findOne(query);
+            res.status(200).json(updatedFight);
+
+        } catch (err) {
+            console.error('[Combat Routes] Error reverting turn:', err);
+            res.status(500).json({ message: 'Failed to revert turn', error: err.message });
+        }
+    });
+
+    // PATCH /fights/:fightId/end-combat
+    router.patch('/fights/:fightId/end-combat', async (req, res) => {
+        const { fightId } = req.params;
+        try {
+            const query = ObjectId.isValid(fightId) ? { _id: new ObjectId(fightId) } : { _id: fightId };
+
+            const updates = {
+                combatStartTime: null,
+                roundCounter: 1,
+                currentTurnIndex: 0,
+                active: false
+            };
+
+            await db.collection('dm_toolkit_fights').updateOne(query, { $set: updates });
+            const updatedFight = await db.collection('dm_toolkit_fights').findOne(query);
+            res.status(200).json(updatedFight);
+
+        } catch (err) {
+            console.error('[Combat Routes] Error ending combat:', err);
+            res.status(500).json({ message: 'Failed to end combat', error: err.message });
+        }
+    });
+
     return router;
 };

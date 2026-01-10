@@ -562,19 +562,152 @@ export class CodexComponent implements OnInit {
   getAvailablePages(): CodexEntry[] {
     const all = this.codexData() || [];
     const currentStr = this.formatPath(this.currentPath());
-    // Filter out current page and root categories that might not be linkable if desired,
-    // though linking to categories is probably fine.
-    // Also filter out any that are ALREADY linked.
-    // FIX: Fallback to current node if activeEntry is null (e.g. for Category pages) to allow linking/testing
     const active = this.currentView().activeEntry || this.getNode(this.currentPath());
     if (!active) return [];
 
     const existingLinks = new Set(active.relatedPages || []);
+    const currentPath = this.currentPath();
+    const parentPath = currentPath.slice(0, -1);
+    const currentParentName = parentPath.length > 0 ? parentPath[parentPath.length - 1]?.toLowerCase() : '';
 
-    return all.filter(e => {
+    // Get sibling entries (same parent, different name)
+    const siblings = all.filter(e => {
+      const ePath = e.path_components;
+      if (ePath.length !== currentPath.length) return false;
+      const eParent = ePath.slice(0, -1);
+      return JSON.stringify(eParent) === JSON.stringify(parentPath) && e.name !== active.name;
+    });
+
+    // Collect all pages that siblings are linked to
+    const siblingLinkedPages = new Set<string>();
+    for (const sibling of siblings) {
+      if (sibling.relatedPages) {
+        for (const link of sibling.relatedPages) {
+          if (link !== currentStr && !existingLinks.has(link)) {
+            siblingLinkedPages.add(link);
+          }
+        }
+      }
+    }
+
+    // Filter available pages
+    const available = all.filter(e => {
       const pStr = this.formatPath(e.path_components);
       return pStr !== currentStr && !existingLinks.has(pStr);
     });
+
+    // Categorize pages
+    const suggested: CodexEntry[] = [];  // Same parent name, different branch
+    const siblingLinks: CodexEntry[] = [];  // Pages siblings are linked to
+    const other: CodexEntry[] = [];
+
+    for (const page of available) {
+      const pStr = this.formatPath(page.path_components);
+      const pageParentPath = page.path_components.slice(0, -1);
+      const pageParentName = pageParentPath.length > 0 ? pageParentPath[pageParentPath.length - 1]?.toLowerCase() : '';
+
+      // Same parent name in a different branch (not actually the same parent)
+      if (currentParentName && pageParentName === currentParentName &&
+        JSON.stringify(pageParentPath) !== JSON.stringify(parentPath)) {
+        suggested.push(page);
+      } else if (siblingLinkedPages.has(pStr)) {
+        // Sibling is linked to this page
+        siblingLinks.push(page);
+      } else {
+        other.push(page);
+      }
+    }
+
+    // Sort each group alphabetically by display path
+    const sortByPath = (a: CodexEntry, b: CodexEntry) =>
+      this.formatPathForDisplay(a.path_components).localeCompare(this.formatPathForDisplay(b.path_components));
+
+    suggested.sort(sortByPath);
+    siblingLinks.sort(sortByPath);
+    other.sort(sortByPath);
+
+    // Return combined, prioritized list
+    return [...suggested, ...siblingLinks, ...other];
+  }
+
+  // Returns grouped pages for optgroup display
+  getGroupedAvailablePages(): { group: string, pages: CodexEntry[] }[] {
+    const all = this.codexData() || [];
+    const currentStr = this.formatPath(this.currentPath());
+    const active = this.currentView().activeEntry || this.getNode(this.currentPath());
+    if (!active) return [];
+
+    const existingLinks = new Set(active.relatedPages || []);
+    const currentPath = this.currentPath();
+    const parentPath = currentPath.slice(0, -1);
+    const currentParentName = parentPath.length > 0 ? parentPath[parentPath.length - 1]?.toLowerCase() : '';
+
+    // Get sibling entries
+    const siblings = all.filter(e => {
+      const ePath = e.path_components;
+      if (ePath.length !== currentPath.length) return false;
+      const eParent = ePath.slice(0, -1);
+      return JSON.stringify(eParent) === JSON.stringify(parentPath) && e.name !== active.name;
+    });
+
+    // Collect sibling linked pages
+    const siblingLinkedPages = new Set<string>();
+    for (const sibling of siblings) {
+      if (sibling.relatedPages) {
+        for (const link of sibling.relatedPages) {
+          if (link !== currentStr && !existingLinks.has(link)) {
+            siblingLinkedPages.add(link);
+          }
+        }
+      }
+    }
+
+    // Filter available pages
+    const available = all.filter(e => {
+      const pStr = this.formatPath(e.path_components);
+      return pStr !== currentStr && !existingLinks.has(pStr);
+    });
+
+    // Categorize
+    const suggested: CodexEntry[] = [];
+    const siblingLinks: CodexEntry[] = [];
+    const other: CodexEntry[] = [];
+
+    for (const page of available) {
+      const pStr = this.formatPath(page.path_components);
+      const pageParentPath = page.path_components.slice(0, -1);
+      const pageParentName = pageParentPath.length > 0 ? pageParentPath[pageParentPath.length - 1]?.toLowerCase() : '';
+
+      if (currentParentName && pageParentName === currentParentName &&
+        JSON.stringify(pageParentPath) !== JSON.stringify(parentPath)) {
+        suggested.push(page);
+      } else if (siblingLinkedPages.has(pStr)) {
+        siblingLinks.push(page);
+      } else {
+        other.push(page);
+      }
+    }
+
+    // Sort
+    const sortByPath = (a: CodexEntry, b: CodexEntry) =>
+      this.formatPathForDisplay(a.path_components).localeCompare(this.formatPathForDisplay(b.path_components));
+
+    suggested.sort(sortByPath);
+    siblingLinks.sort(sortByPath);
+    other.sort(sortByPath);
+
+    // Build result with groups
+    const result: { group: string, pages: CodexEntry[] }[] = [];
+    if (suggested.length > 0) {
+      result.push({ group: '⭐ Suggested (Same Category)', pages: suggested });
+    }
+    if (siblingLinks.length > 0) {
+      result.push({ group: '🔗 Linked by Siblings', pages: siblingLinks });
+    }
+    if (other.length > 0) {
+      result.push({ group: '📚 All Pages', pages: other });
+    }
+    return result;
   }
 
   getRelatedPages(entry: CodexEntry): CodexEntry[] {
@@ -696,6 +829,84 @@ export class CodexComponent implements OnInit {
 
     this.modifiedEntities.update(set => set.add(entity._id));
     this.linkedEntities.set([...this.linkedEntities()]); // Trigger view update
+  }
+
+  // --- Special Abilities ---
+  getSpecialAbilities(entity: Pf1eEntity): string[] {
+    return entity['special_abilities'] || [];
+  }
+
+  addSpecialAbility(entity: Pf1eEntity, inputElement: HTMLTextAreaElement) {
+    if (!this.isEditMode() || !inputElement.value.trim()) return;
+
+    const newAbility = inputElement.value.trim();
+    if (!entity['special_abilities']) {
+      entity['special_abilities'] = [];
+    }
+
+    entity['special_abilities'].push(newAbility);
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]);
+
+    inputElement.value = '';
+  }
+
+  removeSpecialAbility(entity: Pf1eEntity, index: number) {
+    if (!this.isEditMode() || !entity['special_abilities']) return;
+
+    entity['special_abilities'].splice(index, 1);
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]);
+  }
+
+  handleSpecialAbilityUpdate(entity: Pf1eEntity, index: number, event: any) {
+    if (!this.isEditMode() || !entity['special_abilities']) return;
+
+    const newText = event.target.innerText.trim();
+    if (newText) {
+      entity['special_abilities'][index] = newText;
+      this.modifiedEntities.update(set => set.add(entity._id));
+      this.linkedEntities.set([...this.linkedEntities()]);
+    }
+  }
+
+  // --- Vulnerabilities ---
+  getVulnerabilities(entity: Pf1eEntity): string[] {
+    return entity['vulnerabilities'] || [];
+  }
+
+  addVulnerability(entity: Pf1eEntity, inputElement: HTMLInputElement) {
+    if (!this.isEditMode() || !inputElement.value.trim()) return;
+
+    const newVuln = inputElement.value.trim();
+    if (!entity['vulnerabilities']) {
+      entity['vulnerabilities'] = [];
+    }
+
+    entity['vulnerabilities'].push(newVuln);
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]);
+
+    inputElement.value = '';
+  }
+
+  removeVulnerability(entity: Pf1eEntity, index: number) {
+    if (!this.isEditMode() || !entity['vulnerabilities']) return;
+
+    entity['vulnerabilities'].splice(index, 1);
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]);
+  }
+
+  handleVulnerabilityUpdate(entity: Pf1eEntity, index: number, event: any) {
+    if (!this.isEditMode() || !entity['vulnerabilities']) return;
+
+    const newText = event.target.innerText.trim();
+    if (newText) {
+      entity['vulnerabilities'][index] = newText;
+      this.modifiedEntities.update(set => set.add(entity._id));
+      this.linkedEntities.set([...this.linkedEntities()]);
+    }
   }
 
   addLinkedItem(entity: Pf1eEntity, inputElement: HTMLInputElement, type: 'rules' | 'equipment' | 'spells') {

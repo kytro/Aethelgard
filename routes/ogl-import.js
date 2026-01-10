@@ -278,10 +278,13 @@ module.exports = function (db) {
                 // Determine type based on path
                 // Looking for structure generally like 'core_rulebook/feat/...' or just 'feat/...'
                 let typeKey = null;
+                const lowerPath = normPath.toLowerCase();
+
                 for (const t of TARGET_DIRS) {
                     // Check if path contains /{type}/ or ends with /{type}.json (unlikely)
                     // We assume PSRD structure: BookName/type/filename.json
-                    if (normPath.includes(`/${t}/`)) {
+                    // Use case-sensitive check
+                    if (lowerPath.includes(`/${t}/`)) {
                         typeKey = t;
                         break;
                     }

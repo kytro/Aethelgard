@@ -164,6 +164,12 @@ export class SettingsComponent {
   // Helper to format model names for the dropdown
   formatModelName(name: string): string {
     if (!name) return '';
+    // Handle Ollama models - prefix with 🖥️ local indicator
+    if (name.startsWith('ollama:')) {
+      const ollamaName = name.replace('ollama:', '');
+      return `🖥️ ${ollamaName} (Local)`;
+    }
+    // Handle Gemini models
     return name.replace('models/', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
   }
 }

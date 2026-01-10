@@ -205,10 +205,14 @@
             <select #relatedPageSelect
               class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white flex-grow">
               <option value="">Select a page to link...</option>
-              @for(page of getAvailablePages(); track formatPath(page.path_components)) {
-              <option [value]="formatPath(page.path_components)">
-                {{ formatPathForDisplay(page.path_components) }}
-              </option>
+              @for(group of getGroupedAvailablePages(); track group.group) {
+              <optgroup [label]="group.group">
+                @for(page of group.pages; track formatPath(page.path_components)) {
+                <option [value]="formatPath(page.path_components)">
+                  {{ formatPathForDisplay(page.path_components) }}
+                </option>
+                }
+              </optgroup>
               }
             </select>
             <button (click)="addRelatedPage(entry, relatedPageSelect.value); relatedPageSelect.value=''"
@@ -519,6 +523,62 @@
                     }
                     }
                   </div>
+                </div>
+
+                <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                <div class="col-span-1 md:col-span-2">
+                  <p class="font-semibold text-white">Special Abilities:</p>
+                  <div class="space-y-2 mt-2">
+                    @for(ability of getSpecialAbilities(entity); track ability; let i = $index) {
+                    <div class="relative group bg-gray-800/50 px-3 py-2 rounded border-l-2 border-orange-500/50">
+                      <p class="text-orange-300 text-sm whitespace-pre-wrap" [attr.contenteditable]="isEditMode()"
+                        (blur)="handleSpecialAbilityUpdate(entity, i, $event)">{{ ability }}</p>
+                      @if(isEditMode()) {
+                      <button (click)="removeSpecialAbility(entity, i)"
+                        class="absolute top-1 right-1 text-red-500 hover:text-red-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
+                      }
+                    </div>
+                    }
+                    @if(getSpecialAbilities(entity).length === 0 && !isEditMode()) {
+                    <span class="text-gray-500 italic">None</span>
+                    }
+                  </div>
+                  @if(isEditMode()) {
+                  <div class="mt-2 flex items-start gap-2">
+                    <textarea #addSpecialAbilityInput placeholder="Add special ability (e.g., Darkvision 60 ft.)"
+                      class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full text-sm resize-y min-h-[60px]"></textarea>
+                    <button (click)="addSpecialAbility(entity, addSpecialAbilityInput)"
+                      class="bg-orange-600 hover:bg-orange-700 text-white font-bold py-1 px-3 rounded">+</button>
+                  </div>
+                  }
+                </div>
+
+                <div class="col-span-1 md:col-span-2 my-2 border-t border-gray-700"></div>
+                <div class="col-span-1 md:col-span-2">
+                  <p class="font-semibold text-white">Vulnerabilities:</p>
+                  <div class="space-y-2 mt-2">
+                    @for(vuln of getVulnerabilities(entity); track vuln; let i = $index) {
+                    <div class="relative group bg-gray-800/50 px-3 py-2 rounded border-l-2 border-red-500/50">
+                      <p class="text-red-300 text-sm whitespace-pre-wrap" [attr.contenteditable]="isEditMode()"
+                        (blur)="handleVulnerabilityUpdate(entity, i, $event)">{{ vuln }}</p>
+                      @if(isEditMode()) {
+                      <button (click)="removeVulnerability(entity, i)"
+                        class="absolute top-1 right-1 text-red-500 hover:text-red-400 font-bold opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
+                      }
+                    </div>
+                    }
+                    @if(getVulnerabilities(entity).length === 0 && !isEditMode()) {
+                    <span class="text-gray-500 italic">None</span>
+                    }
+                  </div>
+                  @if(isEditMode()) {
+                  <div class="mt-2 flex items-start gap-2">
+                    <input #addVulnerabilityInput type="text" placeholder="Add vulnerability (e.g., Cold, Fire)"
+                      class="bg-gray-700 border border-gray-600 rounded px-2 py-1 text-white w-full text-sm">
+                    <button (click)="addVulnerability(entity, addVulnerabilityInput)"
+                      class="bg-red-600 hover:bg-red-700 text-white font-bold py-1 px-3 rounded">+</button>
+                  </div>
+                  }
                 </div>
               </div>
 

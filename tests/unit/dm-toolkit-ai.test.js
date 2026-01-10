@@ -205,3 +205,78 @@ describe('DM Toolkit AI - NPC Synthesis Logic', () => {
         expect(wizard.spells['0']).toContain('Detect Magic');
     });
 });
+
+describe('DM Toolkit AI - Spellcasting Class Detection', () => {
+    // Simulate the spellcasting class detection from the route
+    const spellcastingClasses = ['wizard', 'sorcerer', 'cleric', 'druid', 'bard', 'paladin', 'ranger', 'witch', 'oracle', 'inquisitor', 'summoner', 'magus', 'alchemist', 'arcanist', 'shaman', 'warpriest', 'bloodrager', 'skald', 'investigator', 'hunter', 'medium', 'mesmerist', 'occultist', 'psychic', 'spiritualist'];
+
+    function isSpellcaster(npcClass) {
+        const classLower = (npcClass || '').toLowerCase();
+        return spellcastingClasses.some(sc => classLower.includes(sc));
+    }
+
+    it('should identify primary spellcasting classes', () => {
+        expect(isSpellcaster('Wizard')).toBe(true);
+        expect(isSpellcaster('Sorcerer')).toBe(true);
+        expect(isSpellcaster('Cleric')).toBe(true);
+        expect(isSpellcaster('Druid')).toBe(true);
+        expect(isSpellcaster('Bard')).toBe(true);
+        expect(isSpellcaster('Witch')).toBe(true);
+        expect(isSpellcaster('Oracle')).toBe(true);
+        expect(isSpellcaster('Magus')).toBe(true);
+        expect(isSpellcaster('Arcanist')).toBe(true);
+    });
+
+    it('should identify partial spellcasting classes', () => {
+        expect(isSpellcaster('Paladin')).toBe(true);
+        expect(isSpellcaster('Ranger')).toBe(true);
+        expect(isSpellcaster('Warpriest')).toBe(true);
+        expect(isSpellcaster('Bloodrager')).toBe(true);
+        expect(isSpellcaster('Hunter')).toBe(true);
+    });
+
+    it('should identify occult and psychic classes', () => {
+        expect(isSpellcaster('Medium')).toBe(true);
+        expect(isSpellcaster('Mesmerist')).toBe(true);
+        expect(isSpellcaster('Occultist')).toBe(true);
+        expect(isSpellcaster('Psychic')).toBe(true);
+        expect(isSpellcaster('Spiritualist')).toBe(true);
+    });
+
+    it('should NOT identify non-spellcasting classes', () => {
+        expect(isSpellcaster('Fighter')).toBe(false);
+        expect(isSpellcaster('Rogue')).toBe(false);
+        expect(isSpellcaster('Barbarian')).toBe(false);
+        expect(isSpellcaster('Monk')).toBe(false);
+        expect(isSpellcaster('Expert')).toBe(false);
+        expect(isSpellcaster('Warrior')).toBe(false);
+        expect(isSpellcaster('Commoner')).toBe(false);
+        expect(isSpellcaster('Cavalier')).toBe(false);
+        expect(isSpellcaster('Gunslinger')).toBe(false);
+        expect(isSpellcaster('Swashbuckler')).toBe(false);
+    });
+
+    it('should handle multiclass strings containing spellcaster', () => {
+        expect(isSpellcaster('Fighter/Wizard')).toBe(true);
+        expect(isSpellcaster('Rogue 3/Sorcerer 5')).toBe(true);
+        expect(isSpellcaster('Wizard (Evoker)')).toBe(true);
+        expect(isSpellcaster('Cleric of Sarenrae')).toBe(true);
+    });
+
+    it('should handle edge cases', () => {
+        expect(isSpellcaster('')).toBe(false);
+        expect(isSpellcaster(null)).toBe(false);
+        expect(isSpellcaster(undefined)).toBe(false);
+        expect(isSpellcaster('WIZARD')).toBe(true); // Case insensitive
+        expect(isSpellcaster('wizard')).toBe(true);
+    });
+
+    it('should handle hybrid classes correctly', () => {
+        expect(isSpellcaster('Alchemist')).toBe(true); // Uses extracts
+        expect(isSpellcaster('Investigator')).toBe(true); // Uses extracts
+        expect(isSpellcaster('Summoner')).toBe(true);
+        expect(isSpellcaster('Inquisitor')).toBe(true);
+        expect(isSpellcaster('Skald')).toBe(true);
+        expect(isSpellcaster('Shaman')).toBe(true);
+    });
+});
