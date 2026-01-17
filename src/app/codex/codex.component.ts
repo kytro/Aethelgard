@@ -144,6 +144,9 @@ export class CodexComponent implements OnInit {
   aiCompletePreview = signal<any>(null);
   aiCompletingEntityId = signal<string | null>(null);
 
+  // Edit State
+  selectedBlockIndex = signal<number | null>(null);
+
   currentView = computed(() => {
     const data = this.codexData();
     const path = this.currentPath();
@@ -833,7 +836,33 @@ export class CodexComponent implements OnInit {
 
   // --- Special Abilities ---
   getSpecialAbilities(entity: Pf1eEntity): string[] {
-    return entity['special_abilities'] || [];
+    const root = entity['special_abilities'] || [];
+    const base = entity['baseStats']?.specialAbilities || [];
+    // Merge unique
+    return Array.from(new Set([...root, ...base]));
+  }
+
+  getSpecialAttacks(entity: Pf1eEntity): string[] {
+    return entity['baseStats']?.specialAttacks || [];
+  }
+
+  getFeats(entity: Pf1eEntity): string[] {
+    return entity['baseStats']?.feats || [];
+  }
+
+  getAttacks(entity: Pf1eEntity): any[] {
+    return entity['baseStats']?.attacks || [];
+  }
+
+  getDefense(entity: Pf1eEntity, type: string): string {
+    const bs = entity['baseStats'];
+    if (!bs) return '-';
+    // Check exact match, uppercase, lowercase, title case
+    const keys = [type, type.toLowerCase(), type.toUpperCase(), type.charAt(0).toUpperCase() + type.slice(1)];
+    for (const key of keys) {
+      if (bs[key] !== undefined && bs[key] !== null && bs[key] !== '') return bs[key];
+    }
+    return '-';
   }
 
   addSpecialAbility(entity: Pf1eEntity, inputElement: HTMLTextAreaElement) {
@@ -852,27 +881,47 @@ export class CodexComponent implements OnInit {
   }
 
   removeSpecialAbility(entity: Pf1eEntity, index: number) {
-    if (!this.isEditMode() || !entity['special_abilities']) return;
+    // Determine if it's in root or baseStats
+    const abilities = this.getSpecialAbilities(entity);
+    const abilityToRemove = abilities[index];
 
-    entity['special_abilities'].splice(index, 1);
+    if (entity['special_abilities']?.includes(abilityToRemove)) {
+      const idx = entity['special_abilities'].indexOf(abilityToRemove);
+      entity['special_abilities'].splice(idx, 1);
+    } else if (entity['baseStats']?.specialAbilities?.includes(abilityToRemove)) {
+      const idx = entity['baseStats'].specialAbilities.indexOf(abilityToRemove);
+      entity['baseStats'].specialAbilities.splice(idx, 1);
+    }
+
     this.modifiedEntities.update(set => set.add(entity._id));
     this.linkedEntities.set([...this.linkedEntities()]);
   }
 
   handleSpecialAbilityUpdate(entity: Pf1eEntity, index: number, event: any) {
-    if (!this.isEditMode() || !entity['special_abilities']) return;
+    if (!this.isEditMode()) return;
 
     const newText = event.target.innerText.trim();
-    if (newText) {
-      entity['special_abilities'][index] = newText;
-      this.modifiedEntities.update(set => set.add(entity._id));
-      this.linkedEntities.set([...this.linkedEntities()]);
+    if (!newText) return;
+
+    const abilities = this.getSpecialAbilities(entity);
+    const oldAbility = abilities[index];
+
+    if (entity['special_abilities']?.includes(oldAbility)) {
+      const idx = entity['special_abilities'].indexOf(oldAbility);
+      entity['special_abilities'][idx] = newText;
+    } else if (entity['baseStats']?.specialAbilities?.includes(oldAbility)) {
+      const idx = entity['baseStats'].specialAbilities.indexOf(oldAbility);
+      entity['baseStats'].specialAbilities[idx] = newText;
     }
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]);
   }
 
   // --- Vulnerabilities ---
   getVulnerabilities(entity: Pf1eEntity): string[] {
-    return entity['vulnerabilities'] || [];
+    const root = entity['vulnerabilities'] || [];
+    const base = entity['baseStats']?.vulnerabilities || [];
+    return Array.from(new Set([...root, ...base]));
   }
 
   addVulnerability(entity: Pf1eEntity, inputElement: HTMLInputElement) {
@@ -891,22 +940,37 @@ export class CodexComponent implements OnInit {
   }
 
   removeVulnerability(entity: Pf1eEntity, index: number) {
-    if (!this.isEditMode() || !entity['vulnerabilities']) return;
+    const vulns = this.getVulnerabilities(entity);
+    const target = vulns[index];
 
-    entity['vulnerabilities'].splice(index, 1);
+    if (entity['vulnerabilities']?.includes(target)) {
+      const idx = entity['vulnerabilities'].indexOf(target);
+      entity['vulnerabilities'].splice(idx, 1);
+    } else if (entity['baseStats']?.vulnerabilities?.includes(target)) {
+      const idx = entity['baseStats'].vulnerabilities.indexOf(target);
+      entity['baseStats'].vulnerabilities.splice(idx, 1);
+    }
     this.modifiedEntities.update(set => set.add(entity._id));
     this.linkedEntities.set([...this.linkedEntities()]);
   }
 
   handleVulnerabilityUpdate(entity: Pf1eEntity, index: number, event: any) {
-    if (!this.isEditMode() || !entity['vulnerabilities']) return;
-
+    if (!this.isEditMode()) return;
     const newText = event.target.innerText.trim();
-    if (newText) {
-      entity['vulnerabilities'][index] = newText;
-      this.modifiedEntities.update(set => set.add(entity._id));
-      this.linkedEntities.set([...this.linkedEntities()]);
+    if (!newText) return;
+
+    const vulns = this.getVulnerabilities(entity);
+    const target = vulns[index];
+
+    if (entity['vulnerabilities']?.includes(target)) {
+      const idx = entity['vulnerabilities'].indexOf(target);
+      entity['vulnerabilities'][idx] = newText;
+    } else if (entity['baseStats']?.vulnerabilities?.includes(target)) {
+      const idx = entity['baseStats'].vulnerabilities.indexOf(target);
+      entity['baseStats'].vulnerabilities[idx] = newText;
     }
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]);
   }
 
   addLinkedItem(entity: Pf1eEntity, inputElement: HTMLInputElement, type: 'rules' | 'equipment' | 'spells') {
@@ -1047,11 +1111,21 @@ export class CodexComponent implements OnInit {
         case 'paragraph':
           newBlock = { type: 'paragraph', text: 'New paragraph.' };
           break;
-        case 'table':
           newBlock = { type: 'table', title: 'New Table', headers: ['Header 1', 'Header 2'], rows: [{ 'Header 1': 'Cell 1', 'Header 2': 'Cell 2' }] };
           break;
       }
-      node.content.push(newBlock);
+
+      const insertIndex = this.selectedBlockIndex();
+      if (insertIndex !== null && insertIndex >= 0 && insertIndex < node.content.length) {
+        node.content.splice(insertIndex + 1, 0, newBlock);
+        // Select the newly added block
+        this.selectedBlockIndex.set(insertIndex + 1);
+      } else {
+        node.content.push(newBlock);
+        // Select the new block at the end
+        this.selectedBlockIndex.set(node.content.length - 1);
+      }
+
       this.codexData.set(JSON.parse(JSON.stringify(data)));
     }
   }
@@ -1079,11 +1153,22 @@ export class CodexComponent implements OnInit {
       const node = this.getNode(path);
       if (node) {
         if (!node.content) node.content = [];
-        node.content.push({
+
+        const newBlock = {
           type: 'map',
           imageUrl: res.url,
           caption: file.name.replace(/\.[^/.]+$/, "") // Default caption is filename without extension
-        });
+        };
+
+        const insertIndex = this.selectedBlockIndex();
+        if (insertIndex !== null && insertIndex >= 0 && insertIndex < node.content.length) {
+          node.content.splice(insertIndex + 1, 0, newBlock);
+          this.selectedBlockIndex.set(insertIndex + 1);
+        } else {
+          node.content.push(newBlock);
+          this.selectedBlockIndex.set(node.content.length - 1);
+        }
+
         // Trigger change detection by creating a new object reference
         this.codexData.set(JSON.parse(JSON.stringify(data)));
       }
@@ -1442,7 +1527,6 @@ export class CodexComponent implements OnInit {
     // Save directly to database
     try {
       await lastValueFrom(this.http.put(`api/codex/entities/${entity._id}`, entity));
-      console.log('[AI Complete] Entity saved successfully');
     } catch (err) {
       console.error('[AI Complete] Failed to save entity', err);
       this.error.set('Failed to save AI suggestions.');

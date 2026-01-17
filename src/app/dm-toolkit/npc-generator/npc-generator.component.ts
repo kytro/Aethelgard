@@ -42,6 +42,7 @@ interface GeneratedNpc {
     hitDice?: string;
     feats?: string[];
     specialAbilities?: string[];
+    specialAttacks?: string[];
     spellSlots?: { [level: string]: number };
     type?: string;
     size?: string;
@@ -200,6 +201,12 @@ interface GeneratedNpc {
                         </div>
                     }
 
+                    @if (npc.baseStats && npc.baseStats['Speed']) {
+                        <div class="mt-2 text-sm">
+                             <p class="text-gray-400"><span class="text-white font-semibold">Speed:</span> {{ npc.baseStats['Speed'] }}</p>
+                        </div>
+                    }
+                    
                     @if ((npc.dr && npc.dr !== '-') || npc.sr || (npc.resist && npc.resist !== '-') || (npc.immune && npc.immune !== '-')) {
                         <div class="mt-2 text-sm space-y-1">
                             @if (npc.dr && npc.dr !== '-') {
@@ -243,9 +250,16 @@ interface GeneratedNpc {
                             </div>
                         }
             
+                        @if (npc.specialAttacks && npc.specialAttacks.length > 0) {
+                            <div>
+                                <h5 class="font-semibold text-red-500">Special Attacks</h5>
+                                <p class="text-gray-400">{{ npc.specialAttacks.join(', ') }}</p>
+                            </div>
+                        }
+
                         @if (npc.specialAbilities && npc.specialAbilities.length > 0) {
                             <div>
-                                <h5 class="font-semibold text-gray-300">Special Abilities</h5>
+                                <h5 class="font-semibold text-gray-300">Special Qualities</h5>
                                 <p class="text-gray-400">{{ npc.specialAbilities.join(', ') }}</p>
                             </div>
                         }
@@ -411,6 +425,12 @@ export class NpcGeneratorComponent {
             }));
 
             // Merge details into NPC
+            // Manual Map of Speed if present (ensure it lands in baseStats)
+            if (details.speed && !details.baseStats?.Speed) {
+                if (!details.baseStats) details.baseStats = {};
+                details.baseStats.Speed = details.speed;
+            }
+
             const normalizedDetails = this.normalizeNpcDetails(details);
             const updatedNpcs = [...this.lastGeneratedNpcs()];
             updatedNpcs[index] = {
@@ -645,6 +665,7 @@ export class NpcGeneratorComponent {
 
         if (npc.spellSlots) entity.spell_slots = npc.spellSlots;
         if (npc.specialAbilities?.length) entity.special_abilities = npc.specialAbilities;
+        if (npc.specialAttacks?.length) entity.special_attacks = npc.specialAttacks;
         if (npc.attacks?.length) entity.attacks = npc.attacks;
         if (npc.vulnerabilities?.length) entity.vulnerabilities = npc.vulnerabilities;
 

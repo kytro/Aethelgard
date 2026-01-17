@@ -53,7 +53,7 @@ export class CodexAssistantComponent implements OnInit {
   assistantQuery = '';
   assistantResponse = signal('');
   isAskingAssistant = signal(false);
-  
+
   availableModels = signal<string[]>([]);
   selectedModel = signal<string>('');
 
@@ -76,20 +76,20 @@ export class CodexAssistantComponent implements OnInit {
   }
 
   async handleAskAssistant() {
-    if (!this.assistantQuery.trim() || !this.codex()) return;
+    if (!this.assistantQuery.trim()) return;
     this.isAskingAssistant.set(true);
     this.assistantResponse.set('');
     try {
-        const res = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit-ai/assistant', { 
-            query: this.assistantQuery,
-            model: this.selectedModel(),
-            options: { codex: this.codex() }
-        }));
-        this.assistantResponse.set(res.response);
-    } catch (e: any) { 
-        this.assistantResponse.set(`Error: ${e.error?.error || e.message}`); 
-    } finally { 
-        this.isAskingAssistant.set(false);
+      const res = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit-ai/assistant', {
+        query: this.assistantQuery,
+        model: this.selectedModel(),
+        options: {}
+      }));
+      this.assistantResponse.set(res.response);
+    } catch (e: any) {
+      this.assistantResponse.set(`Error: ${e.error?.error || e.message}`);
+    } finally {
+      this.isAskingAssistant.set(false);
     }
   }
 

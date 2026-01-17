@@ -252,6 +252,30 @@ module.exports = function (db) {
                 roundCounter: nextRound
             };
 
+            // Handling Effects Decrement
+            const activeCombatant = combatants[nextIndex];
+            if (activeCombatant && activeCombatant.effects && activeCombatant.effects.length > 0) {
+                let effectsChanged = false;
+                const updatedEffects = activeCombatant.effects.map(effect => {
+                    if (effect.unit === 'rounds' && typeof effect.remainingRounds === 'number') {
+                        // Only decrement if it's not permanent (though usually permanent has unit='minutes' or 'permanent', verify logic matches frontend)
+                        // Frontend sets 999 for permanent, but unit is 'permanent'.
+                        // Here we check unit === 'rounds'.
+                        effectsChanged = true;
+                        return { ...effect, remainingRounds: effect.remainingRounds - 1 };
+                    }
+                    return effect;
+                });
+
+                if (effectsChanged) {
+                    await db.collection('dm_toolkit_combatants').updateOne(
+                        { _id: activeCombatant._id },
+                        { $set: { effects: updatedEffects } }
+                    );
+                    console.log(`[Combat Routes] Decremented effects for ${activeCombatant.name}`);
+                }
+            }
+
             await db.collection('dm_toolkit_fights').updateOne(query, { $set: updates });
             const updatedFight = await db.collection('dm_toolkit_fights').findOne(query);
             res.status(200).json(updatedFight);

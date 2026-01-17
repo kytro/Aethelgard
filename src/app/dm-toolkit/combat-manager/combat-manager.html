@@ -412,9 +412,21 @@
                       </div>
                     </div>
                     }
+                    @if(c.specialAttacks.length > 0) {
+                    <div class="mt-2">
+                      <h5 class="text-sm font-bold text-red-500">Special Attacks</h5>
+                      <div class="p-2 bg-gray-900/50 rounded-md mt-1 space-y-1 text-xs max-h-40 overflow-y-auto">
+                        @for(attack of c.specialAttacks; track $index) {
+                        <div class="border-l-2 border-red-500/50 pl-2 py-1">
+                          <p class="text-red-300 whitespace-pre-wrap">{{ attack }}</p>
+                        </div>
+                        }
+                      </div>
+                    </div>
+                    }
                     @if(c.specialAbilities.length > 0) {
                     <div class="mt-2">
-                      <h5 class="text-sm font-bold text-gray-300">Special Abilities</h5>
+                      <h5 class="text-sm font-bold text-gray-300">Special Qualities</h5>
                       <div class="p-2 bg-gray-900/50 rounded-md mt-1 space-y-1 text-xs max-h-40 overflow-y-auto">
                         @for(ability of c.specialAbilities; track $index) {
                         <div class="border-l-2 border-orange-500/50 pl-2 py-1">

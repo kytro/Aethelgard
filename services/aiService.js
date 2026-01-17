@@ -1,12 +1,26 @@
 // services/aiService.js
 // Unified AI Service for Gemini and Local Ollama
 
+// Cache for models to prevent excessive API calls
+let modelCache = {
+    models: [],
+    timestamp: 0
+};
+const CACHE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+
 /**
  * Fetches available models from both Gemini (cloud) and Ollama (local).
+ * Uses caching to prevent excessive quota usage.
  * @param {Object} db - MongoDB connection
  * @returns {Promise<string[]>} List of model names
  */
 async function getAvailableModels(db) {
+    // Return cached if valid
+    const now = Date.now();
+    if (modelCache.models.length > 0 && (now - modelCache.timestamp < CACHE_DURATION_MS)) {
+        return modelCache.models;
+    }
+
     const models = [];
 
     // 1. Fetch Gemini Models
@@ -38,6 +52,14 @@ async function getAvailableModels(db) {
         }
     } catch (error) {
         console.warn('[AI Service] Local Ollama not detected:', error.message);
+    }
+
+    // Update cache
+    if (models.length > 0) {
+        modelCache = {
+            models: models,
+            timestamp: now
+        };
     }
 
     return models;

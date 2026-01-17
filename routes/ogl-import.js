@@ -20,6 +20,7 @@ module.exports = function (db) {
         'spell': 'spell',
         'trap': 'trap',
         'monster': 'monster',
+        'creature': 'monster',
         'npc': 'npc',
         'deity': 'deity'
     };
@@ -30,6 +31,7 @@ module.exports = function (db) {
         'spell': 'spells_pf1e',
         'trap': 'hazards_pf1e',
         'monster': 'entities_pf1e',
+        'creature': 'entities_pf1e',
         'npc': 'entities_pf1e',
         'deity': 'entities_pf1e'
     };
@@ -154,30 +156,42 @@ module.exports = function (db) {
                 subtype: data.creature_subtype || data.subtype
             };
 
+            // Helper for case-insensitive lookup
+            const getStr = (k) => data[k] || data[k.toLowerCase()] || data[k.toUpperCase()] || data[k.charAt(0).toUpperCase() + k.slice(1)];
+            const getInt = (k) => parseInt(getStr(k)) || 0;
+
+            // Space & Reach
+            if (getStr('space')) baseStats.space = getStr('space');
+            if (getStr('reach')) baseStats.reach = getStr('reach');
+
+            // Aura
+            if (getStr('aura')) baseStats.aura = getStr('aura');
+
             // AC
-            if (data.ac) {
+            if (data.ac || getStr('ac')) {
                 baseStats.armorClass = {
-                    total: parseInt(data.ac) || 10,
-                    touch: parseInt(data.ac_touch) || 10,
-                    flatFooted: parseInt(data.ac_flat_footed) || 10
+                    total: getInt('ac') || 10,
+                    touch: getInt('ac_touch') || getInt('touch') || 10,
+                    flatFooted: getInt('ac_flat_footed') || getInt('flat_footed') || 10
                 };
             }
 
-            // Saves
-            if (data.saves) {
+            // Saves (Ungated check - supports missing summary string)
+            // Fix: Check both short (Fort/Ref) and full (Fortitude/Reflex) keys. Will is both.
+            if (data.saves || getInt('fort') || getInt('fortitude') || getInt('ref') || getInt('reflex') || getInt('will')) {
                 baseStats.saves = {
-                    fortitude: parseInt(data.fort) || 0,
-                    reflex: parseInt(data.ref) || 0,
-                    will: parseInt(data.will) || 0
+                    fortitude: getInt('fort') || getInt('fortitude'),
+                    reflex: getInt('ref') || getInt('reflex'),
+                    will: getInt('will')
                 };
             }
 
             // Combat
             baseStats.combat = {
-                bab: parseInt(data.base_attack) || 0,
-                cmb: data.cmb,
-                cmd: data.cmd,
-                init: parseInt(data.init) || 0
+                bab: getInt('base_attack') || getInt('bab') || 0,
+                cmb: getStr('cmb'),
+                cmd: getStr('cmd'),
+                init: getInt('init')
             };
 
             // Skills
@@ -197,6 +211,72 @@ module.exports = function (db) {
                     }
                 });
             }
+
+            // Feats (Parse from string "Feat1, Feat2" to array)
+            if (data.feats) {
+                baseStats.feats = data.feats.split(',').map(f => f.trim());
+            }
+
+            // Languages
+            if (data.languages) {
+                baseStats.languages = data.languages.split(',').map(l => l.trim());
+            }
+
+            // Special Attacks
+            if (data.special_attacks) {
+                baseStats.specialAttacks = data.special_attacks.split(',').map(s => s.trim());
+            }
+
+            // Special Qualities (SQ) -> Map to specialAbilities for consistency with AI
+            if (data.sq || data.special_qualities) {
+                const sq = data.sq || data.special_qualities;
+                baseStats.specialAbilities = sq.split(',').map(s => s.trim());
+            }
+
+            // Defenses
+            if (getStr('immune')) baseStats.immune = getStr('immune');
+            if (getStr('resist')) baseStats.resist = getStr('resist');
+            if (getStr('dr')) baseStats.dr = getStr('dr');
+            if (getStr('sr')) baseStats.sr = getStr('sr');
+            if (data.weaknesses) baseStats.vulnerabilities = data.weaknesses.split(',').map(w => w.trim());
+
+            // Attacks Parsing
+            const parseAttacks = (attackStr, type) => {
+                if (!attackStr) return [];
+                const attacks = [];
+                // Split by comma or 'and' to separate multiple attacks
+                // note: '2 claws +5 (1d4+1)' might be one entry.
+                // Simple split by comma might fail on conditional text, but works for most OGL.
+                const parts = attackStr.split(/,\s*(?![^(]*\))/); // Split by comma, ignoring commas inside parens
+
+                parts.forEach(part => {
+                    // Regex: Name +Bonus (Damage/Crit)
+                    // e.g. "bite +10 (1d8+5)"
+                    // e.g. "mwk longsword +12/+7 (1d8+5/19-20)"
+                    const match = part.match(/^(.*?)\s+([+-]\d+(?:\/[+-]\d+)*)\s+\((.*?)\)/);
+                    if (match) {
+                        attacks.push({
+                            name: match[1].trim(),
+                            bonus: match[2],
+                            damage: match[3],
+                            type: type
+                        });
+                    } else {
+                        // Fallback: just use the whole string as name
+                        attacks.push({
+                            name: part.trim(),
+                            bonus: '',
+                            damage: '',
+                            type: type
+                        });
+                    }
+                });
+                return attacks;
+            };
+
+            const meleeAttacks = parseAttacks(getStr('melee'), 'melee');
+            const rangedAttacks = parseAttacks(getStr('ranged'), 'ranged');
+            baseStats.attacks = [...meleeAttacks, ...rangedAttacks];
 
             return {
                 _id: `${type}_${idBase}`,
@@ -238,15 +318,12 @@ module.exports = function (db) {
      * Upload and process a PSRD-Data zip file
      */
     router.post('/import/zip', upload.single('file'), async (req, res) => {
-        console.log('[OGL Import (ZIP)] Starting import...');
-
         if (!req.file) {
             return res.status(400).json({ error: 'No file uploaded' });
         }
 
         try {
             const zip = await JSZip.loadAsync(req.file.buffer);
-            console.log(`[OGL Import (ZIP)] Opened zip file. Processing entries...`);
 
             let processedCount = 0;
             let errorCount = 0;
@@ -260,7 +337,7 @@ module.exports = function (db) {
 
             // Targeted directories to scan within the zip
             const TARGET_DIRS = [
-                'feat', 'item', 'spell', 'trap', 'monster', 'npc', 'deity'
+                'feat', 'item', 'spell', 'trap', 'monster', 'creature', 'npc', 'deity'
             ];
 
             const codexOps = []; // Store ops for Codex Entries
@@ -570,18 +647,14 @@ module.exports = function (db) {
 
             // Execute Codex Updates
             if (codexOps.length > 0) {
-                console.log(`[OGL Import] Updating Codex with ${codexOps.length} operations...`);
-
                 // Deduplicate parent creates if possible, or just run them unordered (MongoDB handles idempotent upserts well)
                 const chunkSize = 1000;
                 for (let i = 0; i < codexOps.length; i += chunkSize) {
                     const chunk = codexOps.slice(i, i + chunkSize);
                     await db.collection('codex_entries').bulkWrite(chunk, { ordered: false });
                 }
-                console.log(`[OGL Import] Codex hierarchy updated.`);
             }
 
-            console.log(`[OGL Import (ZIP)] Complete.`, resultSummary);
             res.json(resultSummary);
 
         } catch (error) {
