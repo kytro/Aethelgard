@@ -250,6 +250,7 @@ export class CodexComponent implements OnInit {
       const content = currentNode.content;
       if (content && Array.isArray(content)) {
         for (const block of content) {
+          if (!block) continue;
           const blockEntityId = block.entity_id || block.entityId;
           if (blockEntityId) {
             entityIds.add(blockEntityId);
@@ -1111,6 +1112,7 @@ export class CodexComponent implements OnInit {
         case 'paragraph':
           newBlock = { type: 'paragraph', text: 'New paragraph.' };
           break;
+        case 'table':
           newBlock = { type: 'table', title: 'New Table', headers: ['Header 1', 'Header 2'], rows: [{ 'Header 1': 'Cell 1', 'Header 2': 'Cell 2' }] };
           break;
       }
@@ -1196,6 +1198,19 @@ export class CodexComponent implements OnInit {
     }
   }
 
+  removeBrokenBlock(index: number) {
+    const data = this.codexData();
+    const path = this.currentPath();
+    const node = this.getNode(path);
+    if (node && node.content) {
+      if (index >= 0 && index < node.content.length) {
+        node.content.splice(index, 1);
+        this.selectedBlockIndex.set(-1);
+        this.codexData.set(JSON.parse(JSON.stringify(data)));
+      }
+    }
+  }
+
   moveBlock(block: any, direction: 'up' | 'down') {
     const data = this.codexData();
     const path = this.currentPath();
@@ -1215,30 +1230,53 @@ export class CodexComponent implements OnInit {
 
 
   addRow(block: any) {
-    const newRow: any = {};
-    block.headers.forEach((header: string) => {
-      newRow[header] = 'New Cell';
-    });
-    block.rows.push(newRow);
     const data = this.codexData();
-    this.codexData.set(JSON.parse(JSON.stringify(data)));
+    const path = this.currentPath();
+    const node = this.getNode(path);
+    if (node && node.content) {
+      const blockIndex = node.content.findIndex((b: any) => b === block || JSON.stringify(b) === JSON.stringify(block));
+      if (blockIndex !== -1) {
+        const targetBlock = node.content[blockIndex];
+        const newRow: any = {};
+        targetBlock.headers.forEach((header: string) => {
+          newRow[header] = 'New Cell';
+        });
+        targetBlock.rows.push(newRow);
+        this.codexData.set(JSON.parse(JSON.stringify(data)));
+      }
+    }
   }
 
   removeRow(block: any, rowIndex: number) {
-    block.rows.splice(rowIndex, 1);
     const data = this.codexData();
-    this.codexData.set(JSON.parse(JSON.stringify(data)));
+    const path = this.currentPath();
+    const node = this.getNode(path);
+    if (node && node.content) {
+      const blockIndex = node.content.findIndex((b: any) => b === block || JSON.stringify(b) === JSON.stringify(block));
+      if (blockIndex !== -1) {
+        node.content[blockIndex].rows.splice(rowIndex, 1);
+        this.codexData.set(JSON.parse(JSON.stringify(data)));
+      }
+    }
   }
 
   addColumn(block: any) {
     const newHeader = prompt('Enter new column header:');
     if (newHeader) {
-      block.headers.push(newHeader);
-      block.rows.forEach((row: any) => {
-        row[newHeader] = 'New Cell';
-      });
       const data = this.codexData();
-      this.codexData.set(JSON.parse(JSON.stringify(data)));
+      const path = this.currentPath();
+      const node = this.getNode(path);
+      if (node && node.content) {
+        const blockIndex = node.content.findIndex((b: any) => b === block || JSON.stringify(b) === JSON.stringify(block));
+        if (blockIndex !== -1) {
+          const targetBlock = node.content[blockIndex];
+          targetBlock.headers.push(newHeader);
+          targetBlock.rows.forEach((row: any) => {
+            row[newHeader] = 'New Cell';
+          });
+          this.codexData.set(JSON.parse(JSON.stringify(data)));
+        }
+      }
     }
   }
 

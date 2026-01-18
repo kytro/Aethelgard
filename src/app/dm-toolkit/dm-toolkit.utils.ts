@@ -69,15 +69,15 @@ export const formatTime = (t: any): string => {
 };
 
 export const SIZE_DATA: { [key: string]: any } = {
-    'Fine': { mod: 8, specialMod: -8, stealth: 16, fly: 8 },
-    'Diminutive': { mod: 4, specialMod: -4, stealth: 12, fly: 6 },
-    'Tiny': { mod: 2, specialMod: -2, stealth: 8, fly: 4 },
-    'Small': { mod: 1, specialMod: -1, stealth: 4, fly: 2 },
-    'Medium': { mod: 0, specialMod: 0, stealth: 0, fly: 0 },
-    'Large': { mod: -1, specialMod: 1, stealth: -4, fly: -2 },
-    'Huge': { mod: -2, specialMod: 2, stealth: -8, fly: -4 },
-    'Gargantuan': { mod: -4, specialMod: 4, stealth: -12, fly: -6 },
-    'Colossal': { mod: -8, specialMod: 8, stealth: -16, fly: -8 }
+    'Fine': { mod: 8, cmbModifier: -8, stealth: 16, fly: 8 },
+    'Diminutive': { mod: 4, cmbModifier: -4, stealth: 12, fly: 6 },
+    'Tiny': { mod: 2, cmbModifier: -2, stealth: 8, fly: 4 },
+    'Small': { mod: 1, cmbModifier: -1, stealth: 4, fly: 2 },
+    'Medium': { mod: 0, cmbModifier: 0, stealth: 0, fly: 0 },
+    'Large': { mod: -1, cmbModifier: 1, stealth: -4, fly: -2 },
+    'Huge': { mod: -2, cmbModifier: 2, stealth: -8, fly: -4 },
+    'Gargantuan': { mod: -4, cmbModifier: 4, stealth: -12, fly: -6 },
+    'Colossal': { mod: -8, cmbModifier: 8, stealth: -16, fly: -8 }
 };
 
 // PF1e Construct bonus HP by size (replaces Con-based HP)
@@ -372,8 +372,8 @@ export const calculateCompleteBaseStats = (baseStats: any, options?: CalculateSt
     const useDexForCMB = isTinyOrSmaller || hasAgileManeuvers;
     const cmbMod = useDexForCMB ? Math.max(strMod, dexMod) : strMod;
 
-    if (typeof getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + cmbMod + sizeStats.specialMod;
-    if (typeof getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + newStats['BAB'] + strMod + dexMod + sizeStats.specialMod;
+    if (typeof getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + cmbMod + sizeStats.cmbModifier;
+    if (typeof getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + newStats['BAB'] + strMod + dexMod + sizeStats.cmbModifier;
 
     // HP Calculation with creature type handling (PF1e fix)
     const hpValue = getCaseInsensitiveProp(newStats, 'hp') || getCaseInsensitiveProp(newStats, 'HP') || '1d8';

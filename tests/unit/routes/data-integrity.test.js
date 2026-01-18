@@ -87,7 +87,7 @@ describe('Data Integrity Routes', () => {
                 .send({ entity: mockEntity });
 
             expect(response.status).toBe(200);
-            expect(data.bab).toBe(1); // Fighter is Fast BAB (1)
+            expect(response.body.bab).toBe(1); // Fighter is Fast BAB (1)
             // CMB = 1 + 4 = 5
             expect(response.body.cmb).toBe(5);
         });

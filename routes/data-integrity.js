@@ -717,17 +717,39 @@ ${JSON.stringify(existingNames)}`;
         }
 
         try {
-            const baseStats = entity.baseStats;
-            const stats = {
-                str: getAbilityModifierAsNumber(baseStats.Str ?? 10),
-                dex: getAbilityModifierAsNumber(baseStats.Dex ?? 10),
-                con: getAbilityModifierAsNumber(baseStats.Con ?? 10),
-                int: getAbilityModifierAsNumber(baseStats.Int ?? 10),
-                wis: getAbilityModifierAsNumber(baseStats.Wis ?? 10),
-                cha: getAbilityModifierAsNumber(baseStats.Cha ?? 10)
+            const raw = entity.baseStats || {};
+            const getStat = (keys) => {
+                for (const k of keys) {
+                    if (raw[k] !== undefined) return raw[k];
+                }
+                return undefined;
             };
 
-            // Progression Tables
+            const stats = {
+                str: getAbilityModifierAsNumber(getStat(['Str', 'str', 'strength', 'Strength']) ?? 10),
+                dex: getAbilityModifierAsNumber(getStat(['Dex', 'dex', 'dexterity', 'Dexterity']) ?? 10),
+                con: getAbilityModifierAsNumber(getStat(['Con', 'con', 'constitution', 'Constitution']) ?? 10),
+                int: getAbilityModifierAsNumber(getStat(['Int', 'int', 'intelligence', 'Intelligence']) ?? 10),
+                wis: getAbilityModifierAsNumber(getStat(['Wis', 'wis', 'wisdom', 'Wisdom']) ?? 10),
+                cha: getAbilityModifierAsNumber(getStat(['Cha', 'cha', 'charisma', 'Charisma']) ?? 10)
+            };
+
+            const hpString = String(getStat(['hp', 'HP', 'Hp']) || "");
+            const hdMatch = hpString.match(/(\d+)d/);
+            let level = 1;
+            if (hdMatch) {
+                level = parseInt(hdMatch[1], 10);
+            } else {
+                const lvl = getStat(['level', 'Level']);
+                if (lvl) level = parseInt(lvl, 10);
+            }
+
+            // Re-assign raw to baseStats for downstream logic usage (BAB check uses .class, .type)
+            const baseStats = raw;
+
+            // Update Progression Tables and rest is same...
+
+
             const GOOD_SAVES = [2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12];
             const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6];
 
@@ -741,19 +763,7 @@ ${JSON.stringify(existingNames)}`;
 
             // 1. Level / HD
             // Try to parse HD (e.g., "12d10+48") or use explicit level
-            let level = 1;
-            const hpString = String(baseStats.hp || baseStats.HP || "");
-            const hdMatch = hpString.match(/(\d+)d/);
-            if (hdMatch) {
-                level = parseInt(hdMatch[1], 10);
-            } else if (baseStats.level) {
-                level = parseInt(baseStats.level, 10);
-            } else {
-                // Fallback to CR if available?
-                const crString = String(baseStats.CR || 1);
-                const cr = parseFloat(crString.includes('/') ? (parseInt(crString.split('/')[0]) / parseInt(crString.split('/')[1])) : crString);
-                if (cr > 1) level = Math.max(1, Math.floor(cr)); // Rough approximation
-            }
+
             // Cap at 20 for table safety, though monsters go higher.
             // For monsters > 20, logic is usually linear.
             const safeIndex = Math.min(Math.max(0, level - 1), 19);
@@ -763,8 +773,8 @@ ${JSON.stringify(existingNames)}`;
             // Default to "Monster" progressions if class unknown
             // BAB: Fast (1), Medium (0.75), Slow (0.5)
             // Saves: Usually 2 Good, 1 Poor? Or all Good (Outsider)? Or all Poor (Construct)?
-            const className = (baseStats.class || "").toLowerCase();
-            const type = (baseStats.type || "").toLowerCase();
+            const className = (baseStats.class || entity.class || "").toLowerCase();
+            const type = (baseStats.type || entity.type || "").toLowerCase();
 
             // Simple BAB Heuristic
             let babMult = 0.75; // Medium
@@ -801,7 +811,7 @@ ${JSON.stringify(existingNames)}`;
             // Class overrides
             if (className.includes('cleric') || className.includes('druid') || className.includes('wizard') || className.includes('sorcerer')) { willGood = true; }
             if (className.includes('rogue') || className.includes('bard') || className.includes('ranger') || className.includes('monk')) { refGood = true; }
-            if (className.includes('fighter') || className.includes('barbarian') || className.includes('paladin') || className.includes('ranger') || className.includes('monk')) { fortGood = true; }
+            if (className.includes('fighter') || className.includes('barbarian') || className.includes('paladin') || className.includes('ranger') || className.includes('monk') || className.includes('cleric') || className.includes('druid')) { fortGood = true; }
 
             const baseFort = fortGood ? GOOD_SAVES[safeIndex] : POOR_SAVES[safeIndex];
             const baseRef = refGood ? GOOD_SAVES[safeIndex] : POOR_SAVES[safeIndex];
@@ -818,9 +828,10 @@ ${JSON.stringify(existingNames)}`;
             }
             const sizeMod = SIZE_MODS[sizeKey];
 
-            // 4. CM
             const cmb = bab + stats.str + sizeMod.special;
             const cmd = 10 + bab + stats.str + stats.dex + sizeMod.special;
+
+
 
             res.json({
                 level,

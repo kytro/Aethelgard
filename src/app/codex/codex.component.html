@@ -94,6 +94,7 @@
         <div class="relative group p-2 rounded transition-colors"
           [ngClass]="{'bg-gray-800/30 ring-1 ring-yellow-500/30': isEditMode() && selectedBlockIndex() === $index}"
           (click)="isEditMode() && selectedBlockIndex.set($index)">
+          @if (block) {
           @switch (block.type) {
           @case ('heading') { <h3 class="text-xl font-semibold text-yellow-500 border-b border-gray-700 pb-2"
             [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}
@@ -138,6 +139,7 @@
           }
           @if(isEditMode()) {
           <div class="absolute -top-2 -right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+            @if(block) {
             <button (click)="moveBlock(block, 'up')" [disabled]="$index === 0"
               class="bg-gray-600 hover:bg-gray-500 disabled:opacity-30 disabled:cursor-not-allowed text-white rounded-full w-6 h-6 flex items-center justify-center text-xs"
               title="Move up">&#9650;</button>
@@ -147,9 +149,16 @@
             <button (click)="removeBlock(block)"
               class="bg-red-600 hover:bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center"
               title="Remove">&times;</button>
+            } @else {
+            <button (click)="removeBlock(null!)"
+              (click)="content.splice($index, 1); isEditMode() && selectedBlockIndex.set(-1)"
+              class="bg-red-600 hover:bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center z-50 opacity-100"
+              title="Remove Broken Block">Did you mean to remove this broken block?</button>
+            }
           </div>
           }
 
+          }
         </div>
         }
 

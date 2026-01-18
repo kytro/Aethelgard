@@ -8,7 +8,8 @@ import {
   formatTime, getAbilityModifierAsNumber, calculateCompleteBaseStats, getCaseInsensitiveProp,
   formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP, SIZE_DATA,
   CONSTRUCT_HP_BONUS, calculateSkillBonus, CalculateStatsOptions,
-  getArmorMaxDex, getArmorCheckPenalty, classifyNaturalAttack, isLightWeapon, LIGHT_WEAPONS
+  getArmorMaxDex, getArmorCheckPenalty, classifyNaturalAttack, isLightWeapon, LIGHT_WEAPONS,
+  calculateLoad, calculateTotalWeight, LOAD_PENALTIES
 } from '../dm-toolkit.utils';
 import { ModalService } from '../../shared/services/modal.service';
 
@@ -361,8 +362,15 @@ export class CombatManagerComponent {
 
       const newCombatant = await lastValueFrom(this.http.post<Combatant>(`/codex/api/dm-toolkit/fights/${fight._id}/combatants`, combatantData));
 
-      // Update local state immediately
-      this.combatants.update(c => [...c, newCombatant].sort((a, b) => (b.initiative || 0) - (a.initiative || 0) || a.name.localeCompare(b.name)));
+      // Update local state immediately with Dex tie-breaker
+      this.combatants.update(c => [...c, newCombatant].sort((a, b) => {
+        const initDiff = (b.initiative || 0) - (a.initiative || 0);
+        if (initDiff !== 0) return initDiff;
+        const dexA = getAbilityModifierAsNumber(getCaseInsensitiveProp(a.baseStats, 'Dex'));
+        const dexB = getAbilityModifierAsNumber(getCaseInsensitiveProp(b.baseStats, 'Dex'));
+        if ((dexB - dexA) !== 0) return dexB - dexA;
+        return a.name.localeCompare(b.name);
+      }));
       this.logAction(`${newCombatant.name} added. HP: ${newCombatant.hp}, Init: ${newCombatant.initiative}`);
 
       this.customCombatant.set({ name: '', initiative: 10, hp: 10 });
@@ -659,11 +667,24 @@ export class CombatManagerComponent {
       const extractedAbilities = (entity && entity.special_abilities) ? entity.special_abilities : (c.specialAbilities || []);
       const extractedSpecialAttacks = (entity && entity.special_attacks) ? entity.special_attacks : (c.specialAttacks || []);
 
-      let spellIds: string[] = [];
+      let spellData: { id: string, level: number }[] = [];
       if (entity && entity.spells && typeof entity.spells === 'object') {
-        spellIds = Object.values(entity.spells).flat() as string[];
+        Object.entries(entity.spells).forEach(([lvl, ids]) => {
+          const level = parseInt(lvl, 10);
+          if (Array.isArray(ids)) {
+            ids.forEach(id => spellData.push({ id: String(id), level: isNaN(level) ? 0 : level }));
+          }
+        });
       }
-      const spells = entity ? (spellIds).map(id => ({ id, ...this.spellsCache().get(id) })).filter(s => s.name) : [];
+
+      const spells = entity ? spellData.map(s => {
+        const cached = this.spellsCache().get(s.id);
+        return {
+          id: s.id,
+          ...cached,
+          level: cached?.level ?? s.level // Prefer cached level, fallback to source level
+        };
+      }).filter(s => s.name) : [];
 
       const allMods: { [stat: string]: { [type: string]: (number | string)[] } } = {};
       const addMod = (stat: string, type: string, value: number | string) => {
@@ -692,11 +713,17 @@ export class CombatManagerComponent {
           const numVals = allMods[stat][type].filter((v): v is number => typeof v === 'number');
           stringyMods[stat].push(...allMods[stat][type].filter((v): v is string => typeof v === 'string'));
           if (numVals.length > 0) {
-            if (['dodge', 'untyped', 'penalty', 'circumstance'].includes(type)) finalBonuses[stat] += numVals.reduce((s, v) => s + v, 0);
-            else {
+            // PF1e: Dodge, Untyped, Penalty, and Circumstance bonuses stack
+            if (['dodge', 'untyped', 'penalty', 'circumstance'].includes(type.toLowerCase())) {
+              finalBonuses[stat] += numVals.reduce((s, v) => s + v, 0);
+            } else {
               const pos = numVals.filter(v => v > 0);
               const neg = numVals.filter(v => v < 0);
+              // Typed bonuses: Only max applies from positive
               if (pos.length > 0) finalBonuses[stat] += Math.max(...pos);
+              // Penalties (negative values) also typically stack if untyped, but if typed (rare), might not.
+              // For robustness, we assume typed penalties don't stack with same source (handled by cache dedupe?) 
+              // or same type. Sticking to max for consistency with "typed don't stack".
               if (neg.length > 0) finalBonuses[stat] += Math.min(...neg);
             }
           }
@@ -724,19 +751,67 @@ export class CombatManagerComponent {
       const wisModDiff = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Wis')) - getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
       modifiedSaves.Ref += dexModDiff; modifiedSaves.Fort += conModDiff; modifiedSaves.Will += wisModDiff;
 
-      // PF1e: Cap Dex bonus to AC based on armor's Max Dex
+      // PF1e: Cap Dex bonus to AC based on armor's Max Dex AND Encumbrance
       const armorItems = [...equipment, ...magicItems];
       const armorMaxDex = getArmorMaxDex(armorItems);
+
+      // Calculate Load Max Dex
+      const strScore = getCaseInsensitiveProp(modifiedStats, 'Str') || 10;
+      const totalWeight = calculateTotalWeight(armorItems); // armorItems contains all equipment+magic items
+      const loadStatus = calculateLoad(strScore, totalWeight);
+      const loadMaxDex = LOAD_PENALTIES[loadStatus]?.maxDex ?? 99;
+
+      // Determine limiting Max Dex (Strict lower of Armor vs Load)
+      let overallMaxDex = loadMaxDex;
+      if (armorMaxDex !== null) {
+        overallMaxDex = Math.min(overallMaxDex, armorMaxDex);
+      }
+
       const currentDexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
       const baseDexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
 
-      // Effective Dex mod for AC is capped by armor
-      const effectiveDexMod = armorMaxDex !== null ? Math.min(currentDexMod, armorMaxDex) : currentDexMod;
-      const baseEffectiveDexMod = armorMaxDex !== null ? Math.min(baseDexMod, armorMaxDex) : baseDexMod;
+      // Effective Dex mod for AC is capped by permissible Max Dex
+      const effectiveDexMod = Math.min(currentDexMod, overallMaxDex);
+      // Base is also capped to ensure Diff calculation is correct relative to restricted potential
+      const baseEffectiveDexMod = Math.min(baseDexMod, overallMaxDex);
       const cappedDexModDiff = effectiveDexMod - baseEffectiveDexMod;
 
+      // --- AC Bonus Typing Logic ---
+      let touchAcBonus = 0;
+      let ffAcBonus = 0;
+
+      if (allMods['AC']) {
+        for (const type in allMods['AC']) {
+          const values = allMods['AC'][type].filter(v => typeof v === 'number') as number[];
+          if (values.length === 0) continue;
+
+          let typeBonus = 0;
+          if (['dodge', 'untyped', 'penalty', 'circumstance'].includes(type)) {
+            typeBonus = values.reduce((a, b) => a + b, 0);
+          } else {
+            const pos = values.filter(v => v > 0);
+            const neg = values.filter(v => v < 0);
+            if (pos.length > 0) typeBonus += Math.max(...pos);
+            if (neg.length > 0) typeBonus += Math.min(...neg);
+          }
+
+          // Touch: Exclude armor, shield, natural
+          if (!['armor', 'shield', 'natural', 'natural armor', 'natural_armor'].includes(type.toLowerCase())) {
+            touchAcBonus += typeBonus;
+          }
+
+          // Flat-Footed: Exclude dodge
+          if (type.toLowerCase() !== 'dodge') {
+            ffAcBonus += typeBonus;
+          }
+        }
+      }
+
       modifiedStats['AC'] = (getCaseInsensitiveProp(modifiedStats, 'AC') || 10) + cappedDexModDiff;
-      modifiedStats['Touch'] = (getCaseInsensitiveProp(modifiedStats, 'Touch') || 10) + dexModDiff; // Touch ignores armor cap
+      modifiedStats['Touch'] = (getCaseInsensitiveProp(modifiedStats, 'Touch') || 10) + dexModDiff + touchAcBonus;
+      modifiedStats['Flat-Footed'] = (getCaseInsensitiveProp(modifiedStats, 'Flat-Footed') ||
+        getCaseInsensitiveProp(modifiedStats, 'FlatFooted') || 10) + ffAcBonus;
+
       if (conModDiff !== 0) {
         const lvl = getCaseInsensitiveProp(baseStats, 'Level') || parseInt(String(getCaseInsensitiveProp(baseStats, 'HP') || '1d8').match(/\((\d+)d\d+/)?.[1] || '1', 10);
         modifiedStats['maxHp'] = (c.maxHp || 10) + (conModDiff * lvl);
@@ -918,6 +993,9 @@ export class CombatManagerComponent {
           const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
 
           // Add Dex modifier for Dex-based skills
+          if (skillName.toLowerCase() === 'stealth') {
+            console.log(`[DEBUG] Stealth Calc: Base=${baseValue}, DexMod=${dexMod}, Size=${baseStats.size}, SizeMod=${SIZE_DATA[baseStats.size]?.stealth}`);
+          }
           if (SKILL_ABILITY_MAP[skillName] === 'Dex') {
             finalValue += dexMod;
           }
@@ -982,14 +1060,14 @@ export class CombatManagerComponent {
         baseStats,
         modifiedStats,
         initiativeMod,
-        attacks: weaponAttacks.length > 0 ? [...naturalAttacks, ...weaponAttacks] : naturalAttacks,
+        attacks: allAttacks,
         allFeats,
         equipment,
         magicItems,
         spells,
         specialAbilities: extractedAbilities,
         specialAttacks: extractedSpecialAttacks,
-        skills: modifiedStats['skills'] || {},
+        skills: skills,
         vulnerabilities: entity?.vulnerabilities || c.vulnerabilities || []
       };
     }).sort((a, b) => {
@@ -1080,6 +1158,19 @@ export class CombatManagerComponent {
       const casterMod = getAbilityModifierAsNumber(caster.modifiedStats[castingAbility] || 10);
       const dc = 10 + level + casterMod;
       dcInfo = ` (DC ${dc} ${spell.savingThrow})`;
+    }
+
+    // SR Check Check (Target Only)
+    if (target) {
+      const targetSR = getCaseInsensitiveProp(target.baseStats, 'SR');
+      if (targetSR && targetSR > 0) {
+        // Caster Level check: d20 + Level vs SR
+        const casterLevel = getCaseInsensitiveProp(caster.baseStats, 'Level') || getCaseInsensitiveProp(caster.baseStats, 'CR') || 1;
+        const clRoll = Math.floor(Math.random() * 20) + 1;
+        const clTotal = clRoll + parseInt(String(casterLevel), 10);
+        const srSuccess = clTotal >= targetSR ? 'Success' : 'Failure';
+        dcInfo += `. SR Check: ${clRoll}+${casterLevel} = ${clTotal} vs SR ${targetSR} (${srSuccess})`;
+      }
     }
 
     // Log the cast

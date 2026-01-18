@@ -10,14 +10,15 @@ const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 
  */
 function calculateAverageHp(hpString) {
     if (!hpString || typeof hpString !== 'string') return 1;
-    const match = hpString.match(/(\d+)d(\d+)([+-]\d+)?/);
+    const match = hpString.match(/(\d+)d(\d+)\s*([+-]\s*\d+)?/);
     if (!match) {
         const singleNumber = parseInt(hpString, 10);
         return isNaN(singleNumber) ? 1 : singleNumber;
     }
     const numDice = parseInt(match[1], 10);
     const dieSize = parseInt(match[2], 10);
-    const bonus = match[3] ? parseInt(match[3], 10) : 0;
+    // Remove all whitespace from the bonus part (e.g., " + 2" -> "+2") before parsing
+    const bonus = match[3] ? parseInt(match[3].replace(/\s/g, ''), 10) : 0;
     return Math.floor(numDice * (dieSize + 1) / 2) + bonus;
 }
 
@@ -236,8 +237,18 @@ module.exports = function (db) {
             if (!fight) return res.status(404).json({ message: 'Fight not found' });
 
             const combatants = await db.collection('dm_toolkit_combatants').find({ fightId }).toArray();
-            // Sort by initiative desc
-            combatants.sort((a, b) => (b.initiative || 0) - (a.initiative || 0) || a.name.localeCompare(b.name));
+            // Sort by initiative desc, then Dex mod desc, then Name asc
+            combatants.sort((a, b) => {
+                const initDiff = (b.initiative || 0) - (a.initiative || 0);
+                if (initDiff !== 0) return initDiff;
+
+                const dexA = getAbilityModifier(a.baseStats?.Dex || 10);
+                const dexB = getAbilityModifier(b.baseStats?.Dex || 10);
+                const dexDiff = dexB - dexA;
+                if (dexDiff !== 0) return dexDiff;
+
+                return a.name.localeCompare(b.name);
+            });
 
             let nextIndex = (fight.currentTurnIndex || 0) + 1;
             let nextRound = fight.roundCounter || 1;
