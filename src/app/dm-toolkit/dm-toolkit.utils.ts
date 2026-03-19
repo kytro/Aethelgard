@@ -88,22 +88,22 @@ export const CONSTRUCT_HP_BONUS: { [key: string]: number } = {
 };
 
 // PF1e Armor data: maxDex, checkPenalty, type, arcaneSpellFailure
-export const ARMOR_DATA: { [key: string]: { maxDex: number; checkPenalty: number; type: 'light' | 'medium' | 'heavy'; weight: number } } = {
+export const ARMOR_DATA: { [key: string]: { maxDex: number; checkPenalty: number; type: 'light' | 'medium' | 'heavy'; weight: number; acBonus: number } } = {
     // Light Armor
-    'padded': { maxDex: 8, checkPenalty: 0, type: 'light', weight: 10 },
-    'leather': { maxDex: 6, checkPenalty: 0, type: 'light', weight: 15 },
-    'studded leather': { maxDex: 5, checkPenalty: -1, type: 'light', weight: 20 },
-    'chain shirt': { maxDex: 4, checkPenalty: -2, type: 'light', weight: 25 },
+    'padded': { maxDex: 8, checkPenalty: 0, type: 'light', weight: 10, acBonus: 1 },
+    'leather': { maxDex: 6, checkPenalty: 0, type: 'light', weight: 15, acBonus: 2 },
+    'studded leather': { maxDex: 5, checkPenalty: -1, type: 'light', weight: 20, acBonus: 3 },
+    'chain shirt': { maxDex: 4, checkPenalty: -2, type: 'light', weight: 25, acBonus: 4 },
     // Medium Armor
-    'hide': { maxDex: 4, checkPenalty: -3, type: 'medium', weight: 25 },
-    'scale mail': { maxDex: 3, checkPenalty: -4, type: 'medium', weight: 30 },
-    'chainmail': { maxDex: 2, checkPenalty: -5, type: 'medium', weight: 40 },
-    'breastplate': { maxDex: 3, checkPenalty: -4, type: 'medium', weight: 30 },
+    'hide': { maxDex: 4, checkPenalty: -3, type: 'medium', weight: 25, acBonus: 4 },
+    'scale mail': { maxDex: 3, checkPenalty: -4, type: 'medium', weight: 30, acBonus: 5 },
+    'chainmail': { maxDex: 2, checkPenalty: -5, type: 'medium', weight: 40, acBonus: 6 },
+    'breastplate': { maxDex: 3, checkPenalty: -4, type: 'medium', weight: 30, acBonus: 6 },
     // Heavy Armor
-    'splint mail': { maxDex: 0, checkPenalty: -7, type: 'heavy', weight: 45 },
-    'banded mail': { maxDex: 1, checkPenalty: -6, type: 'heavy', weight: 35 },
-    'half-plate': { maxDex: 0, checkPenalty: -7, type: 'heavy', weight: 50 },
-    'full plate': { maxDex: 1, checkPenalty: -6, type: 'heavy', weight: 50 }
+    'splint mail': { maxDex: 0, checkPenalty: -7, type: 'heavy', weight: 45, acBonus: 7 },
+    'banded mail': { maxDex: 1, checkPenalty: -6, type: 'heavy', weight: 35, acBonus: 7 },
+    'half-plate': { maxDex: 0, checkPenalty: -7, type: 'heavy', weight: 50, acBonus: 8 },
+    'full plate': { maxDex: 1, checkPenalty: -6, type: 'heavy', weight: 50, acBonus: 9 }
 };
 
 // PF1e Shield data
@@ -258,14 +258,109 @@ export const calculateSkillBonus = (
     return total;
 };
 
+/**
+ * PF1e Class progressions for BAB and Saves
+ */
+const CLASS_DATA: { [key: string]: { bab: 'full' | 'medium' | 'slow'; fort: 'good' | 'poor'; ref: 'good' | 'poor'; will: 'good' | 'poor' } } = {
+    'fighter': { bab: 'full', fort: 'good', ref: 'poor', will: 'poor' },
+    'cleric': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
+    'wizard': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
+    'rogue': { bab: 'medium', fort: 'poor', ref: 'good', will: 'poor' },
+    'paladin': { bab: 'full', fort: 'good', ref: 'poor', will: 'good' },
+    'ranger': { bab: 'full', fort: 'good', ref: 'good', will: 'poor' },
+    'bard': { bab: 'medium', fort: 'poor', ref: 'good', will: 'good' },
+    'sorcerer': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
+    'druid': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
+    'monk': { bab: 'medium', fort: 'good', ref: 'good', will: 'good' },
+    'barbarian': { bab: 'full', fort: 'good', ref: 'poor', will: 'poor' },
+    'slayer': { bab: 'full', fort: 'good', ref: 'good', will: 'poor' },
+    'alchemist': { bab: 'medium', fort: 'good', ref: 'good', will: 'poor' },
+    'inquisitor': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
+    'magus': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
+    'oracle': { bab: 'medium', fort: 'poor', ref: 'poor', will: 'good' },
+    'summoner': { bab: 'medium', fort: 'poor', ref: 'poor', will: 'good' },
+    'witch': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
+    'vigilante': { bab: 'medium', fort: 'poor', ref: 'good', will: 'good' }
+};
+
+/**
+ * Calculate BAB and Base Saves from an array of classes
+ */
+export const getClassBaseStats = (classes: any[]): { bab: number; fort: number; ref: number; will: number } => {
+    let totalBab = 0;
+    let totalFort = 0;
+    let totalRef = 0;
+    let totalWill = 0;
+
+    if (!Array.isArray(classes)) return { bab: 0, fort: 0, ref: 0, will: 0 };
+
+    classes.forEach(c => {
+        const className = (c.className || '').toLowerCase();
+        const level = parseInt(String(c.level), 10);
+        if (isNaN(level) || level <= 0) return;
+
+        const data = CLASS_DATA[className] || CLASS_DATA['fighter']; // Default to fighter-like if unknown
+
+        // BAB
+        if (data.bab === 'full') totalBab += level;
+        else if (data.bab === 'medium') totalBab += Math.floor(level * 0.75);
+        else totalBab += Math.floor(level * 0.5);
+
+        // Saves (Good: 2 + Lvl/2, Poor: Lvl/3)
+        const good = GOOD_SAVES[level] || 0;
+        const poor = POOR_SAVES[level] || 0;
+
+        totalFort += data.fort === 'good' ? good : poor;
+        totalRef += data.ref === 'good' ? good : poor;
+        totalWill += data.will === 'good' ? good : poor;
+    });
+
+    return { bab: totalBab, fort: totalFort, ref: totalRef, will: totalWill };
+};
+
+/**
+ * Tries to parse class and level from a string description.
+ * Examples: "Human Fighter 5", "Level 3 Wizard", "Paladin 2 / Sorcerer 3"
+ */
+export const parseClassString = (text: string): { className: string; level: number }[] => {
+    if (!text || typeof text !== 'string') return [];
+
+    // Normalize text
+    const cleanText = text.toLowerCase().replace(/level\s*/g, '');
+    const results: { className: string; level: number }[] = [];
+
+    // Check against known classes
+    Object.keys(CLASS_DATA).forEach(className => {
+        // Look for patterns like "fighter 5" or "5 fighter"
+        const regex = new RegExp(`\\b${className}\\s*(\\d+)|(\\d+)\\s*${className}`, 'i');
+        const match = cleanText.match(regex);
+        if (match) {
+            const level = parseInt(match[1] || match[2], 10);
+            if (!isNaN(level) && level > 0) {
+                results.push({ className: className, level: level });
+            }
+        }
+    });
+
+    return results;
+};
+
 export interface CalculateStatsOptions {
     type?: string;              // Creature type (Undead, Construct, Humanoid, etc.)
     feats?: string[];           // List of feat names
     specialAbilities?: string[]; // List of special ability names
+    classes?: any[];
+    level?: number;
+    cr?: number | string;
+    classString?: string;
 }
 
-export const calculateCompleteBaseStats = (baseStats: any, options?: CalculateStatsOptions): any => {
-    const newStats: { [key: string]: any } = { ...(baseStats || {}) };
+export const calculateCompleteBaseStats = (stats: any, options: CalculateStatsOptions = {}): any => {
+    if (!stats) return { Str: 10, Dex: 10, Con: 10, Int: 10, Wis: 10, Cha: 10, AC: 10, BAB: 0 };
+    const newStats: { [key: string]: any } = {
+        ...(stats || {}),
+        classes: stats?.classes || options.classes
+    };
     const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
     abilities.forEach(ability => {
         const val = getCaseInsensitiveProp(newStats, ability);
@@ -338,34 +433,77 @@ export const calculateCompleteBaseStats = (baseStats: any, options?: CalculateSt
         }
     }
 
-    if (!getCaseInsensitiveProp(newStats, 'Saves')) {
-        const level = parseInt(String(getCaseInsensitiveProp(newStats, 'Level') || getCaseInsensitiveProp(newStats, 'CR') || 1), 10);
-        const safeLevelIndex = Math.max(0, Math.min(level - 1, GOOD_SAVES.length - 1));
-
-        // Heuristic for good/bad saves
-        const con = parseInt(String(newStats['Con']), 10);
-        const dex = parseInt(String(newStats['Dex']), 10);
-        const wis = parseInt(String(newStats['Wis']), 10);
-
-        const isFortGood = con >= 14;
-        const isRefGood = dex >= 14;
-        const isWillGood = wis >= 14;
-
-        const baseFort = isFortGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
-        const baseRef = isRefGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
-        const baseWill = isWillGood ? GOOD_SAVES[safeLevelIndex] : POOR_SAVES[safeLevelIndex];
-
-        // Undead use Cha for Fort saves, Constructs have no Fort save modifier
-        const fortMod = isUndead ? chaMod : (isConstruct ? 0 : conMod);
-
-        const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
-        newStats['Saves'] = `Fort ${formatMod(baseFort + fortMod)}, Ref ${formatMod(baseRef + dexMod)}, Will ${formatMod(baseWill + wisMod)}`;
-    }
 
     if (!getCaseInsensitiveProp(newStats, 'Speed')) newStats['Speed'] = '30 ft.';
 
     if (typeof newStats['BAB'] !== 'number') {
-        newStats['BAB'] = parseInt(String(getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || getCaseInsensitiveProp(newStats, 'BAB') || 0).match(/-?\d+/)?.[0] || '0', 10);
+        const explicitBab = parseInt(String(getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || getCaseInsensitiveProp(newStats, 'BAB') || '').match(/-?\d+/)?.[0] || 'NaN', 10);
+
+        let classBab = 0;
+        let classStats = { bab: 0, fort: 0, ref: 0, will: 0 };
+        const hasClasses = newStats['classes'] && Array.isArray(newStats['classes']) && newStats['classes'].length > 0;
+
+        if (hasClasses) {
+            classStats = getClassBaseStats(newStats['classes']);
+            classBab = classStats.bab;
+        }
+
+        if (!isNaN(explicitBab)) {
+            // Use the higher of explicit or calculated BAB to fix low/zero DB values
+            // Exception: If explicit is 0 and calculated is > 0, we trust calculated.
+            // If explicit is HIGHER (e.g. monster HD), we trust explicit.
+            newStats['BAB'] = Math.max(explicitBab, classBab);
+        } else if (hasClasses) {
+            newStats['BAB'] = classBab;
+            // Also derive Saves if missing
+            if (!getCaseInsensitiveProp(newStats, 'Saves')) {
+                const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
+                const conMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Con'));
+                const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Dex'));
+                const wisMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Wis'));
+                const chaMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Cha'));
+                const fortMod = isUndead ? chaMod : (isConstruct ? 0 : conMod);
+                // console.log(`[DEBUG] Deriving Saves: ClassBase(F=${classStats.fort}, R=${classStats.ref}, W=${classStats.will}) + Mods(F=${fortMod}, R=${dexMod}, W=${wisMod})`);
+                newStats['Saves'] = `Fort ${formatMod(classStats.fort + fortMod)}, Ref ${formatMod(classStats.ref + dexMod)}, Will ${formatMod(classStats.will + wisMod)}`;
+            }
+        } else {
+            // FALLBACK: Try to parse class from other fields, or default to Fighter scaled to Level/CR
+            let fallbackClasses: any[] = [];
+
+            // 1. Try to parse from "Class" or "Type" string
+            const classString = getCaseInsensitiveProp(newStats, 'Class') || getCaseInsensitiveProp(newStats, 'Type') || options.classString || '';
+            const parsed = parseClassString(String(classString));
+            if (parsed.length > 0) {
+                console.log(`[DEBUG] Parsed classes from string "${classString}":`, parsed);
+                fallbackClasses = parsed;
+            } else {
+                // 2. Default to Fighter, scaled to CR or Level
+                const levelStr = String(getCaseInsensitiveProp(newStats, 'Level') || getCaseInsensitiveProp(newStats, 'CR') || options.level || options.cr || 1);
+                // Handle "1/2" CR
+                let level = 1;
+                if (levelStr === '1/2' || levelStr === '0.5') level = 1;
+                else level = parseInt(levelStr, 10);
+
+                const effectiveLevel = isNaN(level) || level < 1 ? 1 : level;
+                console.log(`[DEBUG] No classes found. Defaulting to Fighter Level ${effectiveLevel}.`);
+                fallbackClasses = [{ className: 'fighter', level: effectiveLevel }];
+            }
+
+            const classStats = getClassBaseStats(fallbackClasses);
+            newStats['BAB'] = classStats.bab;
+
+            // Also derive Saves for the fallback
+            if (!getCaseInsensitiveProp(newStats, 'Saves')) {
+                const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
+                const conMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Con'));
+                const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Dex'));
+                const wisMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Wis'));
+                const chaMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Cha'));
+                const fortMod = isUndead ? chaMod : (isConstruct ? 0 : conMod);
+
+                newStats['Saves'] = `Fort ${formatMod(classStats.fort + fortMod)}, Ref ${formatMod(classStats.ref + dexMod)}, Will ${formatMod(classStats.will + wisMod)}`;
+            }
+        }
     }
 
     // CMB: Tiny+ creatures or those with Agile Maneuvers can use Dex (PF1e fix)
@@ -373,7 +511,7 @@ export const calculateCompleteBaseStats = (baseStats: any, options?: CalculateSt
     const cmbMod = useDexForCMB ? Math.max(strMod, dexMod) : strMod;
 
     if (typeof getCaseInsensitiveProp(newStats, 'CMB') !== 'number') newStats['CMB'] = newStats['BAB'] + cmbMod + sizeStats.cmbModifier;
-    if (typeof getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + newStats['BAB'] + strMod + dexMod + sizeStats.cmbModifier;
+    if (typeof getCaseInsensitiveProp(newStats, 'CMD') !== 'number') newStats['CMD'] = 10 + (newStats['BAB'] || 0) + strMod + dexMod + sizeStats.cmbModifier;
 
     // HP Calculation with creature type handling (PF1e fix)
     const hpValue = getCaseInsensitiveProp(newStats, 'hp') || getCaseInsensitiveProp(newStats, 'HP') || '1d8';

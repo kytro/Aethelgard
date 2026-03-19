@@ -9,12 +9,13 @@ import {
   formatName, calculateAverageHp, getAbilityModifier, SKILL_ABILITY_MAP, SIZE_DATA,
   CONSTRUCT_HP_BONUS, calculateSkillBonus, CalculateStatsOptions,
   getArmorMaxDex, getArmorCheckPenalty, classifyNaturalAttack, isLightWeapon, LIGHT_WEAPONS,
-  calculateLoad, calculateTotalWeight, LOAD_PENALTIES
+  calculateLoad, calculateTotalWeight, LOAD_PENALTIES,
+  ARMOR_DATA, SHIELD_DATA
 } from '../dm-toolkit.utils';
 import { ModalService } from '../../shared/services/modal.service';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
-interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; tempHp?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; specialAbilities?: string[]; specialAttacks?: string[]; vulnerabilities?: string[]; }
+interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; tempHp?: number; nonLethalDamage?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entity_id?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; specialAbilities?: string[]; specialAttacks?: string[]; vulnerabilities?: string[]; equipment?: any[]; magicItems?: any[]; inventory?: any[]; classes?: any[]; rules?: any[]; spells?: any; }
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
@@ -78,7 +79,7 @@ export class CombatManagerComponent {
   addFormSource = signal<string>('Custom');
   selectedCodexPath = signal<string[]>([]);
   selectedTemplate = signal('');
-  templateOptions = signal<string[]>([]);
+  templateOptions = signal<{ key: string; name: string }[]>([]);
   selectedFoundCreatureId = signal<string | null>(null);
 
   showCustomEffectModal: string | null = null;
@@ -92,10 +93,16 @@ export class CombatManagerComponent {
   newSkill = signal<{ name: string; rank: number }>({ name: '', rank: 0 });
   editingCombatantSpellSlots = signal<CombatantWithModifiers | null>(null);
 
+  // Damage/Healing Modal State
+  damageModalTarget = signal<string | null>(null);
+  healModalTarget = signal<string | null>(null);
+  damageHealAmount = signal<number>(0);
+  isNonLethalDamage = signal(false);
+
   METADATA_KEYS = [
     'summary', 'content', 'category', 'isCombatManagerSource',
     'enableCompletionTracking', 'isCompleted', 'path_components',
-    'baseStats', 'entityId', 'id', 'rules', 'equipment',
+    'baseStats', 'entityId', 'entity_id', 'id', 'rules', 'equipment',
     'magicItems', 'spells', 'relatedPages'
   ];
 
@@ -144,35 +151,43 @@ export class CombatManagerComponent {
 
       if (!node) return;
 
-      let optionsFromContent: string[] = [];
+      // Combine and set
+      const allOptions: { key: string; name: string }[] = [];
 
-      // Case 1: Node has a 'content' array (simple list of templates)
-      // Check if content exists and is NOT rich text (which contains blocks with 'type')
+      const seen = new Set<string>();
+
+      // Case 1: Node has a 'content' array
       if (Array.isArray(node.content)) {
         const isRichText = node.content.some((c: any) => c.type === 'heading' || c.type === 'paragraph' || c.type === 'statblock' || c.type === 'table');
         if (!isRichText) {
-          optionsFromContent = node.content.map((item: any) => typeof item === 'string' ? item : item.name).filter(Boolean);
+          node.content.forEach((item: any) => {
+            const key = typeof item === 'string' ? item : item.name;
+            if (key && !seen.has(key)) {
+              seen.add(key);
+              allOptions.push({ key, name: formatName(key) });
+            }
+          });
         }
       }
 
-      // Case 2: Node is an object that might contain templates (leaf nodes)
-      let optionsFromChildren: string[] = [];
+      // Case 2: Node is an object that might contain templates
       if (typeof node === 'object') {
-        const templateKeys = Object.keys(node).filter(key => {
+        Object.keys(node).filter(key => {
           const child = node[key];
-          // A child is a template if it's a valid object but not a navigable category itself.
           return typeof child === 'object' &&
             child !== null &&
             !this.METADATA_KEYS.includes(key) &&
             !this._isNavigable(child);
+        }).forEach(key => {
+          if (!seen.has(key)) {
+            seen.add(key);
+            allOptions.push({ key, name: formatName(key) });
+          }
         });
-        optionsFromChildren = templateKeys;
       }
 
-      // Combine and set
-      const allOptions = [...new Set([...optionsFromContent, ...optionsFromChildren])];
       if (allOptions.length > 0) {
-        this.templateOptions.set(allOptions.sort().map(formatName));
+        this.templateOptions.set(allOptions.sort((a, b) => a.name.localeCompare(b.name)));
       }
     });
   }
@@ -278,6 +293,8 @@ export class CombatManagerComponent {
     if (!fight) return;
     this.isSavingCombatant.set(true);
     let combatantData: Partial<Combatant> = {};
+    let resolvedNode: any = null;
+    let rules: any[] = [];
 
     try {
       const source = this.addFormSource();
@@ -313,32 +330,59 @@ export class CombatManagerComponent {
             rules = cached.rules || [];
           }
         } else {
-          const templateName = this.selectedTemplate();
-          if (!templateName) throw new Error("Select a template.");
+          const templateKey = this.selectedTemplate();
+          if (!templateKey) throw new Error("Select a template.");
 
           // Resolve Codex Node
-          const fullPath = [source, ...this.selectedCodexPath(), templateName].filter(Boolean);
-          const node = this.getNodeFromCodex(fullPath);
+          const fullPath = [source, ...this.selectedCodexPath(), templateKey].filter(Boolean);
+          console.log(`[CombatManager] Resolving template: ${templateKey} with path: ${fullPath.join('/')}`);
+          let node = this.getNodeFromCodex(fullPath);
+
+          // Fallback Recursive Search in Codex
+          if (!node) {
+            console.warn(`[CombatManager] Path resolution failed for ${fullPath.join('/')}. Attempting recursive search...`);
+            node = this.findNodeRecursive(this.codex()[source], templateKey);
+          }
 
           if (node) {
-            if ((node as any).entityId) entityId = (node as any).entityId;
-            else if ((node as any).id) entityId = (node as any).id;
+            console.log(`[CombatManager] Node found:`, (node as any).name || templateKey);
+            const n = node as any;
 
-            const hpField = getCaseInsensitiveProp((node as any).baseStats || node, 'hp') || getCaseInsensitiveProp((node as any).baseStats || node, 'HP');
+            // Robust ID resolution supporting camelCase, snake_case, and nested metadata
+            entityId = n.entity_id || n.entityId || n.baseStats?.entity_id || n.baseStats?.entityId || n.id || n._id || n.metadata?.id || n.metadata?.entityId;
+
+            const hpField = getCaseInsensitiveProp(n.baseStats || node, 'hp') || getCaseInsensitiveProp(n.baseStats || node, 'HP');
             if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
 
-            baseStats = (node as any).baseStats || node;
+            baseStats = n.baseStats || node;
+            resolvedNode = n;
           }
 
           if (!entityId) {
-            // Fallback to cache search by name
+            // Fallback to cache search by name/key with aggressive normalization
+            console.warn(`[CombatManager] No entityId in node. Checking entitiesCache fallback for: ${templateKey}`);
+
+            const normalize = (s: string) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+
+            const targetNorm = normalize(templateKey);
+            const targetNameNorm = normalize(formatName(templateKey));
+
+            console.log(`[CombatManager] Normalization: targetKey='${templateKey}'->'${targetNorm}', targetName='${formatName(templateKey)}'->'${targetNameNorm}'`);
+
             const entities = this.entitiesCache();
-            const resolvedEntity = entities.find((e: any) => e.name === templateName || e.name === formatName(templateName));
+            const resolvedEntity = entities.find((e: any) => {
+              const eNameNorm = normalize(e.name);
+              const eIdNorm = normalize(e.id || e._id || '');
+              return eNameNorm === targetNorm || eNameNorm === targetNameNorm || eIdNorm === targetNorm;
+            });
+
             if (resolvedEntity) {
-              entityId = resolvedEntity.id;
+              console.log(`[CombatManager] Fallback found entity:`, resolvedEntity.name, `(ID: ${resolvedEntity.id || resolvedEntity._id})`);
+              entityId = resolvedEntity.id || resolvedEntity._id;
               baseStats = resolvedEntity.baseStats || {};
+              resolvedNode = resolvedEntity;
               rules = resolvedEntity.rules || [];
-              if (hpVal === 10) { // Only recalc HP if we didn't find it in the node
+              if (hpVal === 10) {
                 const hpField = getCaseInsensitiveProp(baseStats, 'hp');
                 if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
               }
@@ -346,17 +390,53 @@ export class CombatManagerComponent {
           }
         }
 
-        if (!entityId && source !== 'Found') throw new Error(`Template not found.`);
+        if (!entityId && source !== 'Found') {
+          console.error(`[CombatManager] Resolution Failed! Template: "${this.selectedTemplate()}" Source: ${source} Path: ${this.selectedCodexPath().join('/')}`);
+          console.log(`[CombatManager] entitiesCache count: ${this.entitiesCache().length}`);
+          throw new Error(`Template "${this.selectedTemplate()}" not found in database. Try using 'Find Creature' instead.`);
+        }
 
         // Calculate Initiative
         const initRoll = this.rollInitiative(baseStats, rules);
+
+        // Normalize: Merge top-level stats provided by AI into baseStats
+        const finalBaseStats = {
+          ...baseStats,
+          // Prefer top-level fields if present (common in AI generations or imports)
+          ac: (resolvedNode as any)?.ac ?? (resolvedNode as any)?.AC ?? (baseStats as any).ac ?? (baseStats as any).AC,
+          bab: (resolvedNode as any)?.bab ?? (resolvedNode as any)?.BAB ?? (baseStats as any).bab ?? (baseStats as any).BAB,
+          hp: (resolvedNode as any)?.hp ?? (resolvedNode as any)?.HP ?? (baseStats as any).hp ?? (baseStats as any).HP,
+          saves: (resolvedNode as any)?.saves ?? (resolvedNode as any)?.Saves ?? (baseStats as any).saves ?? (baseStats as any).Saves,
+          senses: (resolvedNode as any)?.senses ?? (resolvedNode as any)?.Senses ?? (baseStats as any).senses ?? (baseStats as any).Senses,
+          classes: (resolvedNode as any)?.classes ?? (baseStats as any).classes ?? []
+        };
 
         combatantData = {
           type: source,
           entityId: entityId || undefined,
           hp: hpVal,
           maxHp: hpVal,
-          initiative: initRoll // Explicitly set initiative
+          initiative: initRoll,
+          baseStats: finalBaseStats,
+          // classes: Handled above
+          // Robust equipment lookup (check items, gear, inventory, baseStats too)
+          equipment: (resolvedNode as any)?.equipment
+            ?? (resolvedNode as any)?.Equipment
+            ?? (resolvedNode as any)?.items
+            ?? (resolvedNode as any)?.Items
+            ?? (resolvedNode as any)?.gear
+            ?? (resolvedNode as any)?.Gear
+            ?? (resolvedNode as any)?.inventory
+            ?? (resolvedNode as any)?.Inventory
+            ?? (baseStats as any)?.equipment
+            ?? (baseStats as any)?.items
+            ?? [],
+          magicItems: (resolvedNode as any)?.magicItems || [],
+          rules: (resolvedNode as any)?.rules || rules,
+          spells: (resolvedNode as any)?.spells || {},
+          specialAbilities: (resolvedNode as any)?.specialAbilities || (resolvedNode as any)?.special_abilities || [],
+          specialAttacks: (resolvedNode as any)?.specialAttacks || (resolvedNode as any)?.special_attacks || [],
+          vulnerabilities: (resolvedNode as any)?.vulnerabilities || []
         };
       }
 
@@ -557,6 +637,18 @@ export class CombatManagerComponent {
     return node;
   }
 
+  private findNodeRecursive(root: any, targetKey: string): any {
+    if (!root || typeof root !== 'object') return null;
+    if (root[targetKey]) return root[targetKey];
+
+    const childKeys = Object.keys(root).filter(k => !this.METADATA_KEYS.includes(k));
+    for (const key of childKeys) {
+      const found = this.findNodeRecursive(root[key], targetKey);
+      if (found) return found;
+    }
+    return null;
+  }
+
   // --- Modals & Tooltips ---
   toggleDetails(id: string) { this.expandedCombatant.update(c => c === id ? null : id); }
   hideFoundCreaturesListWithDelay() { setTimeout(() => this.showFoundCreaturesList.set(false), 200); }
@@ -620,8 +712,17 @@ export class CombatManagerComponent {
   // --- Complex Computed ---
   modifiedCombatants = computed<CombatantWithModifiers[]>(() => {
     return this.combatants().map(c => {
-      const entity = c.entityId ? this.entitiesCache().find(e => e.id === c.entityId) : null;
-      const baseStats = calculateCompleteBaseStats(c.baseStats);
+      const actualEntityId = c.entity_id || c.entityId;
+      const entity = actualEntityId ? this.entitiesCache().find(e => e.id === actualEntityId) : null;
+      const targetEntity = entity || c as any;
+      const baseStats = calculateCompleteBaseStats(c.baseStats, {
+        classes: c.classes,
+        type: c.type,
+        specialAbilities: c.specialAbilities,
+        level: (targetEntity as any)?.level || (targetEntity as any)?.Level,
+        cr: (targetEntity as any)?.cr || (targetEntity as any)?.CR,
+        classString: (targetEntity as any)?.class || (targetEntity as any)?.Class || (targetEntity as any)?.type || (targetEntity as any)?.Type
+      });
       // Saves parsing
       const savesStr = getCaseInsensitiveProp(baseStats, 'Saves');
       const resSaves = { Fort: 0, Ref: 0, Will: 0 };
@@ -636,7 +737,7 @@ export class CombatManagerComponent {
       }
       baseStats.SavesObject = resSaves;
 
-      const allFeats = entity ? (entity.rules || []).map((id: string) => ({ id, ...this.rulesCache().get(id) })).filter((f: any) => f.name) : [];
+      const allFeats = (targetEntity.rules || []).map((id: string) => ({ id, ...this.rulesCache().get(id) })).filter((f: any) => f.name) || [];
 
       // Merge string-based feats from baseStats if available (for monsters)
       const rawFeats: string[] = getCaseInsensitiveProp(baseStats, 'Feats') || [];
@@ -647,20 +748,70 @@ export class CombatManagerComponent {
         }
       });
 
-      const mappedEquipment = entity ? (entity.equipment || []).map((id: string) => ({ id, ...this.equipmentCache().get(id), isMagic: false })).filter((e: any) => e.name) : [];
-      const mappedMagicItems = entity ? (entity.magicItems || []).map((id: string) => ({ id, ...this.magicItemsCache().get(id), isMagic: true })).filter((mi: any) => mi.name) : [];
+      let equipment: any[] = [];
+      let magicItems: any[] = [];
 
-      // Combine equipment
-      const combinedItemsMap = new Map<string, any>();
-      [...mappedEquipment, ...mappedMagicItems].forEach(item => {
-        if (item.id) {
-          if (combinedItemsMap.has(item.id) && !item.isMagic) return;
-          combinedItemsMap.set(item.id, item);
+      // Unified Inventory Logic
+      if (targetEntity.inventory && Array.isArray(targetEntity.inventory)) {
+        targetEntity.inventory.forEach((item: any) => {
+          // Construct item object with defaults, spread properties
+          const processed = {
+            id: item.itemId, // Might be undefined
+            ...item,
+            // Ensure properties are accessible
+            ...(item.properties || {})
+          };
+          if (item.type === 'magic' || item.isMagic) {
+            magicItems.push(processed);
+          } else {
+            equipment.push(processed);
+          }
+        });
+      } else {
+        // Legacy Fallback / Explicit IDs or Objects
+        const mappedEquipment = (targetEntity.equipment || []).map((ref: any) => {
+          if (typeof ref === 'object') return { ...ref, ...(ref.properties || {}) };
+          return this.resolveItem(ref, this.equipmentCache(), false);
+        }).filter((e: any) => e.name);
+
+        const mappedMagicItems = (targetEntity.magicItems || []).map((ref: any) => {
+          if (typeof ref === 'object') return { ...ref, ...(ref.properties || {}) };
+          return this.resolveItem(ref, this.magicItemsCache(), true);
+        }).filter((mi: any) => mi.name);
+
+        // Combine equipment
+        const combinedItemsMap = new Map<string, any>();
+        [...mappedEquipment, ...mappedMagicItems].forEach(item => {
+          if (item.id) {
+            if (combinedItemsMap.has(item.id) && !item.isMagic) return;
+            combinedItemsMap.set(item.id, item);
+          } else {
+            const uniqueKey = item.name + (item.isMagic ? '_magic' : '_equip');
+            combinedItemsMap.set(uniqueKey, item);
+          }
+        });
+        const uniqueItems = Array.from(combinedItemsMap.values());
+        equipment = uniqueItems.filter(item => !item.isMagic);
+        magicItems = uniqueItems.filter(item => item.isMagic);
+      }
+
+      // Final pass: Heuristically type items that look like weapons but are marked as 'equipment'
+      // This fixes the issue where migration set everything to 'equipment'
+      equipment.forEach(item => {
+        if ((item.type === 'equipment' || item.type === 'gear' || !item.type) && !item.properties?.damage_m) {
+          const lowerName = (item.name || '').toLowerCase();
+          // Check for known weapon keywords
+          if (['sword', 'blade', 'dagger', 'axe', 'mace', 'hammer', 'spear', 'bow', 'crossbow', 'sling', 'cutlass', 'rapier', 'scimitar', 'falchion', 'glaive'].some(k => lowerName.includes(k))) {
+            console.warn(`[CombatManager] Heuristic correction: Promoting ${item.name} to weapon`);
+            item.type = 'weapon';
+            // Safe copy of properties
+            const newProps = { ...(item.properties || {}) };
+            if (!newProps.damage_m) newProps.damage_m = '1d6'; // Fallback
+            if (!newProps.critical) newProps.critical = '20/x2';
+            item.properties = newProps;
+          }
         }
       });
-      const uniqueItems = Array.from(combinedItemsMap.values());
-      const equipment = uniqueItems.filter(item => !item.isMagic);
-      const magicItems = uniqueItems.filter(item => item.isMagic);
 
       // Extract Special Abilities
       // const specialAbilities = ... (Removed redeclaration)
@@ -701,6 +852,48 @@ export class CombatManagerComponent {
       (c.activeFeats || []).forEach(featId => {
         const featData = this.rulesCache().get(featId);
         if (featData?.effects) featData.effects.forEach((eff: any) => addMod(eff.target, eff.type, eff.value));
+      });
+
+      // Heuristic: Apply modifiers from equipped items
+      [...equipment, ...magicItems].forEach(item => {
+        if (item.equipped === false) return; // Skip unequipped
+
+        // 1. Explicit Modifiers (Future proofing)
+        if (item.modifiers) {
+          Object.entries(item.modifiers).forEach(([s, m]: [string, any]) => addMod(s, m.type, m.value));
+        }
+
+        // 2. Name-based Heuristics for common PF1e items
+        // Only if no explicit modifiers found (to avoid double counting if data improves)
+        if (!item.modifiers) {
+          const name = (item.name || '').toLowerCase();
+          const bonusMatch = name.match(/[+-]\s*(\d+)/); // Matches "+1" or "+ 1"
+          const bonus = bonusMatch ? parseInt(bonusMatch[1], 10) : 0;
+
+          if (bonus > 0) {
+            if (name.includes('cloak of resistance')) {
+              addMod('Saves', 'resistance', bonus);
+            } else if (name.includes('ring of protection')) {
+              addMod('AC', 'deflection', bonus);
+            } else if (name.includes('amulet of natural armor')) {
+              addMod('AC', 'natural', bonus);
+            } else if (name.includes('bracers of armor')) {
+              addMod('AC', 'armor', bonus);
+            } else if (name.includes('belt of giant strength')) {
+              addMod('Str', 'enhancement', bonus);
+            } else if (name.includes('belt of incredible dexterity')) {
+              addMod('Dex', 'enhancement', bonus);
+            } else if (name.includes('belt of mighty constitution')) {
+              addMod('Con', 'enhancement', bonus);
+            } else if (name.includes('headband of vast intelligence')) {
+              addMod('Int', 'enhancement', bonus);
+            } else if (name.includes('headband of inspired wisdom')) {
+              addMod('Wis', 'enhancement', bonus);
+            } else if (name.includes('headband of alluring charisma')) {
+              addMod('Cha', 'enhancement', bonus);
+            }
+          }
+        }
       });
 
       const finalBonuses: { [key: string]: number } = {};
@@ -786,7 +979,7 @@ export class CombatManagerComponent {
           if (values.length === 0) continue;
 
           let typeBonus = 0;
-          if (['dodge', 'untyped', 'penalty', 'circumstance'].includes(type)) {
+          if (['dodge', 'untyped', 'penalty', 'circumstance'].includes(type.toLowerCase())) {
             typeBonus = values.reduce((a, b) => a + b, 0);
           } else {
             const pos = values.filter(v => v > 0);
@@ -794,6 +987,10 @@ export class CombatManagerComponent {
             if (pos.length > 0) typeBonus += Math.max(...pos);
             if (neg.length > 0) typeBonus += Math.min(...neg);
           }
+
+          // AC: Apply to modifiedStats total
+          const currentAc = getCaseInsensitiveProp(modifiedStats, 'AC') || 10;
+          modifiedStats['AC'] = currentAc + typeBonus;
 
           // Touch: Exclude armor, shield, natural
           if (!['armor', 'shield', 'natural', 'natural armor', 'natural_armor'].includes(type.toLowerCase())) {
@@ -807,7 +1004,49 @@ export class CombatManagerComponent {
         }
       }
 
-      modifiedStats['AC'] = (getCaseInsensitiveProp(modifiedStats, 'AC') || 10) + cappedDexModDiff;
+      let heuristicArmorBonus = 0;
+      let heuristicShieldBonus = 0;
+
+      [...equipment, ...magicItems].forEach(item => {
+        // If explicitly unequipped, skip
+        if (item.equipped === false) return;
+
+        const name = (item.name || '').toLowerCase();
+        const armor = ARMOR_DATA[name] || Object.values(ARMOR_DATA).find((a: any) =>
+          name.includes(a.id || '') || (a.name && name.includes(a.name.toLowerCase()))
+        );
+        const shield = SHIELD_DATA[name] || Object.values(SHIELD_DATA).find((s: any) =>
+          name.includes(s.id || s.name?.toLowerCase() || '')
+        );
+
+        if (armor && !allMods['AC']?.['armor']) {
+          const bonus = armor.acBonus || 0;
+          // Take the best armor bonus found (non-stacking)
+          if (bonus > heuristicArmorBonus) heuristicArmorBonus = bonus;
+        }
+
+        if (shield && !allMods['AC']?.['shield']) {
+          const bonus = shield.acBonus || 0;
+          // Take the best shield bonus found (non-stacking)
+          if (bonus > heuristicShieldBonus) heuristicShieldBonus = bonus;
+        }
+      });
+
+      if (heuristicArmorBonus > 0) {
+        const currentAc = getCaseInsensitiveProp(modifiedStats, 'AC') || 10;
+        modifiedStats['AC'] = currentAc + heuristicArmorBonus;
+        // Flat-footed includes armor
+        ffAcBonus += heuristicArmorBonus;
+      }
+
+      if (heuristicShieldBonus > 0) {
+        const currentAc = getCaseInsensitiveProp(modifiedStats, 'AC');
+        modifiedStats['AC'] = currentAc + heuristicShieldBonus;
+        // Flat-footed includes shield
+        ffAcBonus += heuristicShieldBonus;
+      }
+
+      modifiedStats['AC'] = (modifiedStats['AC'] || 10) + cappedDexModDiff;
       modifiedStats['Touch'] = (getCaseInsensitiveProp(modifiedStats, 'Touch') || 10) + dexModDiff + touchAcBonus;
       modifiedStats['Flat-Footed'] = (getCaseInsensitiveProp(modifiedStats, 'Flat-Footed') ||
         getCaseInsensitiveProp(modifiedStats, 'FlatFooted') || 10) + ffAcBonus;
@@ -1139,15 +1378,16 @@ export class CombatManagerComponent {
       await this.handleUpdateCombatant(caster._id, 'spellSlots', newSlots);
     }
 
-    // Find target name
+    // Find target
     const target = this.combatants().find(c => c._id === targetId);
     const targetName = target ? target.name : 'self';
+
+    // Calculate Caster Level (Hoisted)
+    const casterLevel = parseInt(String(getCaseInsensitiveProp(caster.baseStats, 'Level') || getCaseInsensitiveProp(caster.baseStats, 'CR') || 1), 10);
 
     // Calculate DC if saving throw applies
     let dcInfo = '';
     if (spell.savingThrow && spell.savingThrow.toLowerCase() !== 'none') {
-      // PF1e: DC = 10 + spell level + casting ability modifier
-      // Try to determine casting ability from class
       const classLower = (caster.baseStats?.Class || '').toLowerCase();
       let castingAbility = 'Int'; // Default: Wizard, Magus, Witch
       if (['cleric', 'druid', 'ranger', 'inquisitor'].some(c => classLower.includes(c))) {
@@ -1164,12 +1404,50 @@ export class CombatManagerComponent {
     if (target) {
       const targetSR = getCaseInsensitiveProp(target.baseStats, 'SR');
       if (targetSR && targetSR > 0) {
-        // Caster Level check: d20 + Level vs SR
-        const casterLevel = getCaseInsensitiveProp(caster.baseStats, 'Level') || getCaseInsensitiveProp(caster.baseStats, 'CR') || 1;
         const clRoll = Math.floor(Math.random() * 20) + 1;
-        const clTotal = clRoll + parseInt(String(casterLevel), 10);
+        const clTotal = clRoll + casterLevel;
         const srSuccess = clTotal >= targetSR ? 'Success' : 'Failure';
         dcInfo += `. SR Check: ${clRoll}+${casterLevel} = ${clTotal} vs SR ${targetSR} (${srSuccess})`;
+      }
+
+      // --- Auto-Apply Effect Logic ---
+      if (spell.duration && spell.duration.toLowerCase() !== 'instantaneous' && !spell.duration.toLowerCase().includes('concentration')) {
+        let duration = 0;
+        let unit: 'rounds' | 'minutes' | 'hours' | 'days' | 'permanent' = 'rounds';
+        const durLower = spell.duration.toLowerCase();
+
+        // Regex for "X unit/level" or "X unit"
+        const match = durLower.match(/(\d+)?\s*(round|min|minute|hour|day)s?(\/level)?/);
+        if (match) {
+          const baseVal = parseInt(match[1] || '1', 10);
+          const u = match[2];
+          const perLevel = !!match[3];
+
+          let multiplier = 1;
+          if (perLevel) multiplier = casterLevel;
+
+          let calculatedDuration = baseVal * multiplier;
+
+          // Normalize to rounds/common units
+          if (u.startsWith('min')) { unit = 'minutes'; }
+          else if (u.startsWith('hour')) { unit = 'hours'; }
+          else if (u.startsWith('day')) { unit = 'days'; }
+          else { unit = 'rounds'; } // default
+
+          duration = calculatedDuration;
+
+          // Auto-add effect
+          const effect: CombatantEffect = {
+            name: spell.name,
+            duration: duration,
+            unit: unit,
+            startRound: this.roundCounter(),
+            remainingRounds: duration // Approximation for non-rounds logic
+          };
+          this.logAction(`Auto-applied effect: ${spell.name} (${duration} ${unit}) to ${target.name}`);
+          const updatedEffects = [...(target.effects || []), effect];
+          this.handleUpdateCombatant(target._id, 'effects', updatedEffects);
+        }
       }
     }
 
@@ -1284,10 +1562,17 @@ export class CombatManagerComponent {
    * Apply damage to a combatant, reducing temp HP first (PF1e rules)
    * @param combatantId - ID of the combatant
    * @param damage - Amount of damage to apply
+   * @param isNonLethal - Whether the damage is non-lethal
    */
-  applyDamage(combatantId: string, damage: number) {
+  applyDamage(combatantId: string, damage: number, isNonLethal: boolean = false) {
     const c = this.combatants().find(x => x._id === combatantId);
     if (!c || damage <= 0) return;
+
+    if (isNonLethal) {
+      const currentNL = c.nonLethalDamage || 0;
+      this.handleUpdateCombatant(combatantId, 'nonLethalDamage', currentNL + damage);
+      return;
+    }
 
     let remainingDamage = damage;
     let newTempHp = c.tempHp || 0;
@@ -1327,5 +1612,83 @@ export class CombatManagerComponent {
     const maxHp = c.maxHp || c.baseStats?.maxHp || 100;
     const newHp = Math.min(c.hp + healing, maxHp);
     this.handleUpdateCombatant(combatantId, 'hp', newHp);
+  }
+
+  // --- Damage/Healing Modal Methods ---
+  openDamageModal(combatantId: string) {
+    this.damageModalTarget.set(combatantId);
+    this.damageHealAmount.set(0);
+  }
+
+  openHealModal(combatantId: string) {
+    this.healModalTarget.set(combatantId);
+    this.damageHealAmount.set(0);
+    this.isNonLethalDamage.set(false);
+  }
+
+  confirmDamage() {
+    const target = this.damageModalTarget();
+    if (target && this.damageHealAmount() > 0) {
+      this.applyDamage(target, this.damageHealAmount(), this.isNonLethalDamage());
+    }
+    this.damageModalTarget.set(null);
+    this.isNonLethalDamage.set(false);
+  }
+
+  confirmHeal() {
+    const target = this.healModalTarget();
+    if (target && this.damageHealAmount() > 0) {
+      this.applyHealing(target, this.damageHealAmount());
+    }
+    this.healModalTarget.set(null);
+  }
+
+  closeDamageHealModal() {
+    this.damageModalTarget.set(null);
+    this.healModalTarget.set(null);
+    this.isNonLethalDamage.set(false);
+  }
+  getClasses(c: Combatant): { className: string, level: number }[] {
+    return c.baseStats?.classes || [];
+  }
+
+  getClassSummary(c: Combatant): string {
+    const classes = this.getClasses(c);
+    if (classes.length > 0) {
+      return classes.map(cl => `${cl.className} ${cl.level}`).join(' / ');
+    }
+    // Fallback to legacy
+    const cls = getCaseInsensitiveProp(c.baseStats, 'class') || (getCaseInsensitiveProp(c.baseStats, 'Level') === undefined ? getCaseInsensitiveProp(c.baseStats, 'Class') : undefined);
+    const lvl = getCaseInsensitiveProp(c.baseStats, 'level') || getCaseInsensitiveProp(c.baseStats, 'Level');
+    const cr = getCaseInsensitiveProp(c.baseStats, 'CR');
+
+    if (cls) return `${cls} ${lvl || ''}`.trim();
+    if (cr) return String(cr);
+    return lvl ? String(lvl) : '?';
+  }
+
+  private resolveItem(ref: string, cache: Map<string, any>, isMagic: boolean): any {
+    // 1. Try explicit ID match (standard behavior)
+    if (cache.has(ref)) {
+      return { id: ref, ...cache.get(ref), isMagic };
+    }
+
+    // 2. If it's a string name (e.g., "+1 Cutlass"), try to find the base item in cache
+    // This supports entities that simply list equipment/loot as text strings
+    const lowerRef = ref.toLowerCase();
+
+    // Naively iterate - cache size is usually small enough (~hundreds)
+    for (const [id, item] of cache.entries()) {
+      if (item.name && lowerRef.includes(item.name.toLowerCase())) {
+        // Match found!
+        // We use the Cache's stats (type, properties) but keep the Custom Name
+        // This allows "+1 Cutlass" to act like a "Cutlass" but show as "+1 Cutlass"
+        return { id: id, ...item, name: ref, isMagic };
+      }
+    }
+
+    // 3. Fallback: Return raw string object
+    // It won't have 'type=weapon' or properties, so it won't generate attacks, but it shows in inventory
+    return { name: ref, isMagic, type: 'misc' };
   }
 }

@@ -1,118 +1,174 @@
 <div class="settings">
   <div class="flex justify-between items-center mb-6">
     <h2 class="text-3xl font-bold text-white">Settings</h2>
-    <button (click)="saveAllSettings()" [disabled]="!isDirty() || isLoading()" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed">
+    <button (click)="saveAllSettings()" [disabled]="!isDirty() || isLoading()"
+      class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed">
       {{ isLoading() ? 'Saving...' : 'Save Settings' }}
     </button>
   </div>
 
   @if (apiKeysDoc(); as doc) {
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-      
-      <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6">
-        <h3 class="text-xl font-semibold text-white mb-3">API Key Management</h3>
-        <p class="text-gray-400 mb-4">
-          Add named API keys below. You can select which key is active for AI features from the dropdown on the right.
-        </p>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
 
-        <div class="flex items-start gap-4 mb-6">
-          <div class="flex-grow">
-            <label for="new-key-name" class="block text-sm font-medium text-gray-400">Key Name</label>
-            <input 
-              type="text" 
-              id="new-key-name"
-              [(ngModel)]="newKeyName"
-              [disabled]="isLoading()"
-              placeholder="e.g., 'Default Key'"
-              class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500"
-            />
-          </div>
-          <div class="flex-grow">
-            <label for="new-key-value" class="block text-sm font-medium text-gray-400">API Key</label>
-            <input 
-              type="password" 
-              id="new-key-value"
-              [(ngModel)]="newKeyValue"
-              [disabled]="isLoading()"
-              placeholder="Enter the new API key"
-              class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white font-mono mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500"
-            />
-          </div>
-          <button (click)="addApiKey()" [disabled]="isLoading()" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed mt-6">
-            {{ isLoading() ? 'Adding...' : 'Add Key' }}
-          </button>
-        </div>
+    <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6">
+      <h3 class="text-xl font-semibold text-white mb-3">API Key Management</h3>
+      <p class="text-gray-400 mb-4">
+        Add named API keys below. You can select which key is active for AI features from the dropdown on the right.
+      </p>
 
-        <div class="space-y-2">
-          @if (doc.keys && doc.keys.length > 0) {
-            @for (key of doc.keys; track key.id) {
-              <div class="flex items-center justify-between bg-gray-900/70 p-3 rounded-md">
-                <span class="text-white font-mono">{{ key.name }}</span>
-                <button (click)="deleteApiKey(key.id)" [disabled]="isLoading()" class="text-red-500 hover:text-red-400 disabled:text-gray-500">
-                  Delete
-                </button>
-              </div>
-            }
-          } @else {
-            <p class="text-gray-500 text-center py-4">No API keys have been added yet.</p>
-          }
+      <div class="flex items-start gap-4 mb-6">
+        <div class="flex-grow">
+          <label for="new-key-name" class="block text-sm font-medium text-gray-400">Key Name</label>
+          <input type="text" id="new-key-name" [(ngModel)]="newKeyName" [disabled]="isLoading()"
+            placeholder="e.g., 'Default Key'"
+            class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500" />
         </div>
+        <div class="flex-grow">
+          <label for="new-key-value" class="block text-sm font-medium text-gray-400">API Key</label>
+          <input type="password" id="new-key-value" [(ngModel)]="newKeyValue" [disabled]="isLoading()"
+            placeholder="Enter the new API key"
+            class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white font-mono mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500" />
+        </div>
+        <button (click)="addApiKey()" [disabled]="isLoading()"
+          class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed mt-6">
+          {{ isLoading() ? 'Adding...' : 'Add Key' }}
+        </button>
       </div>
 
-      <div class="space-y-8">
-        <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6 h-fit">
-          <h3 class="text-xl font-semibold text-white mb-3">Active API Key</h3>
-          <p class="text-gray-400 mb-4">
-            Select the API key to be used for all AI-powered features.
-          </p>
-          <select 
-            [(ngModel)]="doc.active_key_id" 
-            (ngModelChange)="onSettingsChange()"
-            [disabled]="isLoading() || !doc.keys || doc.keys.length === 0"
-            class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700"
-          >
-            @if (doc.keys && doc.keys.length > 0) {
-              @for (key of doc.keys; track key.id) {
-                <option [value]="key.id">{{ key.name }}</option>
-              }
-            } @else {
-              <option [value]="null" disabled>Add a key to get started</option>
-            }
-          </select>
+      <div class="space-y-2">
+        @if (doc.keys && doc.keys.length > 0) {
+        @for (key of doc.keys; track key.id) {
+        <div class="flex items-center justify-between bg-gray-900/70 p-3 rounded-md">
+          <span class="text-white font-mono">{{ key.name }}</span>
+          <button (click)="deleteApiKey(key.id)" [disabled]="isLoading()"
+            class="text-red-500 hover:text-red-400 disabled:text-gray-500">
+            Delete
+          </button>
         </div>
-
-        @if(generalSettingsDoc(); as gSettings) {
-            <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6 h-fit">
-                <h3 class="text-xl font-semibold text-white mb-3">Default AI Model</h3>
-                <p class="text-gray-400 mb-4">
-                  Select the default generative model for AI assistants.
-                </p>
-                <select 
-                  [(ngModel)]="gSettings.default_ai_model" 
-                  (ngModelChange)="onSettingsChange()"
-                  [disabled]="isLoading() || availableModels().length === 0"
-                  class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700"
-                >
-                  @if (availableModels().length > 0) {
-                    @for (model of availableModels(); track model) {
-                      <option [value]="model">{{ formatModelName(model) }}</option>
-                    }
-                  } @else {
-                    <option [value]="null" disabled>Could not load models</option>
-                  }
-                </select>
-              </div>
+        }
+        } @else {
+        <p class="text-gray-500 text-center py-4">No API keys have been added yet.</p>
         }
       </div>
     </div>
 
-    @if (message(); as msg) {
-      <div class="mt-6 px-4 py-3 rounded-lg text-sm max-w-2xl" [ngClass]="{'bg-green-900/50 border border-green-700 text-green-300': !msg.isError, 'bg-red-900/50 border border-red-700 text-red-300': msg.isError}">
-        <p>{{ msg.text }}</p>
+    <!-- PERSONAL API KEYS -->
+    <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6">
+      <h3 class="text-xl font-semibold text-white mb-3">My Access Tokens</h3>
+      <p class="text-gray-400 mb-4">
+        Personal API keys allow you to access the Codex API from external scripts.
+      </p>
+
+      <div class="flex items-end gap-3 mb-6">
+        <div class="flex-grow">
+          <label for="new-my-key-name" class="block text-sm font-medium text-gray-400">Token Name</label>
+          <input type="text" id="new-my-key-name" [(ngModel)]="newMyKeyName" [disabled]="isLoading()"
+            placeholder="e.g., 'Verification Script'"
+            class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500" />
+        </div>
+        <button (click)="generateMyApiKey()" [disabled]="isLoading() || !newMyKeyName()"
+          class="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded-md disabled:bg-gray-600 disabled:cursor-not-allowed">
+          {{ isLoading() ? 'Generating...' : 'Generate' }}
+        </button>
       </div>
-    }
+
+      <div class="space-y-2">
+        @if (myApiKeys().length > 0) {
+        @for (key of myApiKeys(); track key.id) {
+        <div class="bg-gray-900/70 p-3 rounded-md">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-white font-bold">{{ key.name }}</span>
+            <button (click)="revokeMyApiKey(key.id)" [disabled]="isLoading()"
+              class="text-red-500 hover:text-red-400 text-sm disabled:text-gray-500">
+              Revoke
+            </button>
+          </div>
+          <div class="flex items-center justify-between text-xs text-gray-500">
+            <span class="font-mono">{{ key.prefix }}...</span>
+            <span>Created: {{ key.createdAt | date:'shortDate' }}</span>
+          </div>
+        </div>
+        }
+        } @else {
+        <p class="text-gray-500 text-center py-4">No personal tokens generated.</p>
+        }
+      </div>
+    </div>
+
+    <div class="space-y-8">
+      <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6 h-fit">
+        <h3 class="text-xl font-semibold text-white mb-3">Active API Key</h3>
+        <p class="text-gray-400 mb-4">
+          Select the API key to be used for all AI-powered features.
+        </p>
+        <select [(ngModel)]="doc.active_key_id" (ngModelChange)="onSettingsChange()"
+          [disabled]="isLoading() || !doc.keys || doc.keys.length === 0"
+          class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700">
+          @if (doc.keys && doc.keys.length > 0) {
+          @for (key of doc.keys; track key.id) {
+          <option [value]="key.id">{{ key.name }}</option>
+          }
+          } @else {
+          <option [value]="null" disabled>Add a key to get started</option>
+          }
+        </select>
+      </div>
+
+      @if(generalSettingsDoc(); as gSettings) {
+      <div class="border border-gray-700 rounded-lg bg-gray-800/50 p-6 h-fit">
+        <h3 class="text-xl font-semibold text-white mb-3">Default AI Model</h3>
+        <p class="text-gray-400 mb-4">
+          Select the default generative model for AI assistants.
+        </p>
+        <select [(ngModel)]="gSettings.default_ai_model" (ngModelChange)="onSettingsChange()"
+          [disabled]="isLoading() || availableModels().length === 0"
+          class="w-full bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white mt-1 focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:bg-gray-700">
+          @if (availableModels().length > 0) {
+          @for (model of availableModels(); track model) {
+          <option [value]="model">{{ formatModelName(model) }}</option>
+          }
+          } @else {
+          <option [value]="null" disabled>Could not load models</option>
+          }
+        </select>
+      </div>
+      }
+    </div>
+  </div>
+
+  @if (message(); as msg) {
+  <div class="mt-6 px-4 py-3 rounded-lg text-sm max-w-2xl"
+    [ngClass]="{'bg-green-900/50 border border-green-700 text-green-300': !msg.isError, 'bg-red-900/50 border border-red-700 text-red-300': msg.isError}">
+    <p>{{ msg.text }}</p>
+  </div>
+  }
 
   } @else if (isLoading()) {
-    <p class="text-white">Loading settings...</p>
+  <p class="text-white">Loading settings...</p>
+  }
+
+  @if (createdMyKey(); as key) {
+  <!-- MODAL FOR NEW KEY -->
+  <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+    <div class="bg-gray-800 border border-gray-600 rounded-lg p-6 max-w-lg w-full shadow-2xl">
+      <h3 class="text-2xl font-bold text-white mb-4">API Key Generated</h3>
+      <div class="bg-yellow-900/30 border border-yellow-700 p-4 rounded mb-4">
+        <p class="text-yellow-200 text-sm">
+          This is the only time required to copy your key. It will not be shown again.
+        </p>
+      </div>
+
+      <div class="bg-gray-950 p-4 rounded border border-gray-700 mb-6 font-mono text-green-400 break-all select-all">
+        {{ key }}
+      </div>
+
+      <div class="flex justify-end">
+        <button (click)="closeCreatedKeyModal()"
+          class="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-6 rounded">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
   }
 </div>

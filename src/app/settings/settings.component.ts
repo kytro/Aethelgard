@@ -24,6 +24,14 @@ export interface GeneralSettingsDoc {
   default_ai_model: string;
 }
 
+export interface MyApiKey {
+  id: string;
+  name: string;
+  prefix: string;
+  createdAt: string;
+  lastUsed?: string;
+}
+
 @Component({
   selector: 'app-settings',
   standalone: true,
@@ -38,9 +46,13 @@ export class SettingsComponent {
   apiKeysDoc: WritableSignal<ApiKeysDoc | null> = signal(null);
   generalSettingsDoc: WritableSignal<GeneralSettingsDoc | null> = signal(null); // NEW
   availableModels = signal<string[]>([]); // NEW
+  myApiKeys = signal<MyApiKey[]>([]);
 
   newKeyName = signal<string>('');
   newKeyValue = signal<string>('');
+
+  newMyKeyName = signal<string>('');
+  createdMyKey = signal<string | null>(null);
 
   isLoading = signal<boolean>(false);
   isDirty = signal<boolean>(false);
@@ -66,7 +78,8 @@ export class SettingsComponent {
       const [keysDoc, generalDoc, modelsResult] = await Promise.all([
         lastValueFrom(this.http.get<ApiKeysDoc>('/codex/api/admin/settings/api-keys')),
         lastValueFrom(this.http.get<GeneralSettingsDoc>('/codex/api/admin/settings/general')),
-        lastValueFrom(this.http.get<{ models: string[] }>('/codex/api/ai-assistant/models'))
+        lastValueFrom(this.http.get<{ models: string[] }>('/codex/api/ai-assistant/models')),
+        this.loadMyApiKeys()
       ]);
 
       this.apiKeysDoc.set(keysDoc);
@@ -171,5 +184,58 @@ export class SettingsComponent {
     }
     // Handle Gemini models
     return name.replace('models/', '').split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  }
+
+  async loadMyApiKeys() {
+    try {
+      const res = await lastValueFrom(this.http.get<{ success: boolean, data: MyApiKey[] }>('/codex/api/admin/api-keys'));
+      if (res && res.success) {
+        this.myApiKeys.set(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to load my api keys', err);
+    }
+  }
+
+  async generateMyApiKey() {
+    if (!this.newMyKeyName()) {
+      this.message.set({ text: 'Key Name cannot be empty.', isError: true });
+      return;
+    }
+    this.isLoading.set(true);
+
+
+    try {
+      const res = await lastValueFrom(this.http.post<{ success: boolean, data: any }>('/codex/api/admin/api-keys', { name: this.newMyKeyName() }));
+      if (res && res.success) {
+        this.createdMyKey.set(res.data.key);
+        this.newMyKeyName.set('');
+        await this.loadMyApiKeys();
+        this.message.set({ text: 'Personal API Key generated.', isError: false });
+      }
+    } catch (err: any) {
+      this.message.set({ text: err.error?.error || 'Failed to generate key.', isError: true });
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
+  async revokeMyApiKey(id: string) {
+    if (!confirm('Revoke this API Key? This will immediately deny access to any scripts using it.')) return;
+
+    this.isLoading.set(true);
+    try {
+      await lastValueFrom(this.http.delete<{ success: boolean }>(`/codex/api/admin/api-keys/${id}`));
+      await this.loadMyApiKeys();
+      this.message.set({ text: 'Key revoked.', isError: false });
+    } catch (err: any) {
+      this.message.set({ text: err.error?.error || 'Failed to revoke key.', isError: true });
+    } finally {
+      this.isLoading.set(false);
+    }
+  }
+
+  closeCreatedKeyModal() {
+    this.createdMyKey.set(null);
   }
 }

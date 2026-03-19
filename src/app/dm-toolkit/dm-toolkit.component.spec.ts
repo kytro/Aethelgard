@@ -39,7 +39,7 @@ describe('DmToolkitComponent', () => {
         const reqs = [
             '/codex/api/dm-toolkit/fights',
             '/codex/api/dm-toolkit/sessions',
-            '/codex/api/codex/data',
+            '/codex/api/v1/entries?limit=10000',
             '/codex/api/admin/collections/entities_pf1e',
             '/codex/api/admin/collections/rules_pf1e',
             '/codex/api/admin/collections/equipment_pf1e',
@@ -51,7 +51,12 @@ describe('DmToolkitComponent', () => {
         reqs.forEach(url => {
             const req = httpMock.expectOne(url);
             expect(req.request.method).toBe('GET');
-            req.flush([]); // Flush empty arrays/objects
+            // V1 entries endpoint returns { data: [] } format
+            if (url.includes('/v1/entries')) {
+                req.flush({ data: [] });
+            } else {
+                req.flush([]);
+            }
         });
 
         await fixture.whenStable();

@@ -13,7 +13,7 @@ export function createMockCodex() {
                 ],
                 // ADDED: A leaf node template to verify detection works alongside rich text
                 'Town_Guard': {
-                    entityId: 'npc-guard-001',
+                    entity_id: 'npc-guard-001',
                     baseStats: {
                         Str: 14, Dex: 12, Con: 14,
                         HP: '20 (3d8+6)',
@@ -21,10 +21,10 @@ export function createMockCodex() {
                     }
                 },
                 'Merchant_Quarter': {
-                    entityId: 'loc-merchant-001',
+                    entity_id: 'loc-merchant-001',
                     baseStats: { Type: 'Location' },
                     'Guildmaster_Theron': {
-                        entityId: 'npc-theron-001',
+                        entity_id: 'npc-theron-001',
                         baseStats: {
                             Str: 12, Dex: 14, Con: 13, Int: 16, Wis: 15, Cha: 17,
                             HP: '45 (6d8+12)',
@@ -33,7 +33,7 @@ export function createMockCodex() {
                         }
                     },
                     'Guard_Captain_Lyra': {
-                        entityId: 'npc-lyra-001',
+                        entity_id: 'npc-lyra-001',
                         baseStats: {
                             Str: 16, Dex: 13, Con: 14, Int: 10, Wis: 12, Cha: 11,
                             HP: '52 (8d8+16)',

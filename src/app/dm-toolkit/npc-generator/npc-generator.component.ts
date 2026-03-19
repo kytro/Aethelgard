@@ -34,6 +34,7 @@ interface GeneratedNpc {
     classSkills?: string[];
     equipment?: (string | EquipmentItem)[];
     magicItems?: (string | EquipmentItem)[];
+    inventory?: any[];
     spells?: { [level: string]: string[] };
     backstory?: string;
     gender?: string;
@@ -264,9 +265,20 @@ interface GeneratedNpc {
                             </div>
                         }
             
-                        @if (npc.equipment && npc.equipment.length > 0) {
+                        @if (npc.inventory && npc.inventory.length > 0) {
                             <div>
-                                <h5 class="font-semibold text-gray-300">Equipment</h5>
+                                <h5 class="font-semibold text-gray-300">Inventory</h5>
+                                <div class="flex flex-wrap gap-2 text-sm">
+                                    @for(item of npc.inventory; track item.name) {
+                                        <span class="bg-gray-800 px-2 py-1 rounded text-gray-400 border border-gray-700">
+                                            {{item.quantity > 1 ? item.quantity + 'x ' : ''}}{{item.name}}
+                                        </span>
+                                    }
+                                </div>
+                            </div>
+                        } @else if (npc.equipment && npc.equipment.length > 0) {
+                            <div>
+                                <h5 class="font-semibold text-gray-300">Equipment (Legacy)</h5>
                                 <p class="text-gray-400">{{ formatItems(npc.equipment) }}</p>
                             </div>
                         }
@@ -403,8 +415,7 @@ export class NpcGeneratorComponent {
         this.lastGeneratedNpcs.set(npcs);
 
         try {
-            const details = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit-ai/generate-npc-details', {
-                query: 'Generate details',
+            const details = await lastValueFrom(this.http.post<any>('/codex/api/v1/generation/npc-details', {
                 options: {
                     npc: {
                         name: npc.name,
@@ -670,13 +681,15 @@ export class NpcGeneratorComponent {
         if (npc.vulnerabilities?.length) entity.vulnerabilities = npc.vulnerabilities;
 
         // Save entity first
-        const entityResult = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
-        const newEntityId = entityResult._id || entityResult.insertedId;
+        // V1 Entity API
+        const entityResult = await lastValueFrom(this.http.post<any>('/codex/api/v1/entities', entity));
+        const newEntityId = entityResult.data?._id || entityResult._id || entityResult.insertedId;
 
         // Save codex entry with entity link
         (newEntry as any).entity_id = newEntityId;
         entriesToSave.push(newEntry);
-        await lastValueFrom(this.http.post('/codex/api/codex/create-entries', entriesToSave));
+        // V1 Bulk Entry API
+        await lastValueFrom(this.http.post('/codex/api/v1/entries/bulk', entriesToSave));
     }
 
 
@@ -705,9 +718,12 @@ export class NpcGeneratorComponent {
                 targetPath: this.npcGenGroupName
             };
 
-            const npcs = await lastValueFrom(this.http.post<GeneratedNpc[]>('/codex/api/dm-toolkit-ai/generate-npcs', {
+            const npcs = await lastValueFrom(this.http.post<GeneratedNpc[]>('/codex/api/v1/generation/npc-candidates', {
                 query: this.npcGenQuery,
-                options: worldContext
+                options: {
+                    generationContext: worldContext.userContext,
+                    existingEntityNames: this.existingEntityNames() || []
+                }
             }));
 
             this.lastGeneratedNpcs.set(npcs);
@@ -936,6 +952,7 @@ export class NpcGeneratorComponent {
                     rules: linkedRules,
                     equipment: linkedEquipment,
                     magicItems: linkedMagicItems,
+                    inventory: npc.inventory || [], // New Inventory Field
                     spells: linkedSpells,
                     deity: npc.deity || '',
                 };
@@ -983,7 +1000,7 @@ export class NpcGeneratorComponent {
                 if (npc.attacks?.length) entity.attacks = npc.attacks;
                 if (npc.vulnerabilities?.length) entity.vulnerabilities = npc.vulnerabilities;
 
-                const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/admin/collections/entities_pf1e', entity));
+                const newEntity = await lastValueFrom(this.http.post<any>('/codex/api/v1/entities', entity));
 
                 const codexContent = [
                     { type: 'heading', text: 'Description' },
@@ -1006,7 +1023,7 @@ export class NpcGeneratorComponent {
             }
 
             if (allNewEntries.length > 0) {
-                await lastValueFrom(this.http.put('/codex/api/codex/data', allNewEntries));
+                await lastValueFrom(this.http.post('/codex/api/v1/entries/bulk', allNewEntries));
             }
 
             this.lastGeneratedNpcs.set([]);

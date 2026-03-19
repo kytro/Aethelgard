@@ -1,7 +1,8 @@
 const express = require('express');
 const { ObjectId } = require('mongodb');
 const router = express.Router();
-const { generateContent } = require('../services/geminiService');
+const { generateContent } = require('../services/aiService');
+const { isValidObjectId, toObjectId } = require('../utils/db-helpers');
 
 module.exports = function (db) {
 
@@ -322,10 +323,7 @@ IMPORTANT: Be accurate to PF1e Core Rulebook rules. Include all standard racial 
 
     try {
       const ids = entityIds.map(id => {
-        if (ObjectId.isValid(id)) {
-          return new ObjectId(id);
-        }
-        return id;
+        return toObjectId(id);
       });
 
       const entities = await db.collection('entities_pf1e').find({
@@ -378,11 +376,11 @@ IMPORTANT: Be accurate to PF1e Core Rulebook rules. Include all standard racial 
       delete updatedEntity._id;
 
       // Check if the ID is a valid 24-char hex string (MongoDB ObjectId format)
-      const isValidObjectId = ObjectId.isValid(id) && id.length === 24 && /^[0-9a-fA-F]{24}$/.test(id);
+      // Util check imported from db-helpers
 
       // Try both ObjectId and string formats
       let result;
-      if (isValidObjectId) {
+      if (isValidObjectId(id)) {
         // Try ObjectId first
         result = await db.collection('entities_pf1e').updateOne(
           { _id: new ObjectId(id) },
@@ -512,7 +510,7 @@ IMPORTANT: Be accurate to PF1e Core Rulebook rules. Include all standard racial 
     try {
       // 1. Fetch the entity
       const entity = await db.collection('entities_pf1e').findOne({
-        _id: ObjectId.isValid(entityId) ? new ObjectId(entityId) : entityId
+        _id: toObjectId(entityId)
       });
 
       if (!entity) {
@@ -581,42 +579,22 @@ IMPORTANT: Be accurate to PF1e Core Rulebook rules. Include all standard racial 
 
       // Helper function to call Gemini API with retry for transient errors
       const callGemini = async (promptText, maxRetries = 3) => {
+        // Use unified aiService
+        // Note: aiService handles its own caching/logic, but retries for network errors might be internal or reliant on standard fetch.
+        // However, we want to respect the unified service's error handling.
+        // If strict retry logic is needed, we can wrap generateContent.
+
         let lastError;
         for (let attempt = 1; attempt <= maxRetries; attempt++) {
           try {
-            const response = await fetch(apiUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                contents: [{ parts: [{ text: promptText }] }],
-                generationConfig: { response_mime_type: 'application/json' }
-              })
+            const result = await generateContent(db, promptText, {
+              jsonMode: true,
+              systemInstruction: "You are a Pathfinder 1e Expert."
             });
-
-            if (!response.ok) {
-              const errorBody = await response.json().catch(() => ({}));
-              const errorMsg = errorBody.error?.message || response.statusText;
-
-              // Retry on transient errors (503 overloaded, 429 rate limit)
-              if ((response.status === 503 || response.status === 429) && attempt < maxRetries) {
-                const delay = attempt * 2000; // 2s, 4s, 6s
-                console.log(`[AI Complete] Gemini ${response.status}, retrying in ${delay}ms (attempt ${attempt}/${maxRetries})`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-                continue;
-              }
-              throw new Error(`Gemini API Error: ${response.status} - ${errorMsg}`);
-            }
-
-            const result = await response.json();
-            const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!responseText) throw new Error('No response from AI.');
-
-            const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
-            const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
-            return JSON.parse(jsonString);
+            return result;
           } catch (e) {
             lastError = e;
-            if (attempt < maxRetries && (e.message?.includes('503') || e.message?.includes('429'))) {
+            if (attempt < maxRetries) {
               const delay = attempt * 2000;
               console.log(`[AI Complete] Retry ${attempt}/${maxRetries} after error: ${e.message}`);
               await new Promise(resolve => setTimeout(resolve, delay));

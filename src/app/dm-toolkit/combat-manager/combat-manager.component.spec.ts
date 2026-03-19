@@ -58,10 +58,11 @@ describe('CombatManagerComponent', () => {
             expect(component.addFormSource()).toBe('Custom');
         });
 
-        it('should have METADATA_KEYS including baseStats, stats, and entityId', () => {
+        it('should have METADATA_KEYS including baseStats, stats, and entity_id', () => {
             expect(component.METADATA_KEYS).toContain('baseStats');
             expect(component.METADATA_KEYS).toContain('baseStats');
             expect(component.METADATA_KEYS).not.toContain('stats');
+            expect(component.METADATA_KEYS).toContain('entity_id');
             expect(component.METADATA_KEYS).toContain('entityId');
             expect(component.METADATA_KEYS).toContain('summary');
             expect(component.METADATA_KEYS).toContain('content');
@@ -90,10 +91,10 @@ describe('CombatManagerComponent', () => {
 
         it('should return true for container entities with children', () => {
             const containerEntity = {
-                entityId: 'loc-001',
+                entity_id: 'loc-001',
                 baseStats: { Type: 'Location' },
                 'Child_NPC': {
-                    entityId: 'npc-001',
+                    entity_id: 'npc-001',
                     baseStats: { Str: 10 }
                 }
             };
@@ -103,11 +104,11 @@ describe('CombatManagerComponent', () => {
         it('should return true for categories with templates', () => {
             const category = {
                 'Template_1': {
-                    entityId: 'tmpl-001',
+                    entity_id: 'tmpl-001',
                     baseStats: {}
                 },
                 'Template_2': {
-                    entityId: 'tmpl-002',
+                    entity_id: 'tmpl-002',
                     baseStats: {}
                 }
             };
@@ -120,7 +121,7 @@ describe('CombatManagerComponent', () => {
                 content: [],
                 baseStats: { Str: 10 },
                 // stats: { HP: 30 }, // Removed stats
-                entityId: 'entity-001',
+                entity_id: 'entity-001',
                 relatedPages: ['Ref/SomePage']
             };
             expect(component['_isNavigable'](nodeWithMetadata)).toBe(false);
@@ -128,7 +129,7 @@ describe('CombatManagerComponent', () => {
 
         it('should return false for leaf templates (entityId with no navigable children)', () => {
             const leafTemplate = {
-                entityId: 'npc-001',
+                entity_id: 'npc-001',
                 baseStats: { Str: 14, Dex: 12, HP: 30 },
             };
             expect(component['_isNavigable'](leafTemplate)).toBe(false);
@@ -178,9 +179,9 @@ describe('CombatManagerComponent', () => {
         it('should extract templates from child objects', async () => {
             await fixture.whenStable();
             fixture.detectChanges();
-            const options = component.templateOptions();
-            expect(options).toContain('Guildmaster Theron');
-            expect(options).toContain('Guard Captain Lyra');
+            const names = component.templateOptions().map(o => o.name);
+            expect(names).toContain('Guildmaster Theron');
+            expect(names).toContain('Guard Captain Lyra');
         });
 
         it('should handle content arrays with non-rich-text', async () => {
@@ -188,10 +189,10 @@ describe('CombatManagerComponent', () => {
             component.selectedCodexPath.set(['Undead']);
             await fixture.whenStable(); fixture.detectChanges();
 
-            const options = component.templateOptions();
-            expect(options).toContain('Skeleton');
-            expect(options).toContain('Zombie');
-            expect(options).toContain('Ghoul');
+            const names = component.templateOptions().map(o => o.name);
+            expect(names).toContain('Skeleton');
+            expect(names).toContain('Zombie');
+            expect(names).toContain('Ghoul');
         });
 
         it('should ignore rich text content arrays', async () => {
@@ -200,9 +201,10 @@ describe('CombatManagerComponent', () => {
             await fixture.whenStable(); fixture.detectChanges();
 
             const options = component.templateOptions();
+            const names = options.map(o => o.name);
             // Should not include content from rich text, only child templates (like Town_Guard from helpers)
             expect(options.length).toBeGreaterThan(0);
-            expect(options).toContain('Town Guard');
+            expect(names).toContain('Town Guard');
         });
 
         it('should reset template options when source changes', async () => {
@@ -635,7 +637,7 @@ describe('CombatManagerComponent', () => {
             component.combatants.set([createMockCombatant({
                 _id: 'c1',
                 name: 'Test',
-                baseStats: { Str: 10, Dex: 10, Con: 10, skills: { 'Stealth': 5 } }
+                baseStats: { Str: 10, Dex: 10, Con: 10, BAB: 0, skills: { 'Stealth': 5 } }
             })]);
             fixture.detectChanges();
             await fixture.whenStable();

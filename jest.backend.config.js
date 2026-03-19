@@ -12,5 +12,8 @@ module.exports = {
     testPathIgnorePatterns: [
         '<rootDir>/node_modules/'
     ],
+    transform: {
+        '^.+\\.js$': 'ts-jest'
+    },
     verbose: true
 };

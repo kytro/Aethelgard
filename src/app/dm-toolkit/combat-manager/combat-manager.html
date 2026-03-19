@@ -148,8 +148,8 @@
             <select [ngModel]="selectedTemplate()" (ngModelChange)="selectedTemplate.set($event)" name="template"
               class="w-full mt-1 bg-gray-900 border border-gray-600 rounded-md px-3 py-2 text-white">
               <option value="">Select...</option>
-              @for(option of templateOptions(); track option) {
-              <option [value]="option">{{ option }}</option>
+              @for(option of templateOptions(); track option.key) {
+              <option [value]="option.key">{{ option.name }}</option>
               }
             </select>
           </div>
@@ -183,8 +183,7 @@
               <div class="col-span-4 font-semibold flex items-center">
                 <span class="truncate" title="{{c.name}}">{{c.name}}</span>
                 <span class="text-xs text-gray-400 font-normal ml-2 whitespace-nowrap">({{ (c.type === 'PC' || c.type
-                  === 'NPC') ? 'Lvl' : 'CR' }} {{ getCaseInsensitiveProp(c.baseStats, 'Level') ||
-                  getCaseInsensitiveProp(c.baseStats, 'CR') || '?' }})</span>
+                  === 'NPC') ? 'Lvl' : 'CR' }} {{ getClassSummary(c) }})</span>
               </div>
               <div class="col-span-3 flex items-center">
                 <input type="number" [ngModel]="c.hp" (ngModelChange)="handleUpdateCombatant(c._id, 'hp', $event)"

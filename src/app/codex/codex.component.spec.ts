@@ -53,18 +53,18 @@ describe('CodexComponent', () => {
     describe('Initialization & Data Loading', () => {
         it('should load codex data and caches on init', async () => {
             // 1. Handle Codex Data request
-            const dataReq = httpMock.expectOne('api/codex/data');
+            const dataReq = httpMock.expectOne('api/v1/entries?limit=10000');
             expect(dataReq.request.method).toBe('GET');
-            dataReq.flush(createMockCodexData());
+            dataReq.flush({ data: createMockCodexData() });
 
             // 2. Handle Cache requests
-            const rulesReq = httpMock.expectOne('api/admin/collections/rules_pf1e');
-            const equipReq = httpMock.expectOne('api/admin/collections/equipment_pf1e');
-            const spellsReq = httpMock.expectOne('api/admin/collections/spells_pf1e');
+            const rulesReq = httpMock.expectOne('api/v1/rules');
+            const equipReq = httpMock.expectOne('api/v1/equipment');
+            const spellsReq = httpMock.expectOne('api/v1/spells');
 
-            rulesReq.flush(MOCK_RULES_CACHE);
-            equipReq.flush(MOCK_EQUIPMENT_CACHE);
-            spellsReq.flush(MOCK_SPELLS_CACHE);
+            rulesReq.flush({ data: MOCK_RULES_CACHE });
+            equipReq.flush({ data: MOCK_EQUIPMENT_CACHE });
+            spellsReq.flush({ data: MOCK_SPELLS_CACHE });
 
             // FIX: Ensure Promises from loadCaches have fully resolved and signals updated
             await fixture.whenStable();
@@ -76,14 +76,14 @@ describe('CodexComponent', () => {
         });
 
         it('should handle data load errors gracefully', async () => {
-            const dataReq = httpMock.expectOne('api/codex/data');
+            const dataReq = httpMock.expectOne('api/v1/entries?limit=10000');
             // Return a specific error structure
             dataReq.flush({ error: 'Server Error' }, { status: 500, statusText: 'Server Error' });
 
             // Clear pending cache requests (we don't care about them for this error test)
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
 
             await fixture.whenStable();
             fixture.detectChanges();
@@ -95,10 +95,10 @@ describe('CodexComponent', () => {
 
     describe('Navigation & View Logic', () => {
         beforeEach(async () => {
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
             await fixture.whenStable();
             fixture.detectChanges();
         });
@@ -128,18 +128,18 @@ describe('CodexComponent', () => {
             expect(component.isCategoryNode()).toBe(false);
 
             // FIX: Expect the side-effect request because Town Square has an entity_id
-            const entityReq = httpMock.expectOne('api/codex/get-entities');
-            entityReq.flush([]);
+            const entityReq = httpMock.expectOne('api/v1/entities/batch');
+            entityReq.flush({ data: [] });
             await fixture.whenStable();
         });
     });
 
     describe('Entity Linking & Effects', () => {
         beforeEach(async () => {
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
             await fixture.whenStable();
             fixture.detectChanges();
         });
@@ -148,15 +148,15 @@ describe('CodexComponent', () => {
             component.currentPath.set(['Bestiary', 'Goblin']);
             fixture.detectChanges(); // Trigger first effect
 
-            const req = httpMock.expectOne('api/codex/get-entities');
-            expect(req.request.body.entityIds).toContain('ent-goblin-001');
-            req.flush([MOCK_ENTITY]);
+            const req = httpMock.expectOne('api/v1/entities/batch');
+            expect(req.request.body.ids).toContain('ent-goblin-001');
+            req.flush({ data: [MOCK_ENTITY] });
 
             await fixture.whenStable();
             fixture.detectChanges(); // Trigger second effect
 
-            const detailsReq = httpMock.expectOne('api/codex/get-linked-details');
-            detailsReq.flush({ rules: MOCK_RULES_CACHE, equipment: [], spells: [] });
+            const detailsReq = httpMock.expectOne('api/v1/linked-details');
+            detailsReq.flush({ data: { rules: MOCK_RULES_CACHE, equipment: [], spells: [] } });
 
             await fixture.whenStable();
 
@@ -167,10 +167,10 @@ describe('CodexComponent', () => {
     describe('Edit Mode & Data Manipulation', () => {
         beforeEach(async () => {
             // 1. Satisfy initial requests
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
 
             await fixture.whenStable();
             fixture.detectChanges();
@@ -180,8 +180,8 @@ describe('CodexComponent', () => {
             fixture.detectChanges();
 
             // 3. Handle the entity fetch triggered by this navigation
-            const entityReq = httpMock.expectOne('api/codex/get-entities');
-            entityReq.flush([]);
+            const entityReq = httpMock.expectOne('api/v1/entities/batch');
+            entityReq.flush({ data: [] });
             await fixture.whenStable();
             fixture.detectChanges();
         });
@@ -203,8 +203,8 @@ describe('CodexComponent', () => {
             component.isEditMode.set(true);
             component.saveChanges();
 
-            const req = httpMock.expectOne('api/codex/data');
-            expect(req.request.method).toBe('PUT');
+            const req = httpMock.expectOne('api/v1/entries/bulk');
+            expect(req.request.method).toBe('POST');
             req.flush({});
 
             await fixture.whenStable();
@@ -229,10 +229,10 @@ describe('CodexComponent', () => {
 
     describe('Completion Tracking', () => {
         beforeEach(async () => {
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
             await fixture.whenStable();
             fixture.detectChanges();
         });
@@ -244,8 +244,8 @@ describe('CodexComponent', () => {
             const goblinEntry = component.currentView().entries[0];
             component.toggleCompletion(goblinEntry);
 
-            const req = httpMock.expectOne('api/codex/item');
-            expect(req.request.method).toBe('PATCH');
+            const req = httpMock.expectOne(req => req.url.includes('api/v1/entries/by-path') && req.method === 'PATCH');
+            expect(req.request.body).toEqual({ isCompleted: false });
             req.flush({});
         });
     });
@@ -271,16 +271,20 @@ describe('CodexComponent', () => {
         };
 
         beforeEach(async () => {
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush(MOCK_RULES_CACHE);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([
-                ...MOCK_EQUIPMENT_CACHE,
-                { _id: 'eq-dagger', name: 'Dagger', description: 'A small blade.', cost: '2gp', weight: '1lb' }
-            ]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([
-                ...MOCK_SPELLS_CACHE,
-                { _id: 'sp-light', name: 'Light', description: 'Creates light.' }
-            ]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: MOCK_RULES_CACHE });
+            httpMock.expectOne('api/v1/equipment').flush({
+                data: [
+                    ...MOCK_EQUIPMENT_CACHE,
+                    { _id: 'eq-dagger', name: 'Dagger', description: 'A small blade.', cost: '2gp', weight: '1lb' }
+                ]
+            });
+            httpMock.expectOne('api/v1/spells').flush({
+                data: [
+                    ...MOCK_SPELLS_CACHE,
+                    { _id: 'sp-light', name: 'Light', description: 'Creates light.' }
+                ]
+            });
             await fixture.whenStable();
             fixture.detectChanges();
 
@@ -289,11 +293,13 @@ describe('CodexComponent', () => {
             fixture.detectChanges();
 
             // Handle the get-linked-details request triggered by the linkedEntities effect
-            const detailsReq = httpMock.expectOne('api/codex/get-linked-details');
+            const detailsReq = httpMock.expectOne('api/v1/linked-details');
             detailsReq.flush({
-                rules: MOCK_RULES_CACHE,
-                equipment: MOCK_EQUIPMENT_CACHE,
-                spells: MOCK_SPELLS_CACHE
+                data: {
+                    rules: MOCK_RULES_CACHE,
+                    equipment: MOCK_EQUIPMENT_CACHE,
+                    spells: MOCK_SPELLS_CACHE
+                }
             });
             await fixture.whenStable();
         });
@@ -309,9 +315,9 @@ describe('CodexComponent', () => {
             expect(component.aiCompletingEntityId()).toBe(entity._id);
 
             // Handle the API request
-            const req = httpMock.expectOne('api/codex/ai-complete');
+            const req = httpMock.expectOne(`api/v1/entities/${entity._id}/ai-complete`);
             expect(req.request.method).toBe('POST');
-            expect(req.request.body.entityId).toBe(entity._id);
+            // Check that no body required or empty
             req.flush(MOCK_AI_PREVIEW);
 
             await requestPromise;
@@ -327,7 +333,7 @@ describe('CodexComponent', () => {
 
             const requestPromise = component.requestAiComplete(entity);
 
-            const req = httpMock.expectOne('api/codex/ai-complete');
+            const req = httpMock.expectOne(`api/v1/entities/${entity._id}/ai-complete`);
             req.flush({ error: 'AI service unavailable' }, { status: 500, statusText: 'Server Error' });
 
             await requestPromise;
@@ -348,7 +354,7 @@ describe('CodexComponent', () => {
             const applyPromise = component.applyAiComplete();
 
             // Handle the PUT request to save the entity
-            const saveReq = httpMock.expectOne(`api/codex/entities/${entity._id}`);
+            const saveReq = httpMock.expectOne(`api/v1/entities/${entity._id}`);
             expect(saveReq.request.method).toBe('PUT');
             saveReq.flush({});
 
@@ -356,8 +362,8 @@ describe('CodexComponent', () => {
             await fixture.whenStable();
 
             // Handle any triggered get-linked-details request from updating linkedEntities
-            const pendingReqs = httpMock.match('api/codex/get-linked-details');
-            pendingReqs.forEach(req => req.flush({ rules: [], equipment: [], spells: [] }));
+            const pendingReqs = httpMock.match('api/v1/linked-details');
+            pendingReqs.forEach(req => req.flush({ data: { rules: [], equipment: [], spells: [] } }));
 
             // Check skills were added
             expect(entity['baseStats'].skills['Perception']).toBe(4);
@@ -433,10 +439,10 @@ describe('CodexComponent', () => {
 
     describe('Fix Stats Feature', () => {
         beforeEach(async () => {
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
             await fixture.whenStable();
             fixture.detectChanges();
         });
@@ -468,7 +474,7 @@ describe('CodexComponent', () => {
             const applyPromise = component.applyFixStats();
 
             // Expect PUT request
-            const req = httpMock.expectOne(`api/codex/entities/${entity._id}`);
+            const req = httpMock.expectOne(`api/v1/entities/${entity._id}`);
             expect(req.request.method).toBe('PUT');
             // Verify payload contains new stats
             // The updates object uses dot-notation keys for MongoDB, so we access them as such
@@ -482,8 +488,8 @@ describe('CodexComponent', () => {
             fixture.detectChanges();
 
             // The update to linkedEntities triggers the effect to fetch details again
-            const detailsReq = httpMock.expectOne('api/codex/get-linked-details');
-            detailsReq.flush({ rules: [], equipment: [], spells: [] });
+            const detailsReq = httpMock.expectOne('api/v1/linked-details');
+            detailsReq.flush({ data: { rules: [], equipment: [], spells: [] } });
 
             // Verify Local Model Update
             const updatedEntity = component.linkedEntities()[0];
@@ -497,10 +503,10 @@ describe('CodexComponent', () => {
 
     describe('Reciprocal Page Linking', () => {
         beforeEach(async () => {
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
             await fixture.whenStable();
             fixture.detectChanges();
         });
@@ -578,10 +584,10 @@ describe('CodexComponent', () => {
 
             component.createPage();
 
-            const req = httpMock.expectOne('api/codex/data');
-            expect(req.request.method).toBe('PUT');
-            expect(req.request.body[0].name).toBe('New Test Page');
-            req.flush({});
+            const req = httpMock.expectOne('api/v1/entries');
+            expect(req.request.method).toBe('POST');
+            expect(req.request.body.name).toBe('New Test Page');
+            req.flush({ data: { _id: 'new-page-id' } });
 
             await fixture.whenStable();
 
@@ -591,10 +597,10 @@ describe('CodexComponent', () => {
 
     describe('Special Abilities', () => {
         beforeEach(async () => {
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
             await fixture.whenStable();
             fixture.detectChanges();
         });
@@ -683,10 +689,10 @@ describe('CodexComponent', () => {
 
     describe('Vulnerabilities', () => {
         beforeEach(async () => {
-            httpMock.expectOne('api/codex/data').flush(createMockCodexData());
-            httpMock.expectOne('api/admin/collections/rules_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/equipment_pf1e').flush([]);
-            httpMock.expectOne('api/admin/collections/spells_pf1e').flush([]);
+            httpMock.expectOne('api/v1/entries?limit=10000').flush({ data: createMockCodexData() });
+            httpMock.expectOne('api/v1/rules').flush({ data: [] });
+            httpMock.expectOne('api/v1/equipment').flush({ data: [] });
+            httpMock.expectOne('api/v1/spells').flush({ data: [] });
             await fixture.whenStable();
             fixture.detectChanges();
         });

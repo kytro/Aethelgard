@@ -9,27 +9,17 @@ module.exports = function (db) {
     // FIX: Robust Gemini Helper Functions for Reconciliation
     // -----------------------------------------------------------
 
-    /**
-     * Retrieves the active Gemini API key from the settings collection.
-     * @returns {Promise<string>} The active API key.
-     */
-    async function getActiveApiKey() {
-        const apiKeysDoc = await db.collection('settings').findOne({ _id: 'api_keys' });
-        const activeKey = apiKeysDoc?.keys?.find(k => k.id === apiKeysDoc.active_key_id);
-        if (!activeKey?.key) {
-            throw new Error('Gemini API key not configured in settings collection.');
-        }
-        return activeKey.key;
-    }
+    // -----------------------------------------------------------
+    // FIX: Integration with Unified AI Service
+    // -----------------------------------------------------------
+
+    const { generateContent } = require('../services/aiService');
 
     /**
-     * Fetches a batch of full item objects for reconciliation from the Gemini API.
-     * This is a single, highly effective API call, replacing the old multi-step process.
+     * Fetches a batch of full item objects for reconciliation using the Unified AI Service.
      */
     async function fetchReconciliationBatch(apiKey, itemType, existingNames, batchSize) {
-        // FIX: Using the reliable Gemini 1.5 Flash model for production stability
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-
+        // Prompt construction remains mostly the same, but we let aiService handle the API call
         const prompt = `You are a Pathfinder 1st Edition rules expert. 
 Provide a list of up to ${batchSize} official ${itemType} objects (including ALL required keys like name, description, stats, etc., as appropriate for the type) that are NOT in the provided JSON array of names. 
 The response MUST be a single, clean JSON array of FULL objects. If no more items are found, return an empty JSON array: [].
@@ -37,30 +27,21 @@ The response MUST be a single, clean JSON array of FULL objects. If no more item
 Existing item names:
 ${JSON.stringify(existingNames)}`;
 
-        const payload = { contents: [{ parts: [{ text: prompt }] }] };
+        // Use the unified service with jsonMode enabled
+        // We pass the db to allow it to look up settings/models if needed (though we passed apiKey implicitly via db lookups in service, 
+        // the service usually looks up keys itself. Let's rely on service's internal key lookup or pass options if needed).
+        // The service signature is: generateContent(db, prompt, options)
 
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.json();
-            throw new Error(`Gemini API Error (Status ${response.status}): ${errorBody.error?.message || 'Unknown Gemini API Error'}`);
-        }
-
-        const result = await response.json();
-        const responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
-
-        // FIX: Robust JSON parsing (removing markdown fences and trimming)
         try {
-            const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
-            const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
-            return JSON.parse(jsonString);
-        } catch (e) {
-            console.error('Failed to parse JSON from Gemini response:', responseText);
-            throw new Error('Invalid JSON response from AI.');
+            const result = await generateContent(db, prompt, {
+                jsonMode: true,
+                systemInstruction: "You are a strict JSON generator."
+                // model: 'gemini-1.5-flash' // Optional: let service pick default or override here if strictly needed
+            });
+            return result || [];
+        } catch (error) {
+            console.error('[Reconciliation] AI Service Error:', error.message);
+            throw new Error(`AI Service Failed: ${error.message}`);
         }
     }
 
@@ -78,7 +59,7 @@ ${JSON.stringify(existingNames)}`;
         for (let i = 0; i < maxIterations; i++) {
             console.log(`[RECONCILE ${collectionName}] Iteration ${i + 1}/${maxIterations}. Fetching ${batchSize} new items...`);
 
-            const newItemsBatch = await fetchReconciliationBatch(apiKey, itemType, knownNames, batchSize);
+            const newItemsBatch = await fetchReconciliationBatch(null, itemType, knownNames, batchSize);
 
             if (!newItemsBatch || newItemsBatch.length === 0) {
                 console.log(`[RECONCILE ${collectionName}] Fetch complete. No new items found.`);
@@ -117,35 +98,10 @@ ${JSON.stringify(existingNames)}`;
 
     // --- PARSER LOGIC (Helper functions - original code starts here) ---
 
-    // Helper function to escape special characters for use in a regular expression
-    function escapeRegExp(string) {
-        return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // $& = whole match
-    }
-    // [NEW Helper Functions - Add these to routes/data-integrity.js]
-    const getAbilityModifierAsNumber = (score) => {
-        const numScore = parseInt(String(score).match(/-?\d+/)?.[0] || '10', 10);
-        if (isNaN(numScore)) return 0;
-        return Math.floor((numScore - 10) / 2);
-    };
+    // [NEW Helper Functions - Imported from utils]
+    const { getAbilityModifierAsNumber, normaliseAbilityKeys } = require('../utils/pf1e-rules');
+    const { escapeRegExp } = require('../utils/db-helpers');
 
-    /* Canonicalise ability keys and default missing ones to 10  */
-    const normaliseAbilityKeys = (stats) => {
-        const canon = {
-            strength: 'Str', str: 'Str',
-            dexterity: 'Dex', dex: 'Dex',
-            constitution: 'Con', con: 'Con',
-            intelligence: 'Int', int: 'Int',
-            wisdom: 'Wis', wis: 'Wis',
-            charisma: 'Cha', cha: 'Cha',
-        };
-        const out = {};
-        /* copy / rename abilities  */
-        for (const [k, v] of Object.entries(stats ?? {})) {
-            const key = canon[k.toLowerCase()] ?? k;
-            out[key] = v;
-        }
-        return out;
-    };
 
     // [MOVED OUTSIDE]
 

@@ -22,7 +22,8 @@ import {
     isLightWeapon,
     CARRYING_CAPACITY,
     calculateLoad,
-    calculateTotalWeight
+    calculateTotalWeight,
+    getClassBaseStats
 } from './dm-toolkit.utils';
 
 describe('DM Toolkit Utilities', () => {
@@ -284,7 +285,6 @@ describe('DM Toolkit Utilities', () => {
             const stats = calculateCompleteBaseStats({ HP: 'invalid' });
             expect(stats.maxHp).toBe(10);
         });
-
         it('should handle case-insensitive HP property', () => {
             const stats1 = calculateCompleteBaseStats({ hp: '20' });
             const stats2 = calculateCompleteBaseStats({ HP: '20' });
@@ -293,315 +293,363 @@ describe('DM Toolkit Utilities', () => {
         });
     });
 
-    describe('Constants', () => {
-        it('should have SKILL_ABILITY_MAP defined', () => {
-            expect(SKILL_ABILITY_MAP).toBeDefined();
-            expect(SKILL_ABILITY_MAP['Acrobatics']).toBe('Dex');
-            expect(SKILL_ABILITY_MAP['Climb']).toBe('Str');
-            expect(SKILL_ABILITY_MAP['Perception']).toBe('Wis');
+    it('should derive BAB and Saves from classes if missing', () => {
+        const stats = calculateCompleteBaseStats({
+            classes: [{ className: 'Fighter', level: 4 }],
+            Con: 14, Dex: 12, Wis: 10
         });
+        expect(stats.BAB).toEqual(4);
+        expect(stats.Saves).toContain('Fort +6');
+        expect(stats.Saves).toContain('Ref +2');
+        expect(stats.Saves).toContain('Will +1');
+    });
+});
 
-        it('should have GOOD_SAVES progression', () => {
-            expect(GOOD_SAVES).toBeDefined();
-            expect(GOOD_SAVES[0]).toBe(0);
-            expect(GOOD_SAVES[1]).toBe(2);
-            expect(GOOD_SAVES.length).toBeGreaterThan(20);
-        });
-
-        it('should have POOR_SAVES progression', () => {
-            expect(POOR_SAVES).toBeDefined();
-            expect(POOR_SAVES[0]).toBe(0);
-            expect(POOR_SAVES[1]).toBe(0);
-            expect(POOR_SAVES.length).toBeGreaterThan(20);
-        });
-
-        it('should have SIZE_DATA with correct modifiers', () => {
-            expect(SIZE_DATA).toBeDefined();
-            expect(SIZE_DATA['Medium'].mod).toBe(0);
-            expect(SIZE_DATA['Small'].mod).toBe(1);
-            expect(SIZE_DATA['Large'].mod).toBe(-1);
-            expect(SIZE_DATA['Tiny'].stealth).toBe(8);
-        });
-
-        it('should have CONSTRUCT_HP_BONUS by size', () => {
-            expect(CONSTRUCT_HP_BONUS).toBeDefined();
-            expect(CONSTRUCT_HP_BONUS['Small']).toBe(10);
-            expect(CONSTRUCT_HP_BONUS['Medium']).toBe(20);
-            expect(CONSTRUCT_HP_BONUS['Large']).toBe(30);
-            expect(CONSTRUCT_HP_BONUS['Huge']).toBe(40);
-        });
+describe('getClassBaseStats', () => {
+    it('should calculate BAB and Saves for a level 1 Fighter', () => {
+        const stats = getClassBaseStats([{ className: 'Fighter', level: 1 }]);
+        expect(stats.bab).toBe(1);
+        expect(stats.fort).toBe(2);
+        expect(stats.ref).toBe(0);
+        expect(stats.will).toBe(0);
     });
 
-    describe('calculateSkillBonus (Class Skills)', () => {
-        it('should calculate basic skill bonus without class skill', () => {
-            const bonus = calculateSkillBonus('Stealth', 5, 3, []);
-            expect(bonus).toBe(8); // 5 ranks + 3 Dex mod
-        });
-
-        it('should add +3 for class skill with at least 1 rank', () => {
-            const bonus = calculateSkillBonus('Stealth', 5, 3, ['Stealth']);
-            expect(bonus).toBe(11); // 5 ranks + 3 Dex mod + 3 class skill
-        });
-
-        it('should not add +3 for class skill with 0 ranks', () => {
-            const bonus = calculateSkillBonus('Stealth', 0, 3, ['Stealth']);
-            expect(bonus).toBe(3); // 0 ranks + 3 Dex mod, no class skill bonus
-        });
-
-        it('should be case-insensitive for class skill matching', () => {
-            const bonus = calculateSkillBonus('Perception', 3, 2, ['PERCEPTION', 'stealth']);
-            expect(bonus).toBe(8); // 3 ranks + 2 Wis mod + 3 class skill
-        });
-
-        it('should handle empty class skills array', () => {
-            const bonus = calculateSkillBonus('Climb', 4, 3, []);
-            expect(bonus).toBe(7); // 4 ranks + 3 Str mod
-        });
+    it('should calculate BAB and Saves for a level 4 Fighter', () => {
+        const stats = getClassBaseStats([{ className: 'Fighter', level: 4 }]);
+        expect(stats.bab).toBe(4);
+        expect(stats.fort).toBe(4);
+        expect(stats.ref).toBe(1);
+        expect(stats.will).toBe(1);
     });
 
-    describe('calculateCompleteBaseStats - PF1e Creature Types', () => {
-        describe('Construct HP Bonus', () => {
-            it('should add construct HP bonus based on size', () => {
-                const stats = calculateCompleteBaseStats(
-                    { hp: '1d10', size: 'Medium', type: 'Construct' },
-                    { type: 'Construct' }
-                );
-                expect(stats.maxHp).toBe(5 + 20); // avg 1d10 = 5.5 -> 5, + 20 Medium bonus
-            });
-
-            it('should add large construct HP bonus', () => {
-                const stats = calculateCompleteBaseStats(
-                    { hp: '2d10', size: 'Large', type: 'Construct' },
-                    { type: 'Construct' }
-                );
-                expect(stats.maxHp).toBe(11 + 30); // avg 2d10 = 11, + 30 Large bonus
-            });
-
-            it('should not add HP bonus for non-constructs', () => {
-                const stats = calculateCompleteBaseStats(
-                    { hp: '2d10', size: 'Medium' },
-                    { type: 'Humanoid' }
-                );
-                expect(stats.maxHp).toBe(11); // avg 2d10 = 11, no construct bonus
-            });
-        });
-
-        describe('Undead Fort Saves (Charisma)', () => {
-            it('should use Cha for Fort saves when Undead', () => {
-                const stats = calculateCompleteBaseStats(
-                    { Con: 10, Cha: 18, Level: 5 },
-                    { type: 'Undead' }
-                );
-                // Cha 18 = +4 mod, should be used instead of Con
-                expect(stats.Saves).toContain('Fort');
-                // Fort should include +4 from Cha
-            });
-        });
+    it('should calculate BAB and Saves for a level 4 Cleric', () => {
+        const stats = getClassBaseStats([{ className: 'Cleric', level: 4 }]);
+        expect(stats.bab).toBe(3); // 4 * 0.75
+        expect(stats.fort).toBe(4);
+        expect(stats.ref).toBe(1);
+        expect(stats.will).toBe(4);
     });
 
-    describe('calculateCompleteBaseStats - CMB Agile Maneuvers', () => {
-        it('should use Str for CMB by default', () => {
-            const stats = calculateCompleteBaseStats({ Str: 16, Dex: 14, BAB: 5, size: 'Medium' });
-            expect(stats.CMB).toBe(8); // 5 BAB + 3 Str mod + 0 size
-        });
+    it('should handle multiclassing', () => {
+        const stats = getClassBaseStats([
+            { className: 'Fighter', level: 1 },
+            { className: 'Wizard', level: 1 }
+        ]);
+        expect(stats.bab).toBe(1); // 1 + 0
+        expect(stats.fort).toBe(2); // 2 + 0
+        expect(stats.ref).toBe(0); // 0 + 0
+        expect(stats.will).toBe(2); // 0 + 2
+    });
+});
 
-        it('should use Dex for CMB when Tiny size', () => {
+describe('Constants', () => {
+    it('should have SKILL_ABILITY_MAP defined', () => {
+        expect(SKILL_ABILITY_MAP).toBeDefined();
+        expect(SKILL_ABILITY_MAP['Acrobatics']).toBe('Dex');
+        expect(SKILL_ABILITY_MAP['Climb']).toBe('Str');
+        expect(SKILL_ABILITY_MAP['Perception']).toBe('Wis');
+    });
+
+    it('should have GOOD_SAVES progression', () => {
+        expect(GOOD_SAVES).toBeDefined();
+        expect(GOOD_SAVES[0]).toBe(0);
+        expect(GOOD_SAVES[1]).toBe(2);
+        expect(GOOD_SAVES.length).toBeGreaterThan(20);
+    });
+
+    it('should have POOR_SAVES progression', () => {
+        expect(POOR_SAVES).toBeDefined();
+        expect(POOR_SAVES[0]).toBe(0);
+        expect(POOR_SAVES[1]).toBe(0);
+        expect(POOR_SAVES.length).toBeGreaterThan(20);
+    });
+
+    it('should have SIZE_DATA with correct modifiers', () => {
+        expect(SIZE_DATA).toBeDefined();
+        expect(SIZE_DATA['Medium'].mod).toBe(0);
+        expect(SIZE_DATA['Small'].mod).toBe(1);
+        expect(SIZE_DATA['Large'].mod).toBe(-1);
+        expect(SIZE_DATA['Tiny'].stealth).toBe(8);
+    });
+
+    it('should have CONSTRUCT_HP_BONUS by size', () => {
+        expect(CONSTRUCT_HP_BONUS).toBeDefined();
+        expect(CONSTRUCT_HP_BONUS['Small']).toBe(10);
+        expect(CONSTRUCT_HP_BONUS['Medium']).toBe(20);
+        expect(CONSTRUCT_HP_BONUS['Large']).toBe(30);
+        expect(CONSTRUCT_HP_BONUS['Huge']).toBe(40);
+    });
+});
+
+describe('calculateSkillBonus (Class Skills)', () => {
+    it('should calculate basic skill bonus without class skill', () => {
+        const bonus = calculateSkillBonus('Stealth', 5, 3, []);
+        expect(bonus).toBe(8); // 5 ranks + 3 Dex mod
+    });
+
+    it('should add +3 for class skill with at least 1 rank', () => {
+        const bonus = calculateSkillBonus('Stealth', 5, 3, ['Stealth']);
+        expect(bonus).toBe(11); // 5 ranks + 3 Dex mod + 3 class skill
+    });
+
+    it('should not add +3 for class skill with 0 ranks', () => {
+        const bonus = calculateSkillBonus('Stealth', 0, 3, ['Stealth']);
+        expect(bonus).toBe(3); // 0 ranks + 3 Dex mod, no class skill bonus
+    });
+
+    it('should be case-insensitive for class skill matching', () => {
+        const bonus = calculateSkillBonus('Perception', 3, 2, ['PERCEPTION', 'stealth']);
+        expect(bonus).toBe(8); // 3 ranks + 2 Wis mod + 3 class skill
+    });
+
+    it('should handle empty class skills array', () => {
+        const bonus = calculateSkillBonus('Climb', 4, 3, []);
+        expect(bonus).toBe(7); // 4 ranks + 3 Str mod
+    });
+});
+
+describe('calculateCompleteBaseStats - PF1e Creature Types', () => {
+    describe('Construct HP Bonus', () => {
+        it('should add construct HP bonus based on size', () => {
             const stats = calculateCompleteBaseStats(
-                { Str: 8, Dex: 18, BAB: 3, size: 'Tiny' }
+                { hp: '1d10', size: 'Medium', type: 'Construct' },
+                { type: 'Construct' }
             );
-            // Tiny: Str -1, Dex +4, should use max(Str, Dex) = +4
-            // CMB = 3 BAB + 4 Dex + (-2) size special mod = 5
-            expect(stats.CMB).toBe(5);
+            expect(stats.maxHp).toBe(5 + 20); // avg 1d10 = 5.5 -> 5, + 20 Medium bonus
         });
 
-        it('should use Dex for CMB when has Agile Maneuvers feat', () => {
+        it('should add large construct HP bonus', () => {
             const stats = calculateCompleteBaseStats(
-                { Str: 10, Dex: 18, BAB: 5, size: 'Medium' },
-                { feats: ['Agile Maneuvers'] }
+                { hp: '2d10', size: 'Large', type: 'Construct' },
+                { type: 'Construct' }
             );
-            // Str 0, Dex +4, should use max(Str, Dex) = +4
-            expect(stats.CMB).toBe(9); // 5 BAB + 4 Dex + 0 size
+            expect(stats.maxHp).toBe(11 + 30); // avg 2d10 = 11, + 30 Large bonus
         });
 
-        it('should use Str if higher even with Agile Maneuvers', () => {
+        it('should not add HP bonus for non-constructs', () => {
             const stats = calculateCompleteBaseStats(
-                { Str: 20, Dex: 14, BAB: 5, size: 'Medium' },
-                { feats: ['Agile Maneuvers'] }
+                { hp: '2d10', size: 'Medium' },
+                { type: 'Humanoid' }
             );
-            // Str +5, Dex +2, should use max = +5
-            expect(stats.CMB).toBe(10); // 5 BAB + 5 Str + 0 size
+            expect(stats.maxHp).toBe(11); // avg 2d10 = 11, no construct bonus
         });
     });
 
-    describe('calculateCompleteBaseStats - Uncanny Dodge', () => {
-        it('should subtract Dex from Flat-Footed normally', () => {
-            const stats = calculateCompleteBaseStats({ Dex: 16, AC: 18 });
-            expect(stats['Flat-Footed']).toBe(15); // 18 - 3 Dex mod
-        });
-
-        it('should keep Dex in Flat-Footed with Uncanny Dodge', () => {
+    describe('Undead Fort Saves (Charisma)', () => {
+        it('should use Cha for Fort saves when Undead', () => {
             const stats = calculateCompleteBaseStats(
-                { Dex: 16, AC: 18 },
-                { specialAbilities: ['Uncanny Dodge'] }
+                { Con: 10, Cha: 18, Level: 5 },
+                { type: 'Undead' }
             );
-            expect(stats['Flat-Footed']).toBe(18); // keeps full AC
-        });
-
-        it('should handle case-insensitive Uncanny Dodge check', () => {
-            const stats = calculateCompleteBaseStats(
-                { Dex: 14, AC: 16 },
-                { specialAbilities: ['UNCANNY DODGE'] }
-            );
-            expect(stats['Flat-Footed']).toBe(16);
-        });
-
-        it('should handle Improved Uncanny Dodge', () => {
-            const stats = calculateCompleteBaseStats(
-                { Dex: 14, AC: 16 },
-                { specialAbilities: ['Improved Uncanny Dodge'] }
-            );
-            expect(stats['Flat-Footed']).toBe(16); // includes "uncanny dodge" in name
+            // Cha 18 = +4 mod, should be used instead of Con
+            expect(stats.Saves).toContain('Fort');
+            // Fort should include +4 from Cha
         });
     });
+});
 
-    describe('Armor Data Tables', () => {
-        it('should have ARMOR_DATA with correct properties', () => {
-            expect(ARMOR_DATA).toBeDefined();
-            expect(ARMOR_DATA['full plate'].maxDex).toBe(1);
-            expect(ARMOR_DATA['full plate'].checkPenalty).toBe(-6);
-            expect(ARMOR_DATA['chain shirt'].maxDex).toBe(4);
-            expect(ARMOR_DATA['leather'].type).toBe('light');
-            expect(ARMOR_DATA['breastplate'].type).toBe('medium');
-        });
-
-        it('should have SHIELD_DATA defined', () => {
-            expect(SHIELD_DATA).toBeDefined();
-            expect(SHIELD_DATA['tower shield'].maxDex).toBe(2);
-            expect(SHIELD_DATA['buckler'].acBonus).toBe(1);
-        });
+describe('calculateCompleteBaseStats - CMB Agile Maneuvers', () => {
+    it('should use Str for CMB by default', () => {
+        const stats = calculateCompleteBaseStats({ Str: 16, Dex: 14, BAB: 5, size: 'Medium' });
+        expect(stats.CMB).toBe(8); // 5 BAB + 3 Str mod + 0 size
     });
 
-    describe('getArmorMaxDex', () => {
-        it('should return null when no armor equipped', () => {
-            expect(getArmorMaxDex([])).toBeNull();
-            expect(getArmorMaxDex([{ name: 'Sword', type: 'weapon' }])).toBeNull();
-        });
-
-        it('should return maxDex from armor name lookup', () => {
-            const equipment = [{ name: 'Full Plate' }];
-            expect(getArmorMaxDex(equipment)).toBe(1);
-        });
-
-        it('should return lowest maxDex when multiple armors', () => {
-            const equipment = [
-                { name: 'Chain Shirt' }, // maxDex 4
-                { name: 'Tower Shield' } // maxDex 2
-            ];
-            expect(getArmorMaxDex(equipment)).toBe(2);
-        });
-
-        it('should use explicit maxDex property over lookup', () => {
-            const equipment = [{ name: 'Custom Armor', maxDex: 3 }];
-            expect(getArmorMaxDex(equipment)).toBe(3);
-        });
+    it('should use Dex for CMB when Tiny size', () => {
+        const stats = calculateCompleteBaseStats(
+            { Str: 8, Dex: 18, BAB: 3, size: 'Tiny' }
+        );
+        // Tiny: Str -1, Dex +4, should use max(Str, Dex) = +4
+        // CMB = 3 BAB + 4 Dex + (-2) size special mod = 5
+        expect(stats.CMB).toBe(5);
     });
 
-    describe('getArmorCheckPenalty', () => {
-        it('should return 0 when no armor equipped', () => {
-            expect(getArmorCheckPenalty([])).toBe(0);
-        });
-
-        it('should return penalty from armor lookup', () => {
-            const equipment = [{ name: 'Full Plate' }];
-            expect(getArmorCheckPenalty(equipment)).toBe(-6);
-        });
-
-        it('should sum penalties from armor and shield', () => {
-            const equipment = [
-                { name: 'Breastplate' }, // -4
-                { name: 'Heavy Shield' } // -2
-            ];
-            expect(getArmorCheckPenalty(equipment)).toBe(-6);
-        });
+    it('should use Dex for CMB when has Agile Maneuvers feat', () => {
+        const stats = calculateCompleteBaseStats(
+            { Str: 10, Dex: 18, BAB: 5, size: 'Medium' },
+            { feats: ['Agile Maneuvers'] }
+        );
+        // Str 0, Dex +4, should use max(Str, Dex) = +4
+        expect(stats.CMB).toBe(9); // 5 BAB + 4 Dex + 0 size
     });
 
-    describe('isLightWeapon', () => {
-        it('should identify light weapons', () => {
-            expect(isLightWeapon('Dagger')).toBe(true);
-            expect(isLightWeapon('Short Sword')).toBe(true);
-            expect(isLightWeapon('Kukri')).toBe(true);
-        });
+    it('should use Str if higher even with Agile Maneuvers', () => {
+        const stats = calculateCompleteBaseStats(
+            { Str: 20, Dex: 14, BAB: 5, size: 'Medium' },
+            { feats: ['Agile Maneuvers'] }
+        );
+        // Str +5, Dex +2, should use max = +5
+        expect(stats.CMB).toBe(10); // 5 BAB + 5 Str + 0 size
+    });
+});
 
-        it('should reject non-light weapons', () => {
-            expect(isLightWeapon('Longsword')).toBe(false);
-            expect(isLightWeapon('Greatsword')).toBe(false);
-        });
-
-        it('should handle null/undefined', () => {
-            expect(isLightWeapon('')).toBe(false);
-        });
+describe('calculateCompleteBaseStats - Uncanny Dodge', () => {
+    it('should subtract Dex from Flat-Footed normally', () => {
+        const stats = calculateCompleteBaseStats({ Dex: 16, AC: 18 });
+        expect(stats['Flat-Footed']).toBe(15); // 18 - 3 Dex mod
     });
 
-    describe('classifyNaturalAttack', () => {
-        it('should classify primary attacks', () => {
-            expect(classifyNaturalAttack('Bite')).toBe('primary');
-            expect(classifyNaturalAttack('2 Claws')).toBe('primary');
-            expect(classifyNaturalAttack('Gore')).toBe('primary');
-            expect(classifyNaturalAttack('Slam')).toBe('primary');
-        });
-
-        it('should classify secondary attacks', () => {
-            expect(classifyNaturalAttack('Hoof')).toBe('secondary');
-            expect(classifyNaturalAttack('Wing')).toBe('secondary');
-            expect(classifyNaturalAttack('Tentacle')).toBe('secondary');
-        });
-
-        it('should default unknown attacks to primary', () => {
-            expect(classifyNaturalAttack('Unknown Attack')).toBe('primary');
-        });
+    it('should keep Dex in Flat-Footed with Uncanny Dodge', () => {
+        const stats = calculateCompleteBaseStats(
+            { Dex: 16, AC: 18 },
+            { specialAbilities: ['Uncanny Dodge'] }
+        );
+        expect(stats['Flat-Footed']).toBe(18); // keeps full AC
     });
 
-    describe('Carrying Capacity & Encumbrance', () => {
-        it('should have CARRYING_CAPACITY table', () => {
-            expect(CARRYING_CAPACITY).toBeDefined();
-            expect(CARRYING_CAPACITY[10]).toEqual([33, 66, 100]);
-            expect(CARRYING_CAPACITY[15]).toEqual([66, 133, 200]);
-        });
+    it('should handle case-insensitive Uncanny Dodge check', () => {
+        const stats = calculateCompleteBaseStats(
+            { Dex: 14, AC: 16 },
+            { specialAbilities: ['UNCANNY DODGE'] }
+        );
+        expect(stats['Flat-Footed']).toBe(16);
+    });
 
-        it('should calculate light load', () => {
-            expect(calculateLoad(10, 30)).toBe('light');
-            expect(calculateLoad(15, 50)).toBe('light');
-        });
+    it('should handle Improved Uncanny Dodge', () => {
+        const stats = calculateCompleteBaseStats(
+            { Dex: 14, AC: 16 },
+            { specialAbilities: ['Improved Uncanny Dodge'] }
+        );
+        expect(stats['Flat-Footed']).toBe(16); // includes "uncanny dodge" in name
+    });
+});
 
-        it('should calculate medium load', () => {
-            expect(calculateLoad(10, 50)).toBe('medium');
-            expect(calculateLoad(15, 100)).toBe('medium');
-        });
+describe('Armor Data Tables', () => {
+    it('should have ARMOR_DATA with correct properties', () => {
+        expect(ARMOR_DATA).toBeDefined();
+        expect(ARMOR_DATA['full plate'].maxDex).toBe(1);
+        expect(ARMOR_DATA['full plate'].checkPenalty).toBe(-6);
+        expect(ARMOR_DATA['chain shirt'].maxDex).toBe(4);
+        expect(ARMOR_DATA['leather'].type).toBe('light');
+        expect(ARMOR_DATA['breastplate'].type).toBe('medium');
+    });
 
-        it('should calculate heavy load', () => {
-            expect(calculateLoad(10, 80)).toBe('heavy');
-            expect(calculateLoad(15, 150)).toBe('heavy');
-        });
+    it('should have SHIELD_DATA defined', () => {
+        expect(SHIELD_DATA).toBeDefined();
+        expect(SHIELD_DATA['tower shield'].maxDex).toBe(2);
+        expect(SHIELD_DATA['buckler'].acBonus).toBe(1);
+    });
+});
 
-        it('should calculate overloaded', () => {
-            expect(calculateLoad(10, 150)).toBe('overloaded');
-        });
+describe('getArmorMaxDex', () => {
+    it('should return null when no armor equipped', () => {
+        expect(getArmorMaxDex([])).toBeNull();
+        expect(getArmorMaxDex([{ name: 'Sword', type: 'weapon' }])).toBeNull();
+    });
 
-        it('should calculate total weight', () => {
-            const equipment = [
-                { name: 'Sword', weight: 4 },
-                { name: 'Armor', weight: 50 },
-                { name: 'Rations', weight: 1, quantity: 10 }
-            ];
-            expect(calculateTotalWeight(equipment)).toBe(64);
-        });
+    it('should return maxDex from armor name lookup', () => {
+        const equipment = [{ name: 'Full Plate' }];
+        expect(getArmorMaxDex(equipment)).toBe(1);
+    });
 
-        it('should handle missing weight/quantity', () => {
-            const equipment = [
-                { name: 'Ring' },
-                { name: 'Potion', quantity: 5 }
-            ];
-            expect(calculateTotalWeight(equipment)).toBe(0);
-        });
+    it('should return lowest maxDex when multiple armors', () => {
+        const equipment = [
+            { name: 'Chain Shirt' }, // maxDex 4
+            { name: 'Tower Shield' } // maxDex 2
+        ];
+        expect(getArmorMaxDex(equipment)).toBe(2);
+    });
+
+    it('should use explicit maxDex property over lookup', () => {
+        const equipment = [{ name: 'Custom Armor', maxDex: 3 }];
+        expect(getArmorMaxDex(equipment)).toBe(3);
+    });
+});
+
+describe('getArmorCheckPenalty', () => {
+    it('should return 0 when no armor equipped', () => {
+        expect(getArmorCheckPenalty([])).toBe(0);
+    });
+
+    it('should return penalty from armor lookup', () => {
+        const equipment = [{ name: 'Full Plate' }];
+        expect(getArmorCheckPenalty(equipment)).toBe(-6);
+    });
+
+    it('should sum penalties from armor and shield', () => {
+        const equipment = [
+            { name: 'Breastplate' }, // -4
+            { name: 'Heavy Shield' } // -2
+        ];
+        expect(getArmorCheckPenalty(equipment)).toBe(-6);
+    });
+});
+
+describe('isLightWeapon', () => {
+    it('should identify light weapons', () => {
+        expect(isLightWeapon('Dagger')).toBe(true);
+        expect(isLightWeapon('Short Sword')).toBe(true);
+        expect(isLightWeapon('Kukri')).toBe(true);
+    });
+
+    it('should reject non-light weapons', () => {
+        expect(isLightWeapon('Longsword')).toBe(false);
+        expect(isLightWeapon('Greatsword')).toBe(false);
+    });
+
+    it('should handle null/undefined', () => {
+        expect(isLightWeapon('')).toBe(false);
+    });
+});
+
+describe('classifyNaturalAttack', () => {
+    it('should classify primary attacks', () => {
+        expect(classifyNaturalAttack('Bite')).toBe('primary');
+        expect(classifyNaturalAttack('2 Claws')).toBe('primary');
+        expect(classifyNaturalAttack('Gore')).toBe('primary');
+        expect(classifyNaturalAttack('Slam')).toBe('primary');
+    });
+
+    it('should classify secondary attacks', () => {
+        expect(classifyNaturalAttack('Hoof')).toBe('secondary');
+        expect(classifyNaturalAttack('Wing')).toBe('secondary');
+        expect(classifyNaturalAttack('Tentacle')).toBe('secondary');
+    });
+
+    it('should default unknown attacks to primary', () => {
+        expect(classifyNaturalAttack('Unknown Attack')).toBe('primary');
+    });
+});
+
+describe('Carrying Capacity & Encumbrance', () => {
+    it('should have CARRYING_CAPACITY table', () => {
+        expect(CARRYING_CAPACITY).toBeDefined();
+        expect(CARRYING_CAPACITY[10]).toEqual([33, 66, 100]);
+        expect(CARRYING_CAPACITY[15]).toEqual([66, 133, 200]);
+    });
+
+    it('should calculate light load', () => {
+        expect(calculateLoad(10, 30)).toBe('light');
+        expect(calculateLoad(15, 50)).toBe('light');
+    });
+
+    it('should calculate medium load', () => {
+        expect(calculateLoad(10, 50)).toBe('medium');
+        expect(calculateLoad(15, 100)).toBe('medium');
+    });
+
+    it('should calculate heavy load', () => {
+        expect(calculateLoad(10, 80)).toBe('heavy');
+        expect(calculateLoad(15, 150)).toBe('heavy');
+    });
+
+    it('should calculate overloaded', () => {
+        expect(calculateLoad(10, 150)).toBe('overloaded');
+    });
+
+    it('should calculate total weight', () => {
+        const equipment = [
+            { name: 'Sword', weight: 4 },
+            { name: 'Armor', weight: 50 },
+            { name: 'Rations', weight: 1, quantity: 10 }
+        ];
+        expect(calculateTotalWeight(equipment)).toBe(64);
+    });
+
+    it('should handle missing weight/quantity', () => {
+        const equipment = [
+            { name: 'Ring' },
+            { name: 'Potion', quantity: 5 }
+        ];
+        expect(calculateTotalWeight(equipment)).toBe(0);
     });
 });

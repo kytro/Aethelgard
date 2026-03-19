@@ -31,6 +31,14 @@ module.exports = function (db) {
     router.post('/collections/:name', async (req, res) => {
         const collectionName = req.params.name;
         const docToInsert = req.body;
+
+        // Validation for mandatory name in specific collections
+        if (['codex_entries', 'entities_pf1e'].includes(collectionName)) {
+            if (!docToInsert.name || typeof docToInsert.name !== 'string' || docToInsert.name.trim() === '') {
+                return res.status(400).json({ error: 'Property "name" is mandatory for this collection.' });
+            }
+        }
+
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         try {
             const result = await db.collection(collectionName).insertOne(docToInsert);
@@ -57,11 +65,22 @@ module.exports = function (db) {
         const { name: collectionName, id: docId } = req.params;
         if (!db) return res.status(503).json({ error: 'Database not ready' });
         try {
-            const queryId = ObjectId.isValid(docId) ? new ObjectId(docId) : docId;
-            const result = await db.collection(collectionName).deleteOne({ _id: queryId });
-            if (result.deletedCount === 0) {
+            let result;
+
+            // 1. Try as ObjectId if valid
+            if (ObjectId.isValid(docId)) {
+                result = await db.collection(collectionName).deleteOne({ _id: new ObjectId(docId) });
+            }
+
+            // 2. If no match (or invalid ObjectId), try as String
+            if (!result || result.deletedCount === 0) {
+                result = await db.collection(collectionName).deleteOne({ _id: docId });
+            }
+
+            if (result.matchedCount === 0 && result.deletedCount === 0) {
                 return res.status(404).json({ error: 'Document not found.' });
             }
+
             res.status(200).json({ message: `Document '${docId}' deleted successfully.` });
         } catch (error) {
             console.error(`Failed to delete document ${docId} from ${collectionName}:`, error);
@@ -72,6 +91,13 @@ module.exports = function (db) {
     router.put('/collections/:name/:id', async (req, res) => {
         const { name: collectionName, id: docId } = req.params;
         const docToUpdate = req.body;
+
+        // Validation for mandatory name in specific collections
+        if (['codex_entries', 'entities_pf1e'].includes(collectionName)) {
+            if (!docToUpdate.name || typeof docToUpdate.name !== 'string' || docToUpdate.name.trim() === '') {
+                return res.status(400).json({ error: 'Property "name" is mandatory for this collection.' });
+            }
+        }
 
         if (!db) return res.status(503).json({ error: 'Database not ready' });
 

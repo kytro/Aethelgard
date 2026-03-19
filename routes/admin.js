@@ -198,19 +198,24 @@ module.exports = function (db) {
                 }
 
                 if (docsToInsert.length > 0) {
-                    if (isPartialRestore) {
-                        const bulkOps = docsToInsert.map(doc => ({
-                            replaceOne: {
-                                filter: { _id: doc._id },
-                                replacement: doc,
-                                upsert: true
-                            }
-                        }));
-                        const bulkResult = await collection.bulkWrite(bulkOps);
-                        report.push(`${restoreMode}: ${collectionName} (${bulkResult.upsertedCount + bulkResult.modifiedCount} updated).`);
-                    } else {
-                        const insertResult = await collection.insertMany(docsToInsert);
-                        report.push(`${restoreMode}: ${collectionName} (+${insertResult.insertedCount}).`);
+                    // FIX: Use bulkWrite with upsert:true and ordered:false to allow "merging / bypassing"
+                    const bulkOps = docsToInsert.map(doc => ({
+                        replaceOne: {
+                            filter: { _id: doc._id },
+                            replacement: doc,
+                            upsert: true
+                        }
+                    }));
+
+                    try {
+                        const bulkResult = await collection.bulkWrite(bulkOps, { ordered: false });
+                        const updatedCount = (bulkResult.upsertedCount || 0) + (bulkResult.modifiedCount || 0);
+                        report.push(`${restoreMode}: ${collectionName} (${updatedCount} updated/inserted).`);
+                    } catch (bulkErr) {
+                        // Some docs might have failed even with ordered:false (e.g. validation), but we continue
+                        console.warn(`[RESTORE] Partial write for ${collectionName}:`, bulkErr.message);
+                        const writeErrors = bulkErr.writeErrors ? bulkErr.writeErrors.length : 'unknown';
+                        report.push(`${restoreMode}: ${collectionName} (${writeErrors} errors bypassed).`);
                     }
                 }
             };

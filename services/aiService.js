@@ -66,12 +66,11 @@ async function getAvailableModels(db) {
 }
 
 // Default Ollama hosts - includes Docker-compatible options
-// Order: Docker host → Docker gateways → LAN IP → localhost
+// Order: Docker host → Docker gateways → localhost
 const DEFAULT_OLLAMA_HOSTS = [
     'http://host.docker.internal:11434',  // Docker Desktop (Windows/Mac)
     'http://172.18.0.1:11434',             // Custom Docker network gateway
     'http://172.17.0.1:11434',             // Default Docker bridge gateway
-    'http://192.168.50.176:11434',         // LAN IP
     'http://localhost:11434'               // Local fallback
 ];
 let cachedOllamaHosts = null;

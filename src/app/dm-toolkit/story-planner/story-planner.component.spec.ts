@@ -46,7 +46,7 @@ describe('StoryPlannerComponent', () => {
         expect(component.isLoading()).toBe(true);
         expect(component.error()).toBeNull();
 
-        const req = httpMock.expectOne('/codex/api/dm-toolkit/story-planner/suggest');
+        const req = httpMock.expectOne('/codex/api/v1/generation/story/suggest');
         expect(req.request.method).toBe('POST');
         expect(req.request.body).toEqual({
             context: 'Context',
@@ -71,7 +71,7 @@ describe('StoryPlannerComponent', () => {
         component.storyContext.set('Context');
         component.getSuggestions();
 
-        const req = httpMock.expectOne('/codex/api/dm-toolkit/story-planner/suggest');
+        const req = httpMock.expectOne('/codex/api/v1/generation/story/suggest');
         req.flush({ error: 'AI unavailable' }, { status: 500, statusText: 'Server Error' });
         await fixture.whenStable();
 
@@ -91,7 +91,7 @@ describe('StoryPlannerComponent', () => {
         component.storyContext.set('Context');
         component.getSuggestions();
 
-        const req = httpMock.expectOne('/codex/api/dm-toolkit/story-planner/suggest');
+        const req = httpMock.expectOne('/codex/api/v1/generation/story/suggest');
         expect(req.request.body.sessionContext).toContain('Session 1: Met a goblin.');
         expect(req.request.body.sessionContext).toContain('Session 2: Found a map.');
 
@@ -106,7 +106,7 @@ describe('StoryPlannerComponent', () => {
         const promise = component.saveSuggestion(suggestion);
 
         // Expect call to generate-npcs
-        const genReq = httpMock.expectOne('/codex/api/dm-toolkit-ai/generate-npcs');
+        const genReq = httpMock.expectOne('/codex/api/v1/generation/npc-candidates');
         expect(genReq.request.method).toBe('POST');
         expect(genReq.request.body.query).toContain('A builder');
 
@@ -116,12 +116,11 @@ describe('StoryPlannerComponent', () => {
         await new Promise(resolve => setTimeout(resolve, 0));
 
         // Expect call to create entry
-        const req = httpMock.expectOne('/codex/api/codex/entry');
+        const req = httpMock.expectOne('/codex/api/v1/entries');
         expect(req.request.method).toBe('POST');
-        expect(req.request.body.path).toBe('NPCs/bob');
-        expect(req.request.body.content.type).toBe('NPC');
-        // Should have merged data
-        expect(req.request.body.content.baseStats.Str).toBe(10);
+        expect(req.request.body.path_components).toEqual(['NPCs', 'bob']);
+        // Should have merged data in content blocks
+        expect(req.request.body.content.some((b: any) => b.text.includes('"Str":10'))).toBe(true);
 
         req.flush({});
         await promise;
@@ -136,11 +135,10 @@ describe('StoryPlannerComponent', () => {
 
         const promise = component.saveSuggestion(suggestion);
 
-        const req = httpMock.expectOne('/codex/api/codex/entry');
+        const req = httpMock.expectOne('/codex/api/v1/entries');
         expect(req.request.method).toBe('POST');
-        expect(req.request.body.path).toBe('Quests/find_gold');
-        expect(req.request.body.content.type).toBe('Quest');
-        expect(req.request.body.content.reward).toBe('100gp');
+        expect(req.request.body.path_components).toEqual(['Quests', 'find_gold']);
+        expect(req.request.body.content.some((b: any) => b.text.includes('100gp'))).toBe(true);
 
         req.flush({});
         await promise;
@@ -153,7 +151,7 @@ describe('StoryPlannerComponent', () => {
 
         const promise = component.previewStats(suggestion);
 
-        const req = httpMock.expectOne('/codex/api/dm-toolkit-ai/generate-npcs');
+        const req = httpMock.expectOne('/codex/api/v1/generation/npc-candidates');
         expect(req.request.method).toBe('POST');
         req.flush([{ name: 'Bob', baseStats: { Str: 10 } }]);
 

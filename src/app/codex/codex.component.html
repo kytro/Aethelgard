@@ -1,4 +1,17 @@
+@if (!currentUser()) {
+<div class="h-full flex items-center justify-center bg-gray-900 text-white">
+  <div class="bg-gray-800 p-8 rounded-xl border border-gray-700 shadow-2xl text-center max-w-md w-full">
+    <h1 class="text-4xl font-bold text-yellow-500 mb-2">Codex</h1>
+    <p class="text-gray-400 mb-8">Restricted Access. Authentication Required.</p>
+    <div id="google-btn" class="flex justify-center min-h-[40px]"></div>
+    @if (error()) {
+    <p class="text-red-400 mt-4 text-sm">{{ error() }}</p>
+    }
+  </div>
+</div>
+} @else {
 <div class="codex-browser h-full flex flex-col text-gray-200 bg-gray-900">
+
   @if (isLoading()) {
   <p class="text-gray-500 px-8 pt-8">Loading Codex...</p>
   } @else if (error()) {
@@ -17,6 +30,16 @@
       }
     </nav>
     <div class="flex items-center gap-4">
+      <div class="flex items-center gap-2 bg-gray-800 rounded-full pr-3 pl-1 py-1 border border-gray-700">
+        <img [src]="currentUser().picture" class="w-6 h-6 rounded-full" referrerPolicy="no-referrer">
+        <span class="text-xs text-gray-300 font-medium">{{ currentUser().name }}</span>
+        <button (click)="logout()" class="ml-2 text-gray-500 hover:text-red-400 text-xs" title="Logout">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+          </svg>
+        </button>
+      </div>
       @if (isEditMode()) {
       <button (click)="saveChanges()"
         class="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded transition-colors">
@@ -96,9 +119,40 @@
           (click)="isEditMode() && selectedBlockIndex.set($index)">
           @if (block) {
           @switch (block.type) {
-          @case ('heading') { <h3 class="text-xl font-semibold text-yellow-500 border-b border-gray-700 pb-2"
-            [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}
-          </h3> }
+          @case ('heading') {
+          <div class="flex items-center gap-2">
+            @if(isEditMode()) {
+            <div class="flex flex-col">
+              <button (click)="changeHeadingLevel(block, 'up')" [disabled]="(block.level || 3) <= 1"
+                class="text-gray-400 hover:text-yellow-400 disabled:opacity-30 disabled:cursor-not-allowed text-xs leading-none"
+                title="Increase heading size">&#9650;</button>
+              <span class="text-gray-500 text-xs text-center">H{{block.level || 3}}</span>
+              <button (click)="changeHeadingLevel(block, 'down')" [disabled]="(block.level || 3) >= 6"
+                class="text-gray-400 hover:text-yellow-400 disabled:opacity-30 disabled:cursor-not-allowed text-xs leading-none"
+                title="Decrease heading size">&#9660;</button>
+            </div>
+            }
+            @switch (block.level || 3) {
+            @case (1) { <h1 class="text-4xl font-bold text-yellow-500 border-b border-gray-700 pb-2 flex-1"
+              [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}
+            </h1> }
+            @case (2) { <h2 class="text-2xl font-bold text-yellow-500 border-b border-gray-700 pb-2 flex-1"
+              [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}
+            </h2> }
+            @case (3) { <h3 class="text-xl font-semibold text-yellow-500 border-b border-gray-700 pb-2 flex-1"
+              [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}
+            </h3> }
+            @case (4) { <h4 class="text-lg font-semibold text-yellow-400 pb-1 flex-1"
+              [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}
+            </h4> }
+            @case (5) { <h5 class="text-base font-semibold text-yellow-400 pb-1 flex-1"
+              [attr.contenteditable]="isEditMode()" (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}
+            </h5> }
+            @case (6) { <h6 class="text-sm font-semibold text-yellow-400 flex-1" [attr.contenteditable]="isEditMode()"
+              (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}</h6> }
+            }
+          </div>
+          }
           @case ('paragraph') { <p class="text-gray-300 leading-relaxed" [attr.contenteditable]="isEditMode()"
             (blur)="handleContentUpdate(block, 'text', $event)">{{ block.text }}</p> }
           @case ('table') {
@@ -267,10 +321,22 @@
                 </button>
               </div>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 text-sm">
-                <p><strong class="font-semibold text-gray-400">Class:</strong> <span
-                    [attr.contenteditable]="isEditMode()"
-                    (blur)="handleEntityUpdate(entity, 'baseStats.class', $event)">{{
-                    getCaseInsensitiveProp(entity['baseStats'], 'class') ?? 'N/A' }}</span></p>
+                <p><strong class="font-semibold text-gray-400">Class:</strong>
+                  @if (!isEditMode()) {
+                  <span>{{ getClassSummary(entity) }}</span>
+                  } @else {
+                  <span [attr.contenteditable]="true" (blur)="handleEntityUpdate(entity, 'baseStats.class', $event)">{{
+                    getCaseInsensitiveProp(entity['baseStats'], 'class') ?? 'N/A' }}</span>
+                  }
+                </p>
+                @if (isEditMode()) {
+                <p><strong class="font-semibold text-gray-400">Level:</strong> <span [attr.contenteditable]="true"
+                    (blur)="handleNumericEntityUpdate(entity, 'baseStats.level', $event)">{{
+                    getCaseInsensitiveProp(entity['baseStats'], 'level') ?? 'N/A' }}</span></p>
+                } @else if (!getClasses(entity).length) {
+                <p><strong class="font-semibold text-gray-400">Level:</strong> <span>{{
+                    getCaseInsensitiveProp(entity['baseStats'], 'level') ?? 'N/A' }}</span></p>
+                }
                 <p><strong class="font-semibold text-gray-400">Race:</strong> <span
                     [attr.contenteditable]="isEditMode()"
                     (blur)="handleEntityUpdate(entity, 'baseStats.race', $event)">{{
@@ -294,6 +360,35 @@
                 <p><strong class="font-semibold text-gray-400">HP:</strong> <span [attr.contenteditable]="isEditMode()"
                     (blur)="handleEntityUpdate(entity, 'baseStats.HP', $event)">{{entity['baseStats']?.HP ??
                     entity['baseStats']?.hp ?? 'N/A'}}</span></p>
+
+                @if (entity._id && (getClasses(entity).length > 0 || isEditMode())) {
+                <div class="col-span-1 md:col-span-2 mt-2">
+                  <p class="font-semibold text-white mb-2">Multiclassing:</p>
+                  <div class="space-y-2">
+                    @for (cls of getClasses(entity); track $index) {
+                    <div class="flex items-center gap-2 bg-gray-800/30 p-2 rounded border border-gray-700/50 group">
+                      <span class="text-sm text-gray-300 flex-grow" [attr.contenteditable]="isEditMode()"
+                        (blur)="handleClassUpdate(entity, $index, 'className', $event)">{{ cls.className }}</span>
+                      <div class="flex items-center gap-2">
+                        <span class="text-sm font-mono text-yellow-400 w-12 text-center"
+                          [attr.contenteditable]="isEditMode()"
+                          (blur)="handleClassUpdate(entity, $index, 'level', $event)">{{ cls.level }}</span>
+                        @if (isEditMode()) {
+                        <button (click)="removeClass(entity, $index)"
+                          class="text-red-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
+                        }
+                      </div>
+                    </div>
+                    }
+                    @if (isEditMode()) {
+                    <button (click)="addClass(entity)"
+                      class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white px-3 py-1 rounded border border-gray-700 transition-colors">
+                      + Add Class
+                    </button>
+                    }
+                  </div>
+                </div>
+                }
                 <p><strong class="font-semibold text-gray-400">Saves:</strong>
                   @if (entity['baseStats']?.saves) {
                   <span class="text-green-400">Fort +{{entity['baseStats']?.saves?.fortitude ??
@@ -433,6 +528,22 @@
                 <div class="col-span-1 md:col-span-2">
                   <p class="font-semibold text-white">Equipment:</p>
                   <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-green-400">
+
+                    <!-- New Inventory System -->
+                    @if (entity.inventory && entity.inventory.length > 0) {
+                    @for(item of entity.inventory; track item.itemId) {
+                    @if (item.equipped) {
+                    <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
+                      <span class="cursor-pointer hover:text-green-300"
+                        (mouseenter)="showTooltip($event, item.itemId || item.name)" (mouseleave)="hideTooltip()">
+                        {{ item.name }}
+                      </span>
+                      <!-- Inventory editing not fully implemented here yet, read-only for now -->
+                    </span>
+                    }
+                    }
+                    } @else {
+                    <!-- Legacy Equipment System -->
                     @for(equipId of entity.equipment; track equipId) {
                     <span class="relative group flex items-center gap-2 bg-gray-800/50 px-2 py-1 rounded">
                       <span class="cursor-pointer hover:text-green-300" (mouseenter)="showTooltip($event, equipId)"
@@ -445,7 +556,10 @@
                       }
                     </span>
                     }
-                    @if(!entity.equipment || entity.equipment.length === 0) {
+                    }
+
+                    @if((!entity.inventory || entity.inventory.length === 0) && (!entity.equipment ||
+                    entity.equipment.length === 0)) {
                     <span class="text-gray-500 italic">None</span>
                     }
                   </div>
@@ -692,7 +806,8 @@
                       }
                     </div>
                     @if(aiCompletePreview().additions.baseStatsReasoning) {
-                    <p class="text-gray-500 text-xs mt-2 italic">{{ aiCompletePreview().additions.baseStatsReasoning }}
+                    <p class="text-gray-500 text-xs mt-2 italic">{{ aiCompletePreview().additions.baseStatsReasoning
+                      }}
                     </p>
                     }
                   </div>
@@ -938,4 +1053,5 @@
     </div>
   </div>
 </div>
+}
 }

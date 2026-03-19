@@ -154,3 +154,8 @@ scratch.md
 # Codex Backup
 codex_backup*.json
 codex_backup*/
+
+# Integration Tools
+
+# Verification Tests
+tests_verification/

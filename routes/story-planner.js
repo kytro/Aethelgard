@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { generateContent } = require('../services/geminiService');
+const { generateContent } = require('../services/aiService');
 
 module.exports = function (db) {
 

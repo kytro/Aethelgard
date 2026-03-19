@@ -22,14 +22,16 @@ describe('SettingsComponent', () => {
         component = fixture.componentInstance;
         httpMock = TestBed.inject(HttpTestingController);
 
-        // loadAllSettings called in constructor - expects 3 parallel requests
+        // loadAllSettings called in constructor - expects 4 parallel requests
         const keysReq = httpMock.expectOne('/codex/api/admin/settings/api-keys');
         const genReq = httpMock.expectOne('/codex/api/admin/settings/general');
         const modelsReq = httpMock.expectOne('/codex/api/ai-assistant/models');
+        const myKeysReq = httpMock.expectOne('/codex/api/admin/api-keys');
 
         keysReq.flush(mockKeys);
         genReq.flush(mockGeneral);
         modelsReq.flush(mockModels);
+        myKeysReq.flush({ success: true, data: [] });
 
         fixture.detectChanges();
         await fixture.whenStable();

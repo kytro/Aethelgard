@@ -44,7 +44,7 @@ describe('NpcGeneratorComponent', () => {
         it('should validate inputs before generating', () => {
             component.npcGenQuery = '';
             component.handleGenerateNpcs();
-            httpMock.expectNone('/codex/api/dm-toolkit-ai/generate-npcs');
+            httpMock.expectNone('/codex/api/v1/generation/npc-candidates');
         });
 
         it('should prevent duplicates in "Generated Characters" path', () => {
@@ -55,7 +55,7 @@ describe('NpcGeneratorComponent', () => {
             component.handleGenerateNpcs();
 
             expect(component.npcSaveSuccessMessage()).toContain('already exists');
-            httpMock.expectNone('/codex/api/dm-toolkit-ai/generate-npcs');
+            httpMock.expectNone('/codex/api/v1/generation/npc-candidates');
         });
 
         it('should call generate API on valid input', async () => {
@@ -65,7 +65,7 @@ describe('NpcGeneratorComponent', () => {
 
             component.handleGenerateNpcs();
 
-            const req = httpMock.expectOne('/codex/api/dm-toolkit-ai/generate-npcs');
+            const req = httpMock.expectOne('/codex/api/v1/generation/npc-candidates');
             expect(req.request.method).toBe('POST');
             expect(req.request.body.query).toBe('3 Bandits');
 
@@ -93,7 +93,7 @@ describe('NpcGeneratorComponent', () => {
             component.handleSaveNpcsToCodex();
 
             // 1. Expect Entity Creation POST (one per NPC)
-            const entityReq = httpMock.expectOne('/codex/api/admin/collections/entities_pf1e');
+            const entityReq = httpMock.expectOne('/codex/api/v1/entities');
             expect(entityReq.request.method).toBe('POST');
             expect(entityReq.request.body.name).toBe('Hero');
 
@@ -105,8 +105,8 @@ describe('NpcGeneratorComponent', () => {
             await fixture.whenStable();
 
             // 2. Expect Codex Data PUT (bulk update containing new parents + npc entry)
-            const codexReq = httpMock.expectOne('/codex/api/codex/data');
-            expect(codexReq.request.method).toBe('PUT');
+            const codexReq = httpMock.expectOne('/codex/api/v1/entries/bulk');
+            expect(codexReq.request.method).toBe('POST');
 
             const payload = codexReq.request.body;
             // Expected hierarchy creation:
@@ -147,7 +147,7 @@ describe('NpcGeneratorComponent', () => {
 
             component.handleSaveNpcsToCodex();
 
-            const entityReq = httpMock.expectOne('/codex/api/admin/collections/entities_pf1e');
+            const entityReq = httpMock.expectOne('/codex/api/v1/entities');
             expect(entityReq.request.method).toBe('POST');
 
             const body = entityReq.request.body;
@@ -161,7 +161,7 @@ describe('NpcGeneratorComponent', () => {
 
             await fixture.whenStable();
 
-            const codexReq = httpMock.expectOne('/codex/api/codex/data');
+            const codexReq = httpMock.expectOne('/codex/api/v1/entries/bulk');
             codexReq.flush({});
 
             await fixture.whenStable();
@@ -199,7 +199,7 @@ describe('NpcGeneratorComponent', () => {
 
             component.handleSaveNpcsToCodex();
 
-            const entityReq = httpMock.expectOne('/codex/api/admin/collections/entities_pf1e');
+            const entityReq = httpMock.expectOne('/codex/api/v1/entities');
             const body = entityReq.request.body;
 
             // Verify HP and AC
@@ -222,7 +222,7 @@ describe('NpcGeneratorComponent', () => {
             entityReq.flush({ insertedId: 'dragon-entity' });
             await fixture.whenStable();
 
-            const codexReq = httpMock.expectOne('/codex/api/codex/data');
+            const codexReq = httpMock.expectOne('/codex/api/v1/entries/bulk');
             codexReq.flush({});
             await fixture.whenStable();
 
@@ -250,7 +250,7 @@ describe('NpcGeneratorComponent', () => {
 
             component.handleGenerateDetails(0);
 
-            const req = httpMock.expectOne('/codex/api/dm-toolkit-ai/generate-npc-details');
+            const req = httpMock.expectOne('/codex/api/v1/generation/npc-details');
             expect(req.request.method).toBe('POST');
 
             const body = req.request.body;
@@ -283,7 +283,7 @@ describe('NpcGeneratorComponent', () => {
         it('should create parent paths and save valid entity/entry when saving individual NPC', async () => {
             component.handleSaveNpc(0);
 
-            const entityReq = httpMock.expectOne('/codex/api/admin/collections/entities_pf1e');
+            const entityReq = httpMock.expectOne('/codex/api/v1/entities');
             expect(entityReq.request.method).toBe('POST');
 
             const entityBody = entityReq.request.body;
@@ -294,7 +294,7 @@ describe('NpcGeneratorComponent', () => {
             entityReq.flush({ insertedId: 'loner-id' });
             await fixture.whenStable();
 
-            const createReq = httpMock.expectOne('/codex/api/codex/create-entries');
+            const createReq = httpMock.expectOne('/codex/api/v1/entries/bulk');
             expect(createReq.request.method).toBe('POST');
 
             const entries = createReq.request.body;

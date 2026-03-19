@@ -14,10 +14,10 @@ import { StoryPlannerComponent } from './story-planner/story-planner.component';
   selector: 'app-dm-toolkit',
   standalone: true,
   imports: [
-    CommonModule, 
-    CodexAssistantComponent, 
-    NpcGeneratorComponent, 
-    SessionLoggerComponent, 
+    CommonModule,
+    CodexAssistantComponent,
+    NpcGeneratorComponent,
+    SessionLoggerComponent,
     CombatManagerComponent,
     StoryPlannerComponent
   ],
@@ -35,11 +35,11 @@ export class DmToolkitComponent implements OnInit {
   http = inject(HttpClient);
 
   activeTool = signal<'assistant' | 'npc-generator' | 'session' | 'combat-manager' | 'story-planner'>('assistant');
-  
+
   fights = signal<any[]>([]);
   sessions = signal<any[]>([]);
   codex = signal<any>(null);
-  
+
   // Caches passed down to children
   rulesCache = signal<Map<string, any>>(new Map());
   equipmentCache = signal<Map<string, any>>(new Map());
@@ -63,7 +63,7 @@ export class DmToolkitComponent implements OnInit {
       const [fights, sessions, codex, entitiesData, rules, equipment, magicItems, effects, spells] = await Promise.all([
         lastValueFrom(this.http.get<any[]>('/codex/api/dm-toolkit/fights')),
         lastValueFrom(this.http.get<any[]>('/codex/api/dm-toolkit/sessions')),
-        lastValueFrom(this.http.get<any>('/codex/api/codex/data')),
+        lastValueFrom(this.http.get<any>('/codex/api/v1/entries?limit=10000')).then(res => res.data || []),
         lastValueFrom(this.http.get<any[]>('/codex/api/admin/collections/entities_pf1e')),
         lastValueFrom(this.http.get<any[]>('/codex/api/admin/collections/rules_pf1e')),
         lastValueFrom(this.http.get<any[]>('/codex/api/admin/collections/equipment_pf1e')),

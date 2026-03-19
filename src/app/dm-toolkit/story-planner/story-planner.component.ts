@@ -57,7 +57,7 @@ export class StoryPlannerComponent {
     const codexContext = '';
 
     try {
-      const response = await lastValueFrom(this.http.post<any>('/codex/api/dm-toolkit/story-planner/suggest', {
+      const response = await lastValueFrom(this.http.post<any>('/codex/api/v1/generation/story/suggest', {
         context: this.storyContext(),
         sessionContext: recentSessions,
         codexContext: codexContext,
@@ -77,10 +77,10 @@ export class StoryPlannerComponent {
     this.generatingStatsForItem.set(suggestion.name);
     try {
       const prompt = `${suggestion.description} ${suggestion.data?.context || ''}`;
-      const npcs = await lastValueFrom(this.http.post<any[]>('/codex/api/dm-toolkit-ai/generate-npcs', {
+      const npcs = await lastValueFrom(this.http.post<any[]>('/codex/api/v1/generation/npc-candidates', {
         query: prompt,
         options: {
-          codex: { userContext: 'Generated from Story Planner' },
+          generationContext: 'Generated from Story Planner',
           existingEntityNames: []
         }
       }));
@@ -105,7 +105,7 @@ export class StoryPlannerComponent {
 
         if (!npcStats) {
           const prompt = `${suggestion.description} ${suggestion.data?.context || ''}`;
-          const npcs = await lastValueFrom(this.http.post<any[]>('/codex/api/dm-toolkit-ai/generate-npcs', {
+          const npcs = await lastValueFrom(this.http.post<any[]>('/codex/api/v1/generation/npc-candidates', {
             query: prompt,
             options: {
               codex: { userContext: 'Generated from Story Planner' },
@@ -178,9 +178,28 @@ export class StoryPlannerComponent {
     // We will use the standard file creation endpoint if available, or just POST to a generic codex endpoint
 
     // Using a hypothetical endpoint based on standard patterns in this app
-    await lastValueFrom(this.http.post('/codex/api/codex/entry', {
-      path: fullPath,
-      content: content
+    // V1 API: Use POST /entries with path_components
+    const pathComponents = fullPath.split('/').filter(p => p);
+
+    const contentBlocks: any[] = [
+      { type: 'paragraph', text: content.description }
+    ];
+
+    // Add extra data fields as text blocks
+    const excludedKeys = ['name', 'type', 'description', 'path'];
+    for (const key of Object.keys(content)) {
+      if (!excludedKeys.includes(key) && (content as any)[key]) {
+        const value = typeof (content as any)[key] === 'object' ? JSON.stringify((content as any)[key]) : (content as any)[key];
+        contentBlocks.push({ type: 'paragraph', text: `${key.charAt(0).toUpperCase() + key.slice(1)}: ${value}` });
+      }
+    }
+
+    await lastValueFrom(this.http.post('/codex/api/v1/entries', {
+      name: content.name,
+      path_components: pathComponents,
+      content: contentBlocks,
+      summary: content.description,
+      category: content.type
     }));
   }
 }

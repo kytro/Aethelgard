@@ -6,6 +6,8 @@ import { MapViewerComponent } from './map-viewer/map-viewer.component';
 import { FormsModule } from '@angular/forms';
 import { ModalService } from '../shared/services/modal.service';
 
+declare const google: any;
+
 // --- TYPE INTERFACES ---
 interface CodexEntry {
   name: string;
@@ -22,6 +24,7 @@ interface Pf1eEntity {
   name: string;
   rules: string[];
   equipment: string[];
+  inventory?: { itemId: string; name: string; type: string; quantity: number; equipped: boolean; properties?: any }[];
   spells?: { [level: string]: string[] };
   deity?: string;
   [key: string]: any;
@@ -88,7 +91,9 @@ export class CodexComponent implements OnInit {
     try {
       node.isCompleted = isCompleted;
       this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
-      await lastValueFrom(this.http.patch('api/codex/item', { path, isCompleted }));
+      // Use V1 Bulk endpoint for path-based update (requires array)
+      const updatePayload = [{ path_components: path, isCompleted }];
+      await lastValueFrom(this.http.post('api/v1/entries/bulk', updatePayload));
     } catch (err) {
       node.isCompleted = !isCompleted;
       this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
@@ -139,6 +144,10 @@ export class CodexComponent implements OnInit {
   tooltipContent = signal<TooltipContent | null>(null);
   tooltipPosition = signal({ top: '0px', left: '0px' });
 
+  // Auth
+  currentUser = signal<any>(null);
+  private googleClientId = '283129050747-a8f87leqdi94b5fc6bat9v6o1go6joc8.apps.googleusercontent.com';
+
   // AI Complete state
   aiCompleteLoading = signal<boolean>(false);
   aiCompletePreview = signal<any>(null);
@@ -150,17 +159,27 @@ export class CodexComponent implements OnInit {
   currentView = computed(() => {
     const data = this.codexData();
     const path = this.currentPath();
-    if (!data) return { entries: [], content: null, activeEntry: null };
+    if (!data) {
+      console.log('CurrentView: No Data');
+      return { entries: [], content: null, activeEntry: null };
+    }
 
     // Find the current entry based on the path
     const currentNode = this.getNode(path);
     const content = currentNode?.content || null;
 
     // Find child entries
-    const children = data.filter((entry: CodexEntry) =>
+    const children = Array.isArray(data) ? data.filter((entry: CodexEntry) =>
       entry.path_components.length === path.length + 1 &&
       path.every((p, i) => entry.path_components[i] === p)
-    );
+    ) : [];
+
+    console.log('CurrentView Debug:', {
+      path,
+      totalEntries: Array.isArray(data) ? data.length : 0,
+      childrenCount: children.length,
+      firstChild: children[0]
+    });
 
     // Determine the active entry if the current node is a leaf
     const isLeaf = currentNode && Array.isArray(currentNode.content);
@@ -281,17 +300,79 @@ export class CodexComponent implements OnInit {
   }
 
   ngOnInit(): void {
+    this.checkAuth();
     this.loadCodexData();
     this.loadCaches();
+  }
+
+  checkAuth() {
+    const token = localStorage.getItem('app_token');
+    const user = localStorage.getItem('app_user');
+    if (token && user) {
+      this.currentUser.set(JSON.parse(user));
+    } else {
+      this.initGoogleAuth();
+    }
+  }
+
+  initGoogleAuth() {
+    if (typeof google === 'undefined') {
+      // console.warn('Google Identity Services not loaded yet.');
+      // Retry or wait? index.html script should handle it, but maybe race condition.
+      // setTimeout(() => this.initGoogleAuth(), 1000); 
+      return;
+    }
+
+    google.accounts.id.initialize({
+      client_id: this.googleClientId,
+      callback: (response: any) => this.handleGoogleLogin(response)
+    });
+
+    // Render the button
+    // We need a slight delay to ensure the container exists if using *ngIf, or just assume it is there.
+    setTimeout(() => {
+      const btn = document.getElementById('google-btn');
+      if (btn) {
+        google.accounts.id.renderButton(
+          btn,
+          { theme: 'outline', size: 'large' }
+        );
+      }
+    }, 100);
+  }
+
+  async handleGoogleLogin(response: any) {
+    try {
+      const res: any = await lastValueFrom(this.http.post('api/auth/google/callback', { credential: response.credential }));
+
+      localStorage.setItem('app_token', res.token);
+      localStorage.setItem('app_user', JSON.stringify(res.user));
+
+      this.currentUser.set(res.user);
+
+      // Reload data now that we are authenticated
+      this.loadCodexData();
+    } catch (err) {
+      console.error('Login Failed', err);
+      this.error.set('Login failed. Please try again.');
+    }
+  }
+
+  logout() {
+    localStorage.removeItem('app_token');
+    localStorage.removeItem('app_user');
+    this.currentUser.set(null);
+    this.codexData.set([]);
+    this.initGoogleAuth(); // Re-init button
   }
 
   async loadCodexData() {
     this.isLoading.set(true);
     this.error.set(null);
     try {
-      // Fetch codex_entries array from backend
-      const entries: CodexEntry[] = await lastValueFrom(this.http.get<CodexEntry[]>('api/codex/data'));
-      this.codexData.set(entries);
+      // Fetch codex_entries from V1 API
+      const res: any = await lastValueFrom(this.http.get<any>('api/v1/entries?limit=10000'));
+      this.codexData.set(res.data || []);
     } catch (err: any) {
       this.error.set(err.error?.error || 'Failed to load Codex data.');
     } finally {
@@ -302,9 +383,9 @@ export class CodexComponent implements OnInit {
   async loadCaches() {
     try {
       const [rules, equipment, spells] = await Promise.all([
-        lastValueFrom(this.http.get<any[]>('api/admin/collections/rules_pf1e')),
-        lastValueFrom(this.http.get<any[]>('api/admin/collections/equipment_pf1e')),
-        lastValueFrom(this.http.get<any[]>('api/admin/collections/spells_pf1e'))
+        lastValueFrom(this.http.get<{ data: any[] }>('api/v1/rules')).then(r => r.data),
+        lastValueFrom(this.http.get<{ data: any[] }>('api/v1/equipment')).then(r => r.data),
+        lastValueFrom(this.http.get<{ data: any[] }>('api/v1/spells')).then(r => r.data)
       ]);
       this.rulesCache.set(new Map(rules.map(item => [item._id, item])));
       this.equipmentCache.set(new Map(equipment.map(item => [item._id, item])));
@@ -317,8 +398,8 @@ export class CodexComponent implements OnInit {
 
   async fetchLinkedEntities(entityIds: string[]) {
     try {
-      const entities = await lastValueFrom(this.http.post<any[]>('api/codex/get-entities', { entityIds }));
-      this.linkedEntities.set(entities);
+      const response = await lastValueFrom(this.http.post<{ data: any[] }>('api/v1/entities/batch', { ids: entityIds }));
+      this.linkedEntities.set(response.data);
     } catch (err) {
       console.error("Failed to fetch linked entities", err);
       this.linkedEntities.set([]);
@@ -327,11 +408,12 @@ export class CodexComponent implements OnInit {
 
   async fetchLinkedDetails(ruleIds: string[], equipmentIds: string[], spellIds: string[]) {
     try {
-      const details = await lastValueFrom(this.http.post<any>('api/codex/get-linked-details', { ruleIds, equipmentIds, spellIds }));
-      this.rulesCache.update(cache => new Map([...cache, ...details.rules.map((item: any) => [item._id, item])]));
-      this.equipmentCache.update(cache => new Map([...cache, ...details.equipment.map((item: any) => [item._id, item])]));
-      if (details.spells) {
-        this.spellsCache.update(cache => new Map([...cache, ...details.spells.map((item: any) => [item._id, item])]));
+      const details = await lastValueFrom(this.http.post<{ data: any }>('api/v1/linked-details', { ruleIds, equipmentIds, spellIds }));
+      const data = details.data;
+      this.rulesCache.update(cache => new Map([...cache, ...data.rules.map((item: any) => [item._id, item])]));
+      this.equipmentCache.update(cache => new Map([...cache, ...data.equipment.map((item: any) => [item._id, item])]));
+      if (data.spells) {
+        this.spellsCache.update(cache => new Map([...cache, ...data.spells.map((item: any) => [item._id, item])]));
       }
     } catch (err) {
       console.error("Failed to fetch linked details", err);
@@ -370,13 +452,13 @@ export class CodexComponent implements OnInit {
   async saveChanges() {
     if (!this.isEditMode()) return;
     try {
-      await lastValueFrom(this.http.put('api/codex/data', this.codexData()));
+      await lastValueFrom(this.http.post('api/v1/entries/bulk', this.codexData()));
 
       const modifiedEntityIds = this.modifiedEntities();
-      if (modifiedEntityIds.size > 0) {
+      if (modifiedEntityIds.size > 0 && Array.isArray(this.linkedEntities())) {
         const entitiesToSave = this.linkedEntities().filter(e => modifiedEntityIds.has(e._id));
         for (const entity of entitiesToSave) {
-          await lastValueFrom(this.http.put(`api/codex/entities/${entity._id}`, entity));
+          await lastValueFrom(this.http.put(`api/v1/entities/${entity._id}`, entity));
         }
         this.modifiedEntities.set(new Set());
       }
@@ -1107,7 +1189,7 @@ export class CodexComponent implements OnInit {
       let newBlock: any;
       switch (type) {
         case 'heading':
-          newBlock = { type: 'heading', text: 'New Heading' };
+          newBlock = { type: 'heading', text: 'New Heading', level: 2 };
           break;
         case 'paragraph':
           newBlock = { type: 'paragraph', text: 'New paragraph.' };
@@ -1228,6 +1310,29 @@ export class CodexComponent implements OnInit {
     }
   }
 
+  changeHeadingLevel(block: any, direction: 'up' | 'down') {
+    if (block.type !== 'heading') return;
+    const currentLevel = block.level || 3; // Default to h3 if not set
+    const newLevel = direction === 'up' ? Math.max(1, currentLevel - 1) : Math.min(6, currentLevel + 1);
+    block.level = newLevel;
+    // Trigger change detection
+    const data = this.codexData();
+    this.codexData.set(JSON.parse(JSON.stringify(data)));
+  }
+
+  getHeadingClass(level: number | undefined): string {
+    const lvl = level || 3;
+    switch (lvl) {
+      case 1: return 'text-4xl font-bold';
+      case 2: return 'text-2xl font-bold';
+      case 3: return 'text-xl font-semibold';
+      case 4: return 'text-lg font-semibold';
+      case 5: return 'text-base font-semibold';
+      case 6: return 'text-sm font-semibold';
+      default: return 'text-xl font-semibold';
+    }
+  }
+
 
   addRow(block: any) {
     const data = this.codexData();
@@ -1321,6 +1426,62 @@ export class CodexComponent implements OnInit {
     return Object.entries(skills).map(([name, value]) => ({ name, value })).sort((a, b) => a.name.localeCompare(b.name));
   }
 
+  // --- Multiclassing ---
+  getClasses(entity: Pf1eEntity): { className: string, level: number }[] {
+    return entity['baseStats']?.classes || [];
+  }
+
+  addClass(entity: Pf1eEntity) {
+    if (!this.isEditMode()) return;
+    if (!entity['baseStats']) entity['baseStats'] = {};
+    if (!entity['baseStats'].classes) entity['baseStats'].classes = [];
+
+    entity['baseStats'].classes.push({ className: 'New Class', level: 1 });
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]);
+  }
+
+  removeClass(entity: Pf1eEntity, index: number) {
+    if (!this.isEditMode() || !entity['baseStats']?.classes) return;
+    entity['baseStats'].classes.splice(index, 1);
+    this.modifiedEntities.update(set => set.add(entity._id));
+    this.linkedEntities.set([...this.linkedEntities()]);
+  }
+
+  handleClassUpdate(entity: Pf1eEntity, index: number, field: string, event: any) {
+    if (!this.isEditMode() || !entity['baseStats']?.classes?.[index]) return;
+
+    const val = event.target.innerText.trim();
+    if (field === 'level') {
+      const num = parseInt(val, 10);
+      entity['baseStats'].classes[index][field] = isNaN(num) ? 1 : num;
+    } else {
+      entity['baseStats'].classes[index][field] = val;
+    }
+
+    this.modifiedEntities.update(set => set.add(entity._id));
+    // No full trigger needed for basic text updates usually, but good for consistency
+  }
+
+  getClassSummary(entity: Pf1eEntity): string {
+    const classes = this.getClasses(entity);
+    if (classes.length > 0) {
+      return classes.map(c => `${c.className} ${c.level}`).join(' / ');
+    }
+    // Fallback to legacy
+    const cls = this.getCaseInsensitiveProp(entity['baseStats'], 'class');
+    const lvl = this.getCaseInsensitiveProp(entity['baseStats'], 'level');
+    return cls ? `${cls} ${lvl || ''}`.trim() : 'N/A';
+  }
+
+  getTotalLevel(entity: Pf1eEntity): number {
+    const classes = this.getClasses(entity);
+    if (classes.length > 0) {
+      return classes.reduce((sum, c) => sum + (Number(c.level) || 0), 0);
+    }
+    return Number(this.getCaseInsensitiveProp(entity['baseStats'], 'level')) || 0;
+  }
+
   formatItemId = (id: string) => this.formatName(id.replace(/^(feat_|sa_|cond_|eq_|spell_)/, ''));
 
   async toggleCompletion(entry: CodexEntry) {
@@ -1334,7 +1495,8 @@ export class CodexComponent implements OnInit {
       node.isCompleted = isCompleted;
       this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
 
-      await lastValueFrom(this.http.patch('api/codex/item', { path, isCompleted }));
+      const urlPath = path.join('/');
+      await lastValueFrom(this.http.patch(`api/v1/entries/by-path/${urlPath}`, { isCompleted }));
     } catch (err) {
       // Revert on error
       node.isCompleted = !isCompleted;
@@ -1355,8 +1517,8 @@ export class CodexComponent implements OnInit {
       categoryNode.enableCompletionTracking = enableCompletionTracking;
       this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
 
-      const categoryPath = path.join('.');
-      await lastValueFrom(this.http.patch('api/codex/category', { category: categoryPath, enableCompletionTracking }));
+      const categoryPath = path.join('/');
+      await lastValueFrom(this.http.patch(`api/v1/entries/by-path/${categoryPath}`, { enableCompletionTracking }));
     } catch (err) {
       // Revert on error
       categoryNode.enableCompletionTracking = !enableCompletionTracking;
@@ -1378,8 +1540,8 @@ export class CodexComponent implements OnInit {
       categoryNode.isCombatManagerSource = isCombatManagerSource;
       this.codexData.set(JSON.parse(JSON.stringify(this.codexData())));
 
-      const categoryPath = path.join('.');
-      await lastValueFrom(this.http.patch('api/codex/category', { category: categoryPath, isCombatManagerSource }));
+      const categoryPath = path.join('/');
+      await lastValueFrom(this.http.patch(`api/v1/entries/by-path/${categoryPath}`, { isCombatManagerSource }));
     } catch (err) {
       // Revert on error
       categoryNode.isCombatManagerSource = !isCombatManagerSource;
@@ -1438,7 +1600,7 @@ export class CodexComponent implements OnInit {
       // The backend accepts an array of entries to upsert.
 
       this.isLoading.set(true);
-      await lastValueFrom(this.http.put('api/codex/data', [newEntry]));
+      await lastValueFrom(this.http.post('api/v1/entries', newEntry));
       this.isLoading.set(false);
 
       this.navigateTo(newEntry);
@@ -1489,7 +1651,7 @@ export class CodexComponent implements OnInit {
 
     try {
       const response = await lastValueFrom(
-        this.http.post<any>('api/codex/ai-complete', { entityId: entity._id })
+        this.http.post<any>(`api/v1/entities/${entity._id}/ai-complete`, {})
       );
       this.aiCompletePreview.set(response);
     } catch (err: any) {
@@ -1564,7 +1726,7 @@ export class CodexComponent implements OnInit {
 
     // Save directly to database
     try {
-      await lastValueFrom(this.http.put(`api/codex/entities/${entity._id}`, entity));
+      await lastValueFrom(this.http.put(`api/v1/entities/${entity._id}`, entity));
     } catch (err) {
       console.error('[AI Complete] Failed to save entity', err);
       this.error.set('Failed to save AI suggestions.');
@@ -1697,7 +1859,7 @@ export class CodexComponent implements OnInit {
       entity['baseStats']['combat'] = updates['baseStats.combat'];
       entity['baseStats']['saves'] = updates['baseStats.saves'];
 
-      await lastValueFrom(this.http.put(`api/codex/entities/${entity._id}`, updates));
+      await lastValueFrom(this.http.put(`api/v1/entities/${entity._id}`, updates));
 
       this.closeFixStatsModal();
       this.linkedEntities.set([...this.linkedEntities()]);
