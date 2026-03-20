@@ -791,18 +791,28 @@ export class CombatManagerComponent {
       const entity = actualEntityId ? this.entitiesCache().find(e => e.id === actualEntityId) : null;
       const targetEntity = entity || c as any;
 
-      // --- ADD THIS BLOCK ---
-      // Merge top-level saves from backend transfer to prevent auto-generation overwrite
+      // 1. Extract raw numerical saves
+      const rawFort = (c as any).Fort ?? (c as any).fort ?? c.baseStats?.Fort ?? c.baseStats?.fort;
+      const rawRef = (c as any).Ref ?? (c as any).ref ?? c.baseStats?.Ref ?? c.baseStats?.ref;
+      const rawWill = (c as any).Will ?? (c as any).will ?? c.baseStats?.Will ?? c.baseStats?.will;
+
+      // 2. Extract string if it already exists
+      let explicitSavesStr = (c as any).Saves || (c as any).saves || c.baseStats?.Saves || c.baseStats?.saves;
+
+      // 3. Compile the string to protect numerical values from being overwritten
+      if (!explicitSavesStr && rawFort !== undefined && rawRef !== undefined && rawWill !== undefined) {
+          explicitSavesStr = `Fort ${rawFort >= 0 ? '+' : ''}${rawFort}, Ref ${rawRef >= 0 ? '+' : ''}${rawRef}, Will ${rawWill >= 0 ? '+' : ''}${rawWill}`;
+      }
+
       const preppedBaseStats = {
           ...(c.baseStats || {}),
-          Saves: (c as any).Saves || (c as any).saves || c.baseStats?.Saves || c.baseStats?.saves,
-          Fort: (c as any).Fort || (c as any).fort || c.baseStats?.Fort || c.baseStats?.fort,
-          Ref: (c as any).Ref || (c as any).ref || c.baseStats?.Ref || c.baseStats?.ref,
-          Will: (c as any).Will || (c as any).will || c.baseStats?.Will || c.baseStats?.will,
+          Saves: explicitSavesStr,
+          Fort: rawFort,
+          Ref: rawRef,
+          Will: rawWill,
       };
-      // ----------------------
 
-      // --- UPDATE the first argument from c.baseStats to preppedBaseStats ---
+      // 4. Calculate final stats using the protected string
       const baseStats = calculateCompleteBaseStats(preppedBaseStats, {
         classes: c.classes,
         type: c.type,
