@@ -15,7 +15,7 @@ import {
 import { ModalService } from '../../shared/services/modal.service';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
-interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; initiativeMod?: number; hp: number; maxHp: number; tempHp?: number; nonLethalDamage?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entity_id?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; specialAbilities?: string[]; specialAttacks?: string[]; vulnerabilities?: string[]; equipment?: any[]; magicItems?: any[]; inventory?: any[]; classes?: any[]; rules?: any[]; spells?: any; }
+interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; initiativeMod?: number; hp: number; maxHp: number; tempHp?: number; nonLethalDamage?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entity_id?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; specialAbilities?: string[]; specialAttacks?: string[]; vulnerabilities?: string[]; equipment?: any[]; magicItems?: any[]; inventory?: any[]; classes?: any[]; rules?: any[]; spells?: any; saves?: any; Saves?: any; class?: string; level?: number; cr?: string; senses?: string; }
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
@@ -416,7 +416,8 @@ export class CombatManagerComponent {
           bab: (resolvedNode as any)?.bab ?? (resolvedNode as any)?.BAB ?? (baseStats as any).bab ?? (baseStats as any).BAB,
           hp: (resolvedNode as any)?.hp ?? (resolvedNode as any)?.HP ?? (baseStats as any).hp ?? (baseStats as any).HP,
           saves: (resolvedNode as any)?.saves ?? (resolvedNode as any)?.Saves ?? (baseStats as any).saves ?? (baseStats as any).Saves,
-          senses: (resolvedNode as any)?.senses ?? (resolvedNode as any)?.Senses ?? (baseStats as any).senses ?? (baseStats as any).Saves,
+          Saves: (resolvedNode as any)?.saves ?? (resolvedNode as any)?.Saves ?? (baseStats as any).saves ?? (baseStats as any).Saves,
+          senses: (resolvedNode as any)?.senses ?? (resolvedNode as any)?.Senses ?? (baseStats as any).senses ?? (baseStats as any).Senses, // Fixed typo here
           classes: (resolvedNode as any)?.classes ?? (baseStats as any).classes ?? []
         };
 
@@ -428,6 +429,13 @@ export class CombatManagerComponent {
           initiative: initRoll,
           initiativeMod: initMod, // PERSISTED MODIFIER FOR TIE-BREAKING
           baseStats: finalBaseStats,
+          // --- ADD THIS BLOCK to explicitly force AI properties into the DB ---
+          saves: finalBaseStats.Saves,
+          Saves: finalBaseStats.Saves,
+          class: (resolvedNode as any)?.class ?? (resolvedNode as any)?.Class ?? (baseStats as any)?.class ?? (baseStats as any)?.Class,
+          level: (resolvedNode as any)?.level ?? (resolvedNode as any)?.Level ?? (baseStats as any)?.level ?? (baseStats as any)?.Level,
+          cr: (resolvedNode as any)?.cr ?? (resolvedNode as any)?.CR ?? (baseStats as any)?.cr ?? (baseStats as any)?.CR,
+          // -------------------------------------------------------------------
           // classes: Handled above
           // Robust equipment lookup (check items, gear, inventory, baseStats too)
           equipment: (resolvedNode as any)?.equipment
