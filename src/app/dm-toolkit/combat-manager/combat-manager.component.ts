@@ -793,24 +793,41 @@ export class CombatManagerComponent {
     return this.combatants().map(c => {
       const actualEntityId = c.entity_id || c.entityId;
       const entity = actualEntityId ? this.entitiesCache().find(e => e.id === actualEntityId) : null;
-      const targetEntity = entity || c as any;
+      
+      // PRIORITY FIX: Prefer the combatant object (c) for stats and metadata, 
+      // as it contains the fresh, synthesized data from the backend.
+      // Use the entity (cache) only for fallback or non-combatant-specific fields (like full description).
+      const level = (c as any).level || (c as any).Level || entity?.level || entity?.Level || 1;
+      const cr = (c as any).cr || (c as any).CR || entity?.cr || entity?.CR || '1';
+      const classes = (c.classes && c.classes.length > 0) ? c.classes : (entity?.classes || []);
+      const type = c.type || entity?.type || 'npc';
+      const classStr = (c as any).class || (c as any).Class || entity?.class || entity?.Class || type;
 
-      // 1. Extract raw numerical saves
-      const rawFort = (c as any).Fort ?? (c as any).fort ?? c.baseStats?.Fort ?? c.baseStats?.fort;
-      const rawRef = (c as any).Ref ?? (c as any).ref ?? c.baseStats?.Ref ?? c.baseStats?.ref;
-      const rawWill = (c as any).Will ?? (c as any).will ?? c.baseStats?.Will ?? c.baseStats?.will;
+      // 1. Extract raw numerical BAB and AC (Prefer combatant over entity)
+      const rawBab = (c as any).bab ?? (c as any).BAB ?? c.baseStats?.bab ?? c.baseStats?.BAB ?? entity?.bab ?? entity?.BAB ?? entity?.baseStats?.bab ?? entity?.baseStats?.BAB ?? 1;
+      const rawAc = (c as any).ac ?? (c as any).AC ?? c.baseStats?.ac ?? c.baseStats?.AC ?? entity?.ac ?? entity?.AC ?? entity?.baseStats?.ac ?? entity?.baseStats?.AC ?? 10;
 
-      // 2. Extract string if it already exists
-      let explicitSavesStr = (c as any).Saves || (c as any).saves || c.baseStats?.Saves || c.baseStats?.saves;
+      // 2. Extract raw numerical saves (Prefer combatant over entity)
+      const rawFort = (c as any).Fort ?? (c as any).fort ?? c.baseStats?.Fort ?? c.baseStats?.fort ?? entity?.baseStats?.Fort ?? entity?.baseStats?.fort;
+      const rawRef = (c as any).Ref ?? (c as any).ref ?? c.baseStats?.Ref ?? c.baseStats?.ref ?? entity?.baseStats?.Ref ?? entity?.baseStats?.ref;
+      const rawWill = (c as any).Will ?? (c as any).will ?? c.baseStats?.Will ?? c.baseStats?.will ?? entity?.baseStats?.Will ?? entity?.baseStats?.will;
 
-      // 3. Compile the string to protect numerical values from being overwritten
+      // 3. Extract string if it already exists (Prefer combatant)
+      let explicitSavesStr = (c as any).Saves || (c as any).saves || c.baseStats?.Saves || c.baseStats?.saves || entity?.baseStats?.Saves || entity?.baseStats?.saves;
+
+      // 4. Compile the string to protect numerical values from being overwritten
       if (!explicitSavesStr && rawFort !== undefined && rawRef !== undefined && rawWill !== undefined) {
           explicitSavesStr = `Fort ${rawFort >= 0 ? '+' : ''}${rawFort}, Ref ${rawRef >= 0 ? '+' : ''}${rawRef}, Will ${rawWill >= 0 ? '+' : ''}${rawWill}`;
       }
 
       const preppedBaseStats = {
+          ...(entity?.baseStats || {}),
           ...(c.baseStats || {}),
           Saves: explicitSavesStr,
+          Level: level,
+          CR: cr,
+          BAB: rawBab,
+          AC: rawAc,
           Fort: rawFort,
           Ref: rawRef,
           Will: rawWill,
@@ -818,13 +835,13 @@ export class CombatManagerComponent {
 
       // 4. Calculate final stats using the protected string
       const baseStats = calculateCompleteBaseStats(preppedBaseStats, {
-        classes: c.classes,
-        type: c.type,
-        specialAbilities: c.specialAbilities,
-        level: (targetEntity as any)?.level || (targetEntity as any)?.Level,
-        cr: (targetEntity as any)?.cr || (targetEntity as any)?.CR,
+        classes: classes,
+        type: type,
+        specialAbilities: (c as any).specialAbilities || entity?.specialAbilities || [],
+        level: level,
+        cr: cr,
         // Ensure the class string is caught if transferred to the top level
-        classString: (targetEntity as any)?.class || (targetEntity as any)?.Class || (targetEntity as any)?.type || (targetEntity as any)?.Type
+        classString: classStr
       });
       // Saves parsing
       const savesStr = getCaseInsensitiveProp(baseStats, 'Saves');
@@ -858,7 +875,7 @@ export class CombatManagerComponent {
 
       // Baseline Enforcement: Ensure saves never drop below Class Base + Ability Mod 
       // This is the CRITICAL safety net for Fighter 8 characters with empty/invalid saves data.
-      const classBase = getClassBaseStats(targetEntity.classes || c.classes || []);
+      const classBase = getClassBaseStats(classes);
       const conModBase = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
       const dexModBase = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
       const wisModBase = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
@@ -867,7 +884,7 @@ export class CombatManagerComponent {
       baseStats.SavesObject.Ref = Math.max(baseStats.SavesObject.Ref, classBase.ref + dexModBase);
       baseStats.SavesObject.Will = Math.max(baseStats.SavesObject.Will, classBase.will + wisModBase);
 
-      const allFeats = (targetEntity.rules || []).map((id: string) => ({ id, ...this.rulesCache().get(id) })).filter((f: any) => f.name) || [];
+      const allFeats = ((c as any).rules || entity?.rules || []).map((id: string) => ({ id, ...this.rulesCache().get(id) })).filter((f: any) => f.name) || [];
 
       // Merge string-based feats from baseStats if available (for monsters)
       const rawFeats: string[] = getCaseInsensitiveProp(baseStats, 'Feats') || [];
@@ -882,8 +899,9 @@ export class CombatManagerComponent {
       let magicItems: any[] = [];
 
       // Unified Inventory Logic
-      if (targetEntity.inventory && Array.isArray(targetEntity.inventory)) {
-        targetEntity.inventory.forEach((item: any) => {
+      if (((c as any).inventory || entity?.inventory) && Array.isArray((c as any).inventory || entity?.inventory)) {
+        const inventory = (c as any).inventory || entity?.inventory;
+        inventory.forEach((item: any) => {
           // Construct item object with defaults, spread properties
           const processed = {
             id: item.itemId, // Might be undefined
@@ -899,12 +917,12 @@ export class CombatManagerComponent {
         });
       } else {
         // Legacy Fallback / Explicit IDs or Objects
-        const mappedEquipment = (targetEntity.equipment || []).map((ref: any) => {
+        const mappedEquipment = ((c as any).equipment || entity?.equipment || []).map((ref: any) => {
           if (typeof ref === 'object') return { ...ref, ...(ref.properties || {}) };
           return this.resolveItem(ref, this.equipmentCache(), false);
         }).filter((e: any) => e.name);
 
-        const mappedMagicItems = (targetEntity.magicItems || []).map((ref: any) => {
+        const mappedMagicItems = ((c as any).magicItems || entity?.magicItems || []).map((ref: any) => {
           if (typeof ref === 'object') return { ...ref, ...(ref.properties || {}) };
           return this.resolveItem(ref, this.magicItemsCache(), true);
         }).filter((mi: any) => mi.name);
@@ -945,8 +963,8 @@ export class CombatManagerComponent {
 
       // Extract Special Abilities
       // const specialAbilities = ... (Removed redeclaration)
-      const extractedAbilities = (entity && entity.special_abilities) ? entity.special_abilities : (c.specialAbilities || []);
-      const extractedSpecialAttacks = (entity && entity.special_attacks) ? entity.special_attacks : (c.specialAttacks || []);
+      const extractedAbilities = (c.specialAbilities && c.specialAbilities.length > 0) ? c.specialAbilities : (entity?.special_abilities || []);
+      const extractedSpecialAttacks = (c.specialAttacks && c.specialAttacks.length > 0) ? c.specialAttacks : (entity?.special_attacks || []);
 
       let spellData: { id: string, level: number }[] = [];
       if (entity && entity.spells && typeof entity.spells === 'object') {

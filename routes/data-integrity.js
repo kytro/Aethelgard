@@ -728,15 +728,27 @@ ${JSON.stringify(existingNames)}`;
             // 2. Class / Role Logic (Heuristic for BAB/Saves)
             // Default to "Monster" progressions if class unknown
             // BAB: Fast (1), Medium (0.75), Slow (0.5)
-            // Saves: Usually 2 Good, 1 Poor? Or all Good (Outsider)? Or all Poor (Construct)?
+            
+            const classes = baseStats.classes || entity.classes || [];
             const className = (baseStats.class || entity.class || "").toLowerCase();
             const type = (baseStats.type || entity.type || "").toLowerCase();
 
             // Simple BAB Heuristic
             let babMult = 0.75; // Medium
-            if (['fighter', 'barbarian', 'paladin', 'ranger', 'cavalier', 'gunslinger', 'slayer', 'swashbuckler', 'dragon', 'magical beast', 'outsider'].some(c => className.includes(c) || type.includes(c))) {
+            
+            // Check subclasses if available for better accuracy
+            const hasFastClass = (clsList) => clsList.some(c => 
+                ['fighter', 'barbarian', 'paladin', 'ranger', 'cavalier', 'gunslinger', 'slayer', 'swashbuckler', 'brawler', 'bloodrager']
+                .includes((c.className || c.name || "").toLowerCase())
+            );
+            const hasSlowClass = (clsList) => clsList.some(c => 
+                ['wizard', 'sorcerer', 'witch', 'arcanist']
+                .includes((c.className || c.name || "").toLowerCase())
+            );
+
+            if (hasFastClass(classes) || ['dragon', 'magical beast', 'outsider'].some(t => type.includes(t)) || ['fighter', 'barbarian', 'paladin', 'ranger', 'cavalier', 'gunslinger', 'slayer', 'swashbuckler', 'brawler', 'bloodrager'].some(c => className.includes(c))) {
                 babMult = 1;
-            } else if (['wizard', 'sorcerer', 'witch', 'fey', 'undead'].some(c => className.includes(c) || type.includes(c))) {
+            } else if (hasSlowClass(classes) || ['fey', 'undead'].some(t => type.includes(t)) || ['wizard', 'sorcerer', 'witch', 'arcanist'].some(c => className.includes(c))) {
                 babMult = 0.5;
             }
             const bab = Math.floor(level * babMult);

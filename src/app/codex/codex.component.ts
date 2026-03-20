@@ -553,9 +553,10 @@ export class CodexComponent implements OnInit {
   handleNumericEntityUpdate(entity: Pf1eEntity, field: string, event: any) {
     if (!this.isEditMode()) return;
 
-    // 1. Clean input: aggressive regex to find the first valid integer, ignoring extra text like "(-1)"
+    // 1. Clean input: Extract the base number, allowing for modifiers in parentheses
+    // e.g., "17 (Touch 13, FF 14)" -> 17
     const text = event.target.innerText;
-    const match = text.match(/-?\d+/);
+    const match = text.match(/^(-?\d+)/); // Only take the leading number
 
     if (!match) {
       // If invalid, revert UI to old value
@@ -564,32 +565,28 @@ export class CodexComponent implements OnInit {
     }
 
     // 2. Parse to number
-    const numVal = parseInt(match[0], 10);
+    const numVal = parseInt(match[1], 10);
 
     // 3. Update deeply nested property with case-sensitivity handling
     const keys = field.split('.');
     let current = entity as any;
     for (let i = 0; i < keys.length - 1; i++) {
-      // FIX: Case-insensitive traversal
       let nextKey = Object.keys(current).find(k => k.toLowerCase() === keys[i].toLowerCase()) || keys[i];
       if (!current[nextKey]) current[nextKey] = {};
       current = current[nextKey];
     }
 
-    // FIX: Case-insensitive setting of the final key
     const finalKeyReq = keys[keys.length - 1];
     const actualKey = Object.keys(current).find(k => k.toLowerCase() === finalKeyReq.toLowerCase()) || finalKeyReq;
 
     current[actualKey] = numVal;
 
-    // 4. Update UI to show strictly the number (removes any pasted junk like modifiers)
-    if (event.target.innerText !== String(numVal)) {
-      event.target.innerText = String(numVal);
-    }
-
-    // 5. Mark as modified to ensure it gets sent to backend on 'Save Changes'
+    // 4. Update UI to show the primary number (preserves clean state)
+    // We don't force-overwrite if they want to keep the extra text for now, 
+    // but the VALUE we save is pure numeric.
+    
+    // 5. Mark as modified
     this.modifiedEntities.update(set => set.add(entity._id));
-    // Force trigger view update to recalculate modifiers immediately
     this.linkedEntities.set([...this.linkedEntities()]);
   }
 
@@ -1672,21 +1669,68 @@ export class CodexComponent implements OnInit {
 
     const additions = preview.additions;
 
-    // Apply baseStats (class, level, alignment, race)
+    // Apply baseStats (class, level, alignment, race, HP, AC, BAB, Saves)
     if (additions.baseStats) {
       if (!entity['baseStats']) entity['baseStats'] = {};
-      if (additions.baseStats.class) {
-        entity['baseStats']['class'] = additions.baseStats.class;
+      const bs = entity['baseStats'];
+
+      if (additions.baseStats.class) bs['class'] = additions.baseStats.class;
+      if (additions.baseStats.level) bs['level'] = additions.baseStats.level;
+      if (additions.baseStats.alignment) bs['alignment'] = additions.baseStats.alignment;
+      if (additions.baseStats.race) bs['race'] = additions.baseStats.race;
+      if (additions.baseStats.size) bs['size'] = additions.baseStats.size;
+      
+      // HP and AC (Clean up uppercase legacies to prevent backend merge collisions)
+      if (additions.baseStats.hp) {
+        bs['hp'] = additions.baseStats.hp;
+        delete bs['HP'];
       }
-      if (additions.baseStats.level) {
-        entity['baseStats']['level'] = additions.baseStats.level;
+      if (additions.baseStats.ac) {
+        if (!bs.armorClass) bs.armorClass = {};
+        const acObj = typeof additions.baseStats.ac === 'object' ? additions.baseStats.ac : { total: parseInt(additions.baseStats.ac, 10) };
+        bs.armorClass.total = acObj.total || acObj.ac || 10;
+        bs.armorClass.touch = acObj.touch || bs.armorClass.total;
+        bs.armorClass.flatFooted = acObj.flatFooted || acObj['flat-footed'] || bs.armorClass.total;
+        delete bs['AC'];
+        delete bs['ac']; // Ensure we aren't shadowing the root-level 'ac' if it exists in baseStats
+        bs['ac'] = bs.armorClass.total;
       }
-      if (additions.baseStats.alignment) {
-        entity['baseStats']['alignment'] = additions.baseStats.alignment;
+
+      // Combat (BAB, CMB, CMD)
+      if (additions.baseStats.combat) {
+        if (!bs.combat) bs.combat = {};
+        const c = additions.baseStats.combat;
+        if (c.bab !== undefined) bs.combat.bab = c.bab;
+        if (c.cmb !== undefined) bs.combat.cmb = c.cmb;
+        if (c.cmd !== undefined) bs.combat.cmd = c.cmd;
+      } else if (additions.baseStats.bab !== undefined) {
+          if (!bs.combat) bs.combat = {};
+          bs.combat.bab = additions.baseStats.bab;
       }
-      if (additions.baseStats.race) {
-        entity['baseStats']['race'] = additions.baseStats.race;
+
+      // Saves
+      if (additions.baseStats.saves) {
+        if (!bs.saves) bs.saves = {};
+        const s = additions.baseStats.saves;
+        bs.saves.fortitude = s.fortitude || s.fort || 0;
+        bs.saves.reflex = s.reflex || s.ref || 0;
+        bs.saves.will = s.will || 0;
+        // redundancy for legacy keys
+        bs.saves.fort = bs.saves.fortitude;
+        bs.saves.ref = bs.saves.reflex;
       }
+
+      // Abilities (Str, Dex, etc.)
+      const abilities = ['Str', 'Dex', 'Con', 'Int', 'Wis', 'Cha'];
+      abilities.forEach(ab => {
+        const val = additions.baseStats[ab] || additions.baseStats[ab.toLowerCase()];
+        if (val !== undefined) bs[ab] = val;
+      });
+
+      // Misc
+      if (additions.baseStats.speed) bs.speed = additions.baseStats.speed;
+      if (additions.baseStats.senses) bs.senses = additions.baseStats.senses;
+      if (additions.baseStats.initiative) bs.initiative = additions.baseStats.initiative;
     }
 
     // Apply skill additions

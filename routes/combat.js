@@ -7,37 +7,39 @@ const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 
 const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
 
 const CLASS_DATA = {
-    'fighter': { bab: 'full', fort: 'good', ref: 'poor', will: 'poor' },
-    'cleric': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
-    'wizard': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
-    'rogue': { bab: 'medium', fort: 'poor', ref: 'good', will: 'poor' },
-    'paladin': { bab: 'full', fort: 'good', ref: 'poor', will: 'good' },
-    'ranger': { bab: 'full', fort: 'good', ref: 'good', will: 'poor' },
-    'bard': { bab: 'medium', fort: 'poor', ref: 'good', will: 'good' },
-    'sorcerer': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
-    'druid': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
-    'monk': { bab: 'medium', fort: 'good', ref: 'good', will: 'good' },
-    'barbarian': { bab: 'full', fort: 'good', ref: 'poor', will: 'poor' },
-    'slayer': { bab: 'full', fort: 'good', ref: 'good', will: 'poor' },
-    'alchemist': { bab: 'medium', fort: 'good', ref: 'good', will: 'poor' },
-    'inquisitor': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
-    'magus': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
-    'oracle': { bab: 'medium', fort: 'poor', ref: 'poor', will: 'good' },
-    'summoner': { bab: 'medium', fort: 'poor', ref: 'poor', will: 'good' },
-    'witch': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
-    'vigilante': { bab: 'medium', fort: 'poor', ref: 'good', will: 'good' }
+    'fighter': { bab: 'full', hp: 10, fort: 'good', ref: 'poor', will: 'poor' },
+    'cleric': { bab: 'medium', hp: 8, fort: 'good', ref: 'poor', will: 'good' },
+    'wizard': { bab: 'slow', hp: 6, fort: 'poor', ref: 'poor', will: 'good' },
+    'rogue': { bab: 'medium', hp: 8, fort: 'poor', ref: 'good', will: 'poor' },
+    'paladin': { bab: 'full', hp: 10, fort: 'good', ref: 'poor', will: 'good' },
+    'ranger': { bab: 'full', hp: 10, fort: 'good', ref: 'good', will: 'poor' },
+    'bard': { bab: 'medium', hp: 8, fort: 'poor', ref: 'good', will: 'good' },
+    'sorcerer': { bab: 'slow', hp: 6, fort: 'poor', ref: 'poor', will: 'good' },
+    'druid': { bab: 'medium', hp: 8, fort: 'good', ref: 'poor', will: 'good' },
+    'monk': { bab: 'medium', hp: 8, fort: 'good', ref: 'good', will: 'good' },
+    'barbarian': { bab: 'full', hp: 12, fort: 'good', ref: 'poor', will: 'poor' },
+    'slayer': { bab: 'full', hp: 10, fort: 'good', ref: 'good', will: 'poor' },
+    'alchemist': { bab: 'medium', hp: 8, fort: 'good', ref: 'good', will: 'poor' },
+    'inquisitor': { bab: 'medium', hp: 8, fort: 'good', ref: 'poor', will: 'good' },
+    'magus': { bab: 'medium', hp: 8, fort: 'good', ref: 'poor', will: 'good' },
+    'oracle': { bab: 'medium', hp: 8, fort: 'poor', ref: 'poor', will: 'good' },
+    'summoner': { bab: 'medium', hp: 8, fort: 'poor', ref: 'poor', will: 'good' },
+    'witch': { bab: 'slow', hp: 6, fort: 'poor', ref: 'poor', will: 'good' },
+    'vigilante': { bab: 'medium', hp: 8, fort: 'poor', ref: 'good', will: 'good' }
 };
 
 /**
- * Calculate BAB and Base Saves from an array of classes
+ * Calculate BAB, Base Saves, and HP info from an array of classes
  */
 function getClassBaseStats(classes) {
     let totalBab = 0;
     let totalFort = 0;
     let totalRef = 0;
     let totalWill = 0;
+    let hpDie = 8; // default
+    let totalLevel = 0;
 
-    if (!Array.isArray(classes)) return { bab: 0, fort: 0, ref: 0, will: 0 };
+    if (!Array.isArray(classes)) return { bab: 0, fort: 0, ref: 0, will: 0, hpDie: 8, totalLevel: 0 };
 
     classes.forEach(c => {
         const className = (c.className || '').toLowerCase();
@@ -45,6 +47,7 @@ function getClassBaseStats(classes) {
         if (isNaN(level) || level <= 0) return;
 
         const data = CLASS_DATA[className] || CLASS_DATA['fighter']; 
+        totalLevel += level;
 
         // BAB
         if (data.bab === 'full') totalBab += level;
@@ -52,14 +55,18 @@ function getClassBaseStats(classes) {
         else totalBab += Math.floor(level * 0.5);
 
         // Saves
-        const good = GOOD_SAVES[level] || 0;
-        const poor = POOR_SAVES[level] || 0;
+        const safeIndex = Math.min(level, GOOD_SAVES.length - 1);
+        const good = GOOD_SAVES[safeIndex] || 0;
+        const poor = POOR_SAVES[safeIndex] || 0;
         totalFort += data.fort === 'good' ? good : poor;
         totalRef += data.ref === 'good' ? good : poor;
         totalWill += data.will === 'good' ? good : poor;
+        
+        // Priority for HP die (assume first or highest?) - let's just use the max found
+        if (data.hp > hpDie) hpDie = data.hp;
     });
 
-    return { bab: totalBab, fort: totalFort, ref: totalRef, will: totalWill };
+    return { bab: totalBab, fort: totalFort, ref: totalRef, will: totalWill, hpDie, totalLevel };
 }
 
 /**
@@ -190,12 +197,21 @@ module.exports = function (db) {
 
                 combatantData.name = combatantData.name || entity.name;
 
-                // Merge baseStats carefully: AI Payload takes precedence
-                console.log(`[Combat Manager] Merging baseStats...`);
-                combatantData.baseStats = {
-                    ...(entity.baseStats || {}),
-                    ...combatantData.baseStats // AI Payload takes precedence
-                };
+                // Merge baseStats carefully: AI Payload takes precedence UNLESS it's a default value
+                console.log(`[Combat Manager] Smarter Merging baseStats...`);
+                const mergedBaseStats = { ...(entity.baseStats || {}) };
+                for (const [key, val] of Object.entries(combatantData.baseStats || {})) {
+                    const isDefault = (key === 'hp' || key === 'ac') && (val === 10 || val === '10') || (key === 'bab' && (val === 1 || val === '1'));
+                    const dbVal = getCaseInsensitiveProp(entity.baseStats || {}, key);
+                    
+                    if (isDefault && dbVal !== undefined && dbVal !== 10 && dbVal !== 1) {
+                         console.log(`[Combat Manager] Overwriting payload default for "${key}" with DB value: ${dbVal}`);
+                         mergedBaseStats[key] = dbVal;
+                    } else {
+                         mergedBaseStats[key] = val;
+                    }
+                }
+                combatantData.baseStats = mergedBaseStats;
 
                 // Transfer fields from Entity ONLY if they are missing in the processed payload
                 const fieldsToTransfer = [
@@ -261,11 +277,27 @@ module.exports = function (db) {
                     }
                 }
 
-                // BAB Priority Synthesis (Override 0/1 defaults)
+                // BAB & HP/AC Synthesis (Override 0/1/10 defaults)
                 const calculatedStats = getClassBaseStats(combatantData.classes);
                 if (calculatedStats.bab > 0 && (!combatantData.bab || combatantData.bab === 1 || combatantData.bab === '1')) {
                     combatantData.bab = calculatedStats.bab;
                     console.log(`[Combat Manager] Overrode default BAB with synthesis: ${combatantData.bab}`);
+                }
+                
+                // HP Synthesis
+                if (calculatedStats.totalLevel > 0 && (!combatantData.hp || combatantData.hp === 10 || combatantData.hp === '10')) {
+                    const con = getAbilityModifier(getCaseInsensitiveProp(combatantData.baseStats, 'Con') || 10);
+                    const hpBonus = calculatedStats.totalLevel * con;
+                    const hpStr = `${calculatedStats.totalLevel}d${calculatedStats.hpDie}${hpBonus >= 0 ? '+' : ''}${hpBonus}`;
+                    combatantData.hp = calculateAverageHp(hpStr);
+                    console.log(`[Combat Manager] Overrode default HP with synthesis (${hpStr}): ${combatantData.hp}`);
+                }
+
+                // AC Synthesis (Naive baseline if missing)
+                if (!combatantData.ac || combatantData.ac === 10 || combatantData.ac === '10') {
+                    const dex = getAbilityModifier(getCaseInsensitiveProp(combatantData.baseStats, 'Dex') || 10);
+                    combatantData.ac = 10 + dex; // Base AC (Armor is handled by entity properties if present)
+                    console.log(`[Combat Manager] Adjusted default AC for Dex: ${combatantData.ac}`);
                 }
 
                 // Saves Normalization (Capture Object and convert to string)
@@ -279,6 +311,15 @@ module.exports = function (db) {
                 }
                 combatantData.saves = finalSaves;
                 combatantData.Saves = finalSaves;
+                combatantData.baseStats.saves = finalSaves;
+                combatantData.baseStats.Saves = finalSaves;
+                
+                // Final Sync: Ensure synthesized stats are mirrored in baseStats
+                combatantData.baseStats.hp = combatantData.hp;
+                combatantData.baseStats.ac = combatantData.ac;
+                combatantData.baseStats.bab = combatantData.bab;
+                combatantData.baseStats.level = combatantData.level;
+                combatantData.baseStats.cr = combatantData.cr;
 
                 // STRICT HP PARSING
                 let rawHp = combatantData.hp;
