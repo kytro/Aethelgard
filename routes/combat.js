@@ -33,6 +33,15 @@ function getAbilityModifier(score) {
 }
 
 /**
+ * Helper to get property case-insensitively (matching frontend utility)
+ */
+function getCaseInsensitiveProp(obj, key) {
+    if (!obj || typeof obj !== 'object' || !key) return undefined;
+    const objKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+    return objKey ? obj[objKey] : undefined;
+}
+
+/**
  * Calculates BAB from level and class type
  */
 function calculateBAB(level, classType = 'average') {
@@ -137,10 +146,13 @@ module.exports = function (db) {
                 console.log(`[Combat Manager] Equipment:`, (combatantData.equipment || []).length, 'items');
                 console.log(`[Combat Manager] Magic Items:`, (combatantData.magicItems || []).length, 'items');
 
-                // Recalculate HP on the server based on official stats for consistency.
-                const hpValue = calculateAverageHp(baseStats.HP || baseStats.hp || '1d8');
-                combatantData.hp = hpValue;
-                combatantData.maxHp = hpValue;
+                // Recalculate HP on the server ONLY if not provided by the frontend.
+                // This respects user selections like 'Rolled' or 'Max' HP while providing a fallback.
+                if (combatantData.hp === undefined || combatantData.hp === null) {
+                    const hpValue = calculateAverageHp(baseStats.HP || baseStats.hp || '1d8');
+                    combatantData.hp = hpValue;
+                    combatantData.maxHp = hpValue;
+                }
             }
 
             // Default to 0 initiative if not provided
@@ -294,13 +306,28 @@ module.exports = function (db) {
             if (!fight) return res.status(404).json({ message: 'Fight not found' });
 
             const combatants = await db.collection('dm_toolkit_combatants').find({ fightId }).toArray();
-            // Sort by initiative desc, then Dex mod desc, then Name asc
+            // Sort by initiative desc, then initiativeMod (persisted) desc, then Dex mod desc, then Name asc
             combatants.sort((a, b) => {
                 const initDiff = (b.initiative || 0) - (a.initiative || 0);
                 if (initDiff !== 0) return initDiff;
 
-                const dexA = getAbilityModifier(a.baseStats?.Dex || 10);
-                const dexB = getAbilityModifier(b.baseStats?.Dex || 10);
+                // 1. Prefer persisted initiativeMod (calculated by frontend with full logic)
+                const modA = a.initiativeMod !== undefined ? a.initiativeMod : null;
+                const modB = b.initiativeMod !== undefined ? b.initiativeMod : null;
+                
+                if (modA !== null && modB !== null) {
+                    if (modB !== modA) return modB - modA;
+                }
+
+                // 2. Fallback: Calculate effective Dex modifier (Base + Temp)
+                const getEffectiveDex = (c) => {
+                    const base = parseInt(getCaseInsensitiveProp(c.baseStats, 'Dex') || '10', 10);
+                    const temp = parseInt(getCaseInsensitiveProp(c.tempMods, 'Dex') || getCaseInsensitiveProp(c.tempMods, 'Dexterity') || '0', 10);
+                    return getAbilityModifier(base + temp);
+                };
+
+                const dexA = getEffectiveDex(a);
+                const dexB = getEffectiveDex(b);
                 const dexDiff = dexB - dexA;
                 if (dexDiff !== 0) return dexDiff;
 
@@ -358,18 +385,51 @@ module.exports = function (db) {
     router.patch('/fights/:fightId/previous-turn', async (req, res) => {
         const { fightId } = req.params;
         try {
-            const query = { _id: toObjectId(fightId) };
+            const query = ObjectId.isValid(fightId) ? { _id: new ObjectId(fightId) } : { _id: fightId };
             const fight = await db.collection('dm_toolkit_fights').findOne(query);
             if (!fight) return res.status(404).json({ message: 'Fight not found' });
 
             const combatants = await db.collection('dm_toolkit_combatants').find({ fightId }).toArray();
+            
+            // Sort to ensure we handle the right combatant (mirroring next-turn)
+            combatants.sort((a, b) => {
+                const initDiff = (b.initiative || 0) - (a.initiative || 0);
+                if (initDiff !== 0) return initDiff;
+                const modA = a.initiativeMod !== undefined ? a.initiativeMod : (getAbilityModifier(getCaseInsensitiveProp(a.baseStats, 'Dex') || 10) + (a.tempMods?.Dex || 0));
+                const modB = b.initiativeMod !== undefined ? b.initiativeMod : (getAbilityModifier(getCaseInsensitiveProp(b.baseStats, 'Dex') || 10) + (b.tempMods?.Dex || 0));
+                if (modB !== modA) return modB - modA;
+                return a.name.localeCompare(b.name);
+            });
 
-            let prevIndex = (fight.currentTurnIndex || 0) - 1;
+            const currentIndex = fight.currentTurnIndex || 0;
+            const revertingCombatant = combatants[currentIndex];
+
+            let prevIndex = currentIndex - 1;
             let prevRound = fight.roundCounter || 1;
 
             if (prevIndex < 0) {
                 prevRound = Math.max(1, prevRound - 1);
                 prevIndex = Math.max(0, combatants.length - 1);
+            }
+
+            // Handling Effects Reversal (Increment back)
+            if (revertingCombatant && revertingCombatant.effects && revertingCombatant.effects.length > 0) {
+                let effectsChanged = false;
+                const updatedEffects = revertingCombatant.effects.map(effect => {
+                    if (effect.unit === 'rounds' && typeof effect.remainingRounds === 'number') {
+                        effectsChanged = true;
+                        return { ...effect, remainingRounds: effect.remainingRounds + 1 };
+                    }
+                    return effect;
+                });
+
+                if (effectsChanged) {
+                    await db.collection('dm_toolkit_combatants').updateOne(
+                        { _id: revertingCombatant._id },
+                        { $set: { effects: updatedEffects } }
+                    );
+                    console.log(`[Combat Routes] Reverted effects for ${revertingCombatant.name}`);
+                }
             }
 
             const updates = {

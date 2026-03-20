@@ -572,39 +572,15 @@ IMPORTANT: Be accurate to PF1e Core Rulebook rules. Include all standard racial 
       // Get HP for level estimation
       const hp = baseStats.HP || baseStats.hp || baseStats.hitPoints || null;
 
-      // Get API settings
+      // Get AI configurations
       const generalSettings = await db.collection('settings').findOne({ _id: 'general' });
-      const modelId = (generalSettings?.default_ai_model || 'gemini-1.5-flash').replace('models/', '');
-      const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${activeKey.key}`;
 
-      // Helper function to call Gemini API with retry for transient errors
-      const callGemini = async (promptText, maxRetries = 3) => {
-        // Use unified aiService
-        // Note: aiService handles its own caching/logic, but retries for network errors might be internal or reliant on standard fetch.
-        // However, we want to respect the unified service's error handling.
-        // If strict retry logic is needed, we can wrap generateContent.
-
-        let lastError;
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
-          try {
-            const result = await generateContent(db, promptText, {
-              jsonMode: true,
-              systemInstruction: "You are a Pathfinder 1e Expert."
-            });
-            return result;
-          } catch (e) {
-            lastError = e;
-            if (attempt < maxRetries) {
-              const delay = attempt * 2000;
-              console.log(`[AI Complete] Retry ${attempt}/${maxRetries} after error: ${e.message}`);
-              await new Promise(resolve => setTimeout(resolve, delay));
-              continue;
-            }
-            throw e;
-          }
-        }
-        throw lastError;
-      };
+      // Unified AI Service Wrapper
+      const callGemini = (promptText) => generateContent(db, promptText, {
+        jsonMode: true,
+        systemInstruction: "You are a Pathfinder 1e Expert.",
+        maxRetries: 3
+      });
 
       // Inferred base stats from Phase 1
       let inferredBaseStats = {};

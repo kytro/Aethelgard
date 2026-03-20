@@ -51,7 +51,7 @@ ${JSON.stringify(existingNames)}`;
     async function reconcileCollection(collectionName, itemType, idPrefix, maxIterations, batchSize) {
         if (!db) { throw new Error('Database not ready for reconciliation.'); }
 
-        const apiKey = await getActiveApiKey();
+
         const existingDocs = await db.collection(collectionName).find({}).project({ name: 1 }).toArray();
         let knownNames = existingDocs.map(d => d.name).filter(Boolean);
         let totalAdded = 0;
@@ -818,7 +818,7 @@ ${JSON.stringify(existingNames)}`;
         try {
             // 1. Grab Gemini key
             // FIX: Uses robust helper function
-            const apiKey = await getActiveApiKey();
+
 
 
             // 2. Fetch entities and Codex data
@@ -844,53 +844,11 @@ Constraints:
 2.  **Ignore** generic, non-game-rule items like 'keys', 'ledgers', 'pouch', 'spectacles', 'coins', 'trinkets', 'small constructs', 'fine clothes', 'uniform', 'robes', 'maps', or 'scrolls'.
 3.  **Return ONLY** a clean JSON array of extracted item names (no explanations, no markdown formatting).
 `;
-                const prompt = `${systemPrompt}\nInput: \"${text}\"`;
-
-                // Exponential backoff logic for retry
-                const maxRetries = 3;
-                let attempt = 0;
-                while (attempt < maxRetries) {
-                    try {
-                        // FIX: Use the reliable Gemini 1.5 Flash model for production stability
-                        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-                        const body = { contents: [{ parts: [{ text: prompt }] }] };
-
-                        const r = await fetch(url, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(body)
-                        });
-
-                        if (!r.ok) {
-                            if (r.status === 429) {
-                                throw new Error('429 Rate Limit Hit');
-                            }
-                            throw new Error(`Gemini request failed with status: ${r.status} ${r.statusText}`);
-                        }
-
-                        const json = await r.json();
-                        const raw = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
-
-                        try {
-                            // FIX: Robust JSON parsing (removing markdown fences and trimming)
-                            const jsonMatch = raw.match(/```json\s*([\s\S]*?)\s*```/);
-                            const jsonString = jsonMatch ? jsonMatch[1] : raw.trim();
-                            return JSON.parse(jsonString);
-                        } catch (e) {
-                            console.error(`[LINK EQUIPMENT] Failed to parse JSON from Gemini. Raw response: ${raw.substring(0, 100)}...`, e);
-                            return [];
-                        }
-
-                    } catch (error) {
-                        attempt++;
-                        if (attempt >= maxRetries) {
-                            throw error;
-                        }
-                        const delay = Math.pow(2, attempt) * 1000;
-                        console.log(`[LINK EQUIPMENT] Retrying in ${delay / 1000}s due to error: ${error.message}`);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                    }
-                }
+                return await generateContent(db, text, {
+                    systemInstruction: systemPrompt,
+                    jsonMode: true,
+                    maxRetries: 3
+                });
             }
 
             // 4. Batch Processing Loop (Rate Limit Fix)
@@ -1387,21 +1345,14 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         console.log(`[SMART SPELL LINK] Job started.`);
 
         try {
-            const apiKey = await getActiveApiKey();
+
 
             async function fetchFromGemini(prompt) {
-                // FIX: Use the reliable Gemini 1.5 Flash model for reliability
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-                const body = { contents: [{ parts: [{ text: prompt }] }] };
-                const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                if (!r.ok) throw new Error(`Gemini request failed with status: ${r.status} ${r.statusText}`);
-                const json = await r.json();
-                const responseText = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
-
-                // FIX: Robust JSON parsing
-                const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
-                const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
-                return jsonString;
+                // Use the unified service with retry logic
+                return await generateContent(db, prompt, {
+                    jsonMode: true,
+                    maxRetries: 3
+                });
             }
 
             const allSpells = await db.collection('spells_pf1e').find({}).toArray();
@@ -1663,21 +1614,14 @@ ${dryRun ? 'No changes were made to the database.' : 'Database has been updated.
         console.log(`[RECONCILE RULES] Job started.`);
 
         try {
-            const apiKey = await getActiveApiKey();
+
 
             async function fetchFromGemini(prompt) {
-                // FIX: Use the reliable Gemini 1.5 Flash model
-                const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
-                const body = { contents: [{ parts: [{ text: prompt }] }] };
-                const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                if (!r.ok) throw new Error(`Gemini request failed with status: ${r.status} ${r.statusText}`);
-                const json = await r.json();
-                const responseText = json.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || '[]';
-
-                // FIX: Robust JSON parsing
-                const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/);
-                const jsonString = jsonMatch ? jsonMatch[1] : responseText.trim();
-                return jsonString;
+                // Use the unified service with retry logic
+                return await generateContent(db, prompt, {
+                    jsonMode: true,
+                    maxRetries: 3
+                });
             }
 
             async function reconcileRuleType(ruleType, idPrefix) {

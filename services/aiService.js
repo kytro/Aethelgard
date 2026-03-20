@@ -141,21 +141,48 @@ async function fetchOllamaWithFallback(endpoint, options = {}, timeoutMs = 5000,
 
 /**
  * Generates content using the specified model (Gemini or Ollama).
+ * Supports optional retry logic for production stability.
  */
 async function generateContent(db, prompt, options = {}) {
-    // 1. Determine Model
-    let modelId = options.model;
-    if (!modelId) {
-        const generalSettings = await db.collection('settings').findOne({ _id: 'general' });
-        modelId = generalSettings?.default_ai_model || 'gemini-1.5-flash';
+    const maxRetries = options.maxRetries || 1;
+    let attempt = 0;
+    let lastError = null;
+
+    while (attempt < maxRetries) {
+        try {
+            // 1. Determine Model
+            let modelId = options.model;
+            if (!modelId) {
+                const generalSettings = await db.collection('settings').findOne({ _id: 'general' });
+                modelId = generalSettings?.default_ai_model || 'gemini-1.5-flash';
+            }
+
+            // 2. Route to appropriate provider
+            let result;
+            if (modelId.startsWith('ollama:')) {
+                result = await generateOllamaContent(db, modelName(modelId), prompt, options);
+            } else {
+                result = await generateGeminiContent(db, modelId, prompt, options);
+            }
+            return result;
+
+        } catch (error) {
+            lastError = error;
+            attempt++;
+            if (attempt >= maxRetries) break;
+
+            const delay = options.retryDelay || Math.pow(2, attempt) * 1000;
+            console.warn(`[AI Service] Attempt ${attempt} failed. Retrying in ${delay}ms... Error: ${error.message}`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
     }
 
-    // 2. Route to appropriate provider
-    if (modelId.startsWith('ollama:')) {
-        return generateOllamaContent(db, modelId.replace('ollama:', ''), prompt, options);
-    } else {
-        return generateGeminiContent(db, modelId, prompt, options);
-    }
+    throw lastError || new Error('AI Generation failed after multiple attempts.');
+}
+
+// Helper to strip prefix
+function modelName(id) {
+    return id.replace('ollama:', '').replace('models/', '');
 }
 
 // --- Internal: Ollama Implementation ---
@@ -182,7 +209,7 @@ async function generateOllamaContent(db, modelName, prompt, options) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        }, 600000, db);
+        }, options.timeout || 600000, db);
 
         const responseText = result.message?.content;
 
@@ -206,8 +233,8 @@ async function generateGeminiContent(db, modelId, prompt, options) {
     if (!apiKey) throw new Error('Gemini API key is not configured.');
 
     // Clean model ID
-    modelId = modelId.replace('models/', '');
-    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${apiKey}`;
+    const sanitizedModelId = modelId.replace('models/', '');
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${sanitizedModelId}:generateContent?key=${apiKey}`;
 
     const payload = {
         contents: [{ parts: [{ text: prompt }] }]
@@ -228,7 +255,9 @@ async function generateGeminiContent(db, modelId, prompt, options) {
 
     if (!response.ok) {
         const errBody = await response.json().catch(() => ({}));
-        throw new Error(`Gemini API Error ${response.status}: ${errBody.error?.message || response.statusText}`);
+        const message = errBody.error?.message || response.statusText;
+        if (response.status === 429) throw new Error(`Gemini Rate Limit (429): ${message}`);
+        throw new Error(`Gemini API Error ${response.status}: ${message}`);
     }
 
     const result = await response.json();
@@ -244,14 +273,23 @@ async function generateGeminiContent(db, modelId, prompt, options) {
 
 // Helper: Robust JSON parsing
 function parseJsonSafe(text) {
+    if (!text) return null;
+    
     // Try to find JSON code block first
     const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-    const jsonString = jsonMatch ? jsonMatch[1] : text.trim();
+    const jsonString = (jsonMatch ? jsonMatch[1] : text).trim();
+    
     try {
         return JSON.parse(jsonString);
     } catch (e) {
-        console.error("Failed to parse JSON:", text);
-        throw new Error('Failed to parse JSON response from AI.');
+        // Fallback: If it still fails, try to strip ANY markdown fences if present
+        const stripped = jsonString.replace(/^```|```$/g, '').trim();
+        try {
+            return JSON.parse(stripped);
+        } catch (e2) {
+            console.error("[AI Service] Failed to parse JSON. Raw text preview:", text.substring(0, 100));
+            throw new Error('Failed to parse JSON response from AI.');
+        }
     }
 }
 

@@ -15,7 +15,7 @@ import {
 import { ModalService } from '../../shared/services/modal.service';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
-interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; hp: number; maxHp: number; tempHp?: number; nonLethalDamage?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entity_id?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; specialAbilities?: string[]; specialAttacks?: string[]; vulnerabilities?: string[]; equipment?: any[]; magicItems?: any[]; inventory?: any[]; classes?: any[]; rules?: any[]; spells?: any; }
+interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; initiativeMod?: number; hp: number; maxHp: number; tempHp?: number; nonLethalDamage?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entity_id?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; specialAbilities?: string[]; specialAttacks?: string[]; vulnerabilities?: string[]; equipment?: any[]; magicItems?: any[]; inventory?: any[]; classes?: any[]; rules?: any[]; spells?: any; }
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
@@ -122,10 +122,12 @@ export class CombatManagerComponent {
   objectKeys = Object.keys;
 
   constructor() {
-    effect(() => {
+    effect((onCleanup) => {
       const fight = this.currentFight();
       if (fight) {
-        this.loadCombatants(fight._id).subscribe(); // Subscribe to observable
+        const sub = this.loadCombatants(fight._id).subscribe();
+        onCleanup(() => sub.unsubscribe());
+
         this.isCombatActive.set(!!fight.combatStartTime);
         this.roundCounter.set(fight.roundCounter || 1);
         this.currentTurnIndex.set(fight.currentTurnIndex || 0);
@@ -269,7 +271,7 @@ export class CombatManagerComponent {
   }
 
   // --- NEW HELPER: Roll Initiative ---
-  private rollInitiative(baseStats: any, rules: string[] = []): number {
+  private rollInitiative(baseStats: any, rules: string[] = []): { total: number, mod: number } {
     const dex = getCaseInsensitiveProp(baseStats, 'Dex') || 10;
     const dexMod = getAbilityModifierAsNumber(dex);
 
@@ -284,7 +286,10 @@ export class CombatManagerComponent {
     }
 
     const roll = Math.floor(Math.random() * 20) + 1;
-    return roll + dexMod + miscMod;
+    return {
+      total: roll + dexMod + miscMod,
+      mod: dexMod + miscMod
+    };
   }
 
   async handleAddCombatant(event: Event) {
@@ -308,7 +313,10 @@ export class CombatManagerComponent {
           hp: +custom.hp,
           maxHp: +custom.hp,
           type: 'Custom',
-          baseStats: {}
+          baseStats: {
+            hp: +custom.hp,
+            initiative: +custom.initiative
+          }
         };
       } else {
         // Logic for Found/Bestiary/Templates
@@ -397,7 +405,7 @@ export class CombatManagerComponent {
         }
 
         // Calculate Initiative
-        const initRoll = this.rollInitiative(baseStats, rules);
+        const { total: initRoll, mod: initMod } = this.rollInitiative(baseStats, rules);
 
         // Normalize: Merge top-level stats provided by AI into baseStats
         const finalBaseStats = {
@@ -407,7 +415,7 @@ export class CombatManagerComponent {
           bab: (resolvedNode as any)?.bab ?? (resolvedNode as any)?.BAB ?? (baseStats as any).bab ?? (baseStats as any).BAB,
           hp: (resolvedNode as any)?.hp ?? (resolvedNode as any)?.HP ?? (baseStats as any).hp ?? (baseStats as any).HP,
           saves: (resolvedNode as any)?.saves ?? (resolvedNode as any)?.Saves ?? (baseStats as any).saves ?? (baseStats as any).Saves,
-          senses: (resolvedNode as any)?.senses ?? (resolvedNode as any)?.Senses ?? (baseStats as any).senses ?? (baseStats as any).Senses,
+          senses: (resolvedNode as any)?.senses ?? (resolvedNode as any)?.Senses ?? (baseStats as any).senses ?? (baseStats as any).Saves,
           classes: (resolvedNode as any)?.classes ?? (baseStats as any).classes ?? []
         };
 
@@ -417,6 +425,7 @@ export class CombatManagerComponent {
           hp: hpVal,
           maxHp: hpVal,
           initiative: initRoll,
+          initiativeMod: initMod, // PERSISTED MODIFIER FOR TIE-BREAKING
           baseStats: finalBaseStats,
           // classes: Handled above
           // Robust equipment lookup (check items, gear, inventory, baseStats too)
@@ -446,9 +455,12 @@ export class CombatManagerComponent {
       this.combatants.update(c => [...c, newCombatant].sort((a, b) => {
         const initDiff = (b.initiative || 0) - (a.initiative || 0);
         if (initDiff !== 0) return initDiff;
-        const dexA = getAbilityModifierAsNumber(getCaseInsensitiveProp(a.baseStats, 'Dex'));
-        const dexB = getAbilityModifierAsNumber(getCaseInsensitiveProp(b.baseStats, 'Dex'));
-        if ((dexB - dexA) !== 0) return dexB - dexA;
+
+        // Use persisted mods for tie-breaking
+        const modA = a.initiativeMod ?? getAbilityModifierAsNumber(getCaseInsensitiveProp(a.baseStats, 'Dex') || 10);
+        const modB = b.initiativeMod ?? getAbilityModifierAsNumber(getCaseInsensitiveProp(b.baseStats, 'Dex') || 10);
+        if ((modB - modA) !== 0) return modB - modA;
+
         return a.name.localeCompare(b.name);
       }));
       this.logAction(`${newCombatant.name} added. HP: ${newCombatant.hp}, Init: ${newCombatant.initiative}`);
@@ -467,9 +479,37 @@ export class CombatManagerComponent {
   handleRemoveCombatant(id: string) {
     const combatant = this.combatants().find(c => c._id === id);
     if (!combatant) return;
+
+    // Calculate the index of the combatant being removed in the current sorted list
+    const sorted = this.modifiedCombatants();
+    const removedIndex = sorted.findIndex(c => c._id === id);
+    const fight = this.currentFight();
+
     this.logAction(`${combatant.name} removed.`);
     this.http.delete(`/codex/api/dm-toolkit/combatants/${id}`).subscribe({
-      next: () => this.combatants.update(c => c.filter(cb => cb._id !== id)),
+      next: () => {
+        this.combatants.update(c => c.filter(cb => cb._id !== id));
+        
+        // Adjust currentTurnIndex if this combatant was before or at the current turn
+        if (fight && fight.combatStartTime && fight.currentTurnIndex !== undefined) {
+          let newTurnIndex = fight.currentTurnIndex;
+          if (removedIndex < newTurnIndex) {
+            newTurnIndex--;
+          } else if (removedIndex === newTurnIndex) {
+            // If the active person is deleted, stay on same index (next person slides in)
+            // but ensure we don't go out of bounds if they were the last one
+            if (newTurnIndex >= sorted.length - 1) {
+              newTurnIndex = 0;
+            }
+          }
+          
+          if (newTurnIndex !== fight.currentTurnIndex) {
+            this.http.patch<Fight>(`/codex/api/dm-toolkit/fights/${fight._id}`, { currentTurnIndex: newTurnIndex }).subscribe({
+              next: (updated) => this.currentFight.set(updated)
+            });
+          }
+        }
+      },
       error: (e) => console.error(e)
     });
   }
@@ -478,10 +518,22 @@ export class CombatManagerComponent {
     const combatant = this.combatants().find(c => c._id === id);
     if (!combatant) return;
     const valueToPatch = (typeof val === 'number' || !isNaN(+val)) && field !== 'effects' ? +val : val;
-    this.http.patch(`/codex/api/dm-toolkit/combatants/${id}`, { [field]: valueToPatch }).subscribe({
+    const updates: any = { [field]: valueToPatch };
+
+    // If stats or effects change, we should also update the persisted initiativeMod
+    // to keep the backend in sync for tie-breaking.
+    if (['baseStats', 'tempMods', 'effects', 'rules', 'activeFeats'].includes(field)) {
+      // Find the fully computed version of this combatant to get the latest modifier
+      const modified = this.modifiedCombatants().find(m => m._id === id);
+      if (modified) {
+        updates.initiativeMod = modified.initiativeMod;
+      }
+    }
+
+    this.http.patch(`/codex/api/dm-toolkit/combatants/${id}`, updates).subscribe({
       error: (e) => console.error(e)
     });
-    this.combatants.update(c => c.map(cb => cb._id === id ? { ...cb, [field]: valueToPatch } : cb));
+    this.combatants.update(c => c.map(cb => cb._id === id ? { ...cb, ...updates } : cb));
 
     // Log the action (optimistic)
     const combatantName = combatant.name;
@@ -583,14 +635,36 @@ export class CombatManagerComponent {
     const current = combatants[currentIndex];
     const target = combatants[targetIndex];
 
-    const currentInit = current.initiative || 0;
-    const targetInit = target.initiative || 0;
+    let currentInit = current.initiative || 0;
+    let targetInit = target.initiative || 0;
+    let currentMod = current.initiativeMod || 0;
+    let targetMod = target.initiativeMod || 0;
 
-    // Swap initiatives
+    // Standard Swap
+    const updatesCurrent: any = { initiative: targetInit, initiativeMod: targetMod };
+    const updatesTarget: any = { initiative: currentInit, initiativeMod: currentMod };
+
+    // If they are tied on both numerical score and modifier, we must force a difference
+    // to guarantee the UI re-orders them.
+    if (currentInit === targetInit && currentMod === targetMod) {
+      if (direction === 'up') {
+        updatesCurrent.initiative = targetInit + 1;
+      } else {
+        updatesCurrent.initiative = targetInit - 1;
+      }
+    }
+
     await Promise.all([
-      this.handleUpdateCombatant(current._id, 'initiative', targetInit),
-      this.handleUpdateCombatant(target._id, 'initiative', currentInit)
+      lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/combatants/${current._id}`, updatesCurrent)),
+      lastValueFrom(this.http.patch(`/codex/api/dm-toolkit/combatants/${target._id}`, updatesTarget))
     ]);
+
+    // Update local state (optimistic or refresh)
+    this.combatants.update(list => list.map(c => {
+      if (c._id === current._id) return { ...c, ...updatesCurrent };
+      if (c._id === target._id) return { ...c, ...updatesTarget };
+      return c;
+    }));
   }
 
   async handleFindCreature() {
@@ -730,6 +804,10 @@ export class CombatManagerComponent {
         resSaves.Fort = parseInt(savesStr.match(/Fort\s*([+-]?\d+)/i)?.[1] || '0', 10);
         resSaves.Ref = parseInt(savesStr.match(/Ref\s*([+-]?\d+)/i)?.[1] || '0', 10);
         resSaves.Will = parseInt(savesStr.match(/Will\s*([+-]?\d+)/i)?.[1] || '0', 10);
+      } else if (savesStr && typeof savesStr === 'object') {
+        resSaves.Fort = Number(getCaseInsensitiveProp(savesStr, 'Fort') || getCaseInsensitiveProp(savesStr, 'Fortitude') || 0);
+        resSaves.Ref = Number(getCaseInsensitiveProp(savesStr, 'Ref') || getCaseInsensitiveProp(savesStr, 'Reflex') || 0);
+        resSaves.Will = Number(getCaseInsensitiveProp(savesStr, 'Will') || 0);
       } else {
         resSaves.Fort = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
         resSaves.Ref = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
@@ -1060,7 +1138,13 @@ export class CombatManagerComponent {
       modifiedStats['Saves'] = formatSaves(modifiedSaves);
       modifiedStats['SavesObject'] = modifiedSaves;
 
-      const initiativeMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(modifiedStats, 'Dex'));
+      const dexScore = getCaseInsensitiveProp(modifiedStats, 'Dex') || 10;
+      const dexMod = getAbilityModifierAsNumber(dexScore);
+      let featMod = 0;
+      if (allFeats.some((f: any) => f.name && f.name.toLowerCase() === 'improved initiative')) {
+        featMod = 4;
+      }
+      const initiativeMod = dexMod + featMod;
 
       const parseAttacks = (s: any) => {
         const attacks: ParsedAttack[] = [];
