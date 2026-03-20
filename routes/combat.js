@@ -74,8 +74,25 @@ function getCaseInsensitiveProp(obj, propName) {
 }
 
 /**
- * Calculates average HP from a dice string (e.g., "4d10+8" => 30)
+ * Calculates BAB from level and class type
  */
+function calculateBAB(level, classType = 'average') {
+    if (classType === 'full') return level;
+    if (classType === 'medium') return Math.floor(level * 0.75);
+    return Math.floor(level / 2);
+}
+
+/**
+ * Calculates saves based on level and ability modifiers
+ */
+function calculateSaves(level, con, dex, wis, classType = 'balanced') {
+    const safeLevel = Math.max(0, Math.min(level - 1, GOOD_SAVES.length - 1));
+    return {
+        fort: (classType === 'fort' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + con,
+        ref: (classType === 'ref' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + dex,
+        will: (classType === 'will' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + wis
+    };
+}
 function calculateAverageHp(hpString) {
     if (!hpString || typeof hpString !== 'string') return 1;
     const match = hpString.match(/(\d+)d(\d+)\s*([+-]\s*\d+)?/);
@@ -295,12 +312,49 @@ module.exports = function (db) {
                     }
                 }
 
-                // Recalculate HP on the server ONLY if not provided (or if it's the 10 fallback)
-                if (combatantData.hp === undefined || combatantData.hp === null || combatantData.hp === 10) {
-                    const hpString = getCaseInsensitiveProp(combatantData.baseStats, 'hp') || '1d8';
-                    const hpValue = calculateAverageHp(hpString);
-                    combatantData.hp = hpValue;
-                    combatantData.maxHp = hpValue;
+                // --- NEW: String-to-Array Splitting for character-separated data ---
+                ['equipment', 'magicItems', 'specialAbilities', 'specialAttacks', 'vulnerabilities', 'rules', 'activeFeats'].forEach(arrField => {
+                    if (typeof combatantData[arrField] === 'string') {
+                        combatantData[arrField] = combatantData[arrField].split(',').map(s => s.trim()).filter(Boolean);
+                    }
+                });
+
+                // --- NEW: STRICT HP PARSING ---
+                let rawHp = combatantData.hp;
+                if (typeof rawHp === 'string') {
+                    // Match the first contiguous block of digits (e.g. "36" from "36 (6d8+6)")
+                    const leadingNumMatch = rawHp.match(/^(\d+)/);
+                    if (leadingNumMatch) {
+                        combatantData.hp = parseInt(leadingNumMatch[1], 10);
+                        console.log(`[Combat Manager] Parsed HP string "${rawHp}" to integer: ${combatantData.hp}`);
+                    } else {
+                        combatantData.hp = calculateAverageHp(rawHp);
+                        console.log(`[Combat Manager] Calculated average HP from string "${rawHp}": ${combatantData.hp}`);
+                    }
+                }
+
+                if (combatantData.hp === undefined || combatantData.hp === null || combatantData.hp === 10 || isNaN(combatantData.hp)) {
+                    const hpString = getCaseInsensitiveProp(combatantData.baseStats, 'hp') || getCaseInsensitiveProp(combatantData.baseStats, 'HP') || '1d8';
+                    combatantData.hp = calculateAverageHp(String(hpString));
+                    console.log(`[Combat Manager] HP was missing or 10. Fallback to baseStats calculation: ${combatantData.hp}`);
+                }
+
+                let rawMaxHp = combatantData.maxHp;
+                if (typeof rawMaxHp === 'string') {
+                    const maxLeadingMatch = rawMaxHp.match(/^(\d+)/);
+                    if (maxLeadingMatch) {
+                        rawMaxHp = parseInt(maxLeadingMatch[1], 10);
+                        console.log(`[Combat Manager] Parsed maxHp string "${rawMaxHp}" to integer: ${rawMaxHp}`);
+                    } else {
+                        rawMaxHp = calculateAverageHp(rawMaxHp);
+                        console.log(`[Combat Manager] Calculated average maxHp from string "${rawMaxHp}": ${rawMaxHp}`);
+                    }
+                }
+                
+                if (!rawMaxHp || isNaN(rawMaxHp) || rawMaxHp === 10 || rawMaxHp < combatantData.hp) {
+                    combatantData.maxHp = combatantData.hp;
+                } else {
+                    combatantData.maxHp = rawMaxHp;
                 }
             }
 
