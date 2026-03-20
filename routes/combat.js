@@ -91,12 +91,14 @@ module.exports = function (db) {
 
                 // Transfer all relevant entity fields to combatant
                 const fieldsToTransfer = [
-                    'ac', 'hp', 'bab', 'init', 'fort', 'ref', 'will',
-                    'melee', 'ranged', 'cmb', 'cmd', 'speed', 'senses',
-                    'level', 'cr', 'type', 'classes', 'tags', 'alignment', 'race',
-                    'equipment', 'magicItems', 'inventory', 'spells', 'spellbook', 'spellSlots',
-                    'feats', 'special_abilities', 'specialAbilities', 'special_attacks', 'specialAttacks',
-                    'rules', 'vulnerabilities', 'resist', 'immune', 'dr', 'sr'
+                    'hp', 'maxHp', 'tempHp', 'nonLethalDamage', 'initiative', 'initiativeMod',
+                    'baseStats', 'tempMods', 'activeFeats', 'type', 'entityId', 'entity_id',
+                    'preparedSpells', 'castSpells', 'spellSlots',
+                    'specialAbilities', 'specialAttacks', 'vulnerabilities',
+                    'equipment', 'magicItems', 'inventory', 'classes', 'rules', 'spells',
+                    'saves', 'Saves',
+                    'feats', 'special_abilities', 'specialAttacks',
+                    'rules', 'resist', 'immune', 'dr', 'sr'
                 ];
 
                 fieldsToTransfer.forEach(field => {

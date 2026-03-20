@@ -809,14 +809,26 @@ export class CombatManagerComponent {
         resSaves.Ref = Number(getCaseInsensitiveProp(savesStr, 'Ref') || getCaseInsensitiveProp(savesStr, 'Reflex') || 0);
         resSaves.Will = Number(getCaseInsensitiveProp(savesStr, 'Will') || 0);
       } else {
-        resSaves.Fort = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
-        resSaves.Ref = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
-        resSaves.Will = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
+        // Check for individual properties transferred by backend or in baseStats (Bug Fix)
+        const fortVal = getCaseInsensitiveProp(baseStats, 'Fort') || getCaseInsensitiveProp(baseStats, 'Fortitude');
+        const refVal = getCaseInsensitiveProp(baseStats, 'Ref') || getCaseInsensitiveProp(baseStats, 'Reflex');
+        const willVal = getCaseInsensitiveProp(baseStats, 'Will');
+        
+        if (fortVal !== undefined || refVal !== undefined || willVal !== undefined) {
+          resSaves.Fort = parseInt(String(fortVal || '0').match(/-?\d+/)?.[0] || '0', 10);
+          resSaves.Ref = parseInt(String(refVal || '0').match(/-?\d+/)?.[0] || '0', 10);
+          resSaves.Will = parseInt(String(willVal || '0').match(/-?\d+/)?.[0] || '0', 10);
+        } else {
+          // Final Fallback to raw mods ONLY if no save data found at all
+          resSaves.Fort = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
+          resSaves.Ref = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
+          resSaves.Will = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
+        }
       }
       baseStats.SavesObject = resSaves;
 
       // Baseline Enforcement: Ensure saves never drop below Class Base + Ability Mod 
-      // This fix addresses "Captain Orion Thorne" and other cases where AI import misses base bonuses.
+      // This is the CRITICAL safety net for Fighter 8 characters with empty/invalid saves data.
       const classBase = getClassBaseStats(targetEntity.classes || c.classes || []);
       const conModBase = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
       const dexModBase = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));

@@ -437,73 +437,57 @@ export const calculateCompleteBaseStats = (stats: any, options: CalculateStatsOp
     if (!getCaseInsensitiveProp(newStats, 'Speed')) newStats['Speed'] = '30 ft.';
 
     if (typeof newStats['BAB'] !== 'number') {
-        const explicitBab = parseInt(String(getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || getCaseInsensitiveProp(newStats, 'BAB') || '').match(/-?\d+/)?.[0] || 'NaN', 10);
+        const explicitBabText = String(getCaseInsensitiveProp(newStats, 'Base Attack Bonus') || getCaseInsensitiveProp(newStats, 'BAB') || '');
+        const explicitBab = parseInt(explicitBabText.match(/-?\d+/)?.[0] || 'NaN', 10);
 
         let classBab = 0;
+        const hasClasses = newStats['classes'] && Array.isArray(newStats['classes']) && newStats['classes'].length > 0;
+
+        if (hasClasses) {
+            classBab = getClassBaseStats(newStats['classes']).bab;
+        }
+
+        if (!isNaN(explicitBab)) {
+            newStats['BAB'] = Math.max(explicitBab, classBab);
+        } else if (hasClasses) {
+            newStats['BAB'] = classBab;
+        } else {
+            // Default BAB if nothing found
+            const levelStr = String(getCaseInsensitiveProp(newStats, 'Level') || getCaseInsensitiveProp(newStats, 'CR') || options.level || options.cr || 1);
+            let level = 1;
+            if (levelStr === '1/2' || levelStr === '0.5') level = 1; else level = parseInt(levelStr, 10);
+            newStats['BAB'] = Math.max(0, isNaN(level) ? 0 : level);
+        }
+    }
+
+    // --- Independent Saves Derivation ---
+    if (!getCaseInsensitiveProp(newStats, 'Saves')) {
         let classStats = { bab: 0, fort: 0, ref: 0, will: 0 };
         const hasClasses = newStats['classes'] && Array.isArray(newStats['classes']) && newStats['classes'].length > 0;
 
         if (hasClasses) {
             classStats = getClassBaseStats(newStats['classes']);
-            classBab = classStats.bab;
-        }
-
-        if (!isNaN(explicitBab)) {
-            // Use the higher of explicit or calculated BAB to fix low/zero DB values
-            // Exception: If explicit is 0 and calculated is > 0, we trust calculated.
-            // If explicit is HIGHER (e.g. monster HD), we trust explicit.
-            newStats['BAB'] = Math.max(explicitBab, classBab);
-        } else if (hasClasses) {
-            newStats['BAB'] = classBab;
-            // Also derive Saves if missing
-            if (!getCaseInsensitiveProp(newStats, 'Saves')) {
-                const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
-                const conMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Con'));
-                const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Dex'));
-                const wisMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Wis'));
-                const chaMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Cha'));
-                const fortMod = isUndead ? chaMod : (isConstruct ? 0 : conMod);
-                // console.log(`[DEBUG] Deriving Saves: ClassBase(F=${classStats.fort}, R=${classStats.ref}, W=${classStats.will}) + Mods(F=${fortMod}, R=${dexMod}, W=${wisMod})`);
-                newStats['Saves'] = `Fort ${formatMod(classStats.fort + fortMod)}, Ref ${formatMod(classStats.ref + dexMod)}, Will ${formatMod(classStats.will + wisMod)}`;
-            }
         } else {
-            // FALLBACK: Try to parse class from other fields, or default to Fighter scaled to Level/CR
-            let fallbackClasses: any[] = [];
-
-            // 1. Try to parse from "Class" or "Type" string
             const classString = getCaseInsensitiveProp(newStats, 'Class') || getCaseInsensitiveProp(newStats, 'Type') || options.classString || '';
             const parsed = parseClassString(String(classString));
             if (parsed.length > 0) {
-                console.log(`[DEBUG] Parsed classes from string "${classString}":`, parsed);
-                fallbackClasses = parsed;
+                classStats = getClassBaseStats(parsed);
             } else {
-                // 2. Default to Fighter, scaled to CR or Level
                 const levelStr = String(getCaseInsensitiveProp(newStats, 'Level') || getCaseInsensitiveProp(newStats, 'CR') || options.level || options.cr || 1);
-                // Handle "1/2" CR
                 let level = 1;
-                if (levelStr === '1/2' || levelStr === '0.5') level = 1;
-                else level = parseInt(levelStr, 10);
-
-                const effectiveLevel = isNaN(level) || level < 1 ? 1 : level;
-                console.log(`[DEBUG] No classes found. Defaulting to Fighter Level ${effectiveLevel}.`);
-                fallbackClasses = [{ className: 'fighter', level: effectiveLevel }];
-            }
-
-            const classStats = getClassBaseStats(fallbackClasses);
-            newStats['BAB'] = classStats.bab;
-
-            // Also derive Saves for the fallback
-            if (!getCaseInsensitiveProp(newStats, 'Saves')) {
-                const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
-                const conMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Con'));
-                const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Dex'));
-                const wisMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Wis'));
-                const chaMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Cha'));
-                const fortMod = isUndead ? chaMod : (isConstruct ? 0 : conMod);
-
-                newStats['Saves'] = `Fort ${formatMod(classStats.fort + fortMod)}, Ref ${formatMod(classStats.ref + dexMod)}, Will ${formatMod(classStats.will + wisMod)}`;
+                if (levelStr === '1/2' || levelStr === '0.5') level = 1; else level = parseInt(levelStr, 10);
+                classStats = getClassBaseStats([{ className: 'fighter', level: isNaN(level) ? 1 : level }]);
             }
         }
+
+        const formatMod = (mod: number) => mod >= 0 ? `+${mod}` : String(mod);
+        const conMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Con'));
+        const dexMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Dex'));
+        const wisMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Wis'));
+        const chaMod = getAbilityModifierAsNumber(getCaseInsensitiveProp(newStats, 'Cha'));
+        const fortMod = isUndead ? chaMod : (isConstruct ? 0 : conMod);
+
+        newStats['Saves'] = `Fort ${formatMod(classStats.fort + fortMod)}, Ref ${formatMod(classStats.ref + dexMod)}, Will ${formatMod(classStats.will + wisMod)}`;
     }
 
     // CMB: Tiny+ creatures or those with Agile Maneuvers can use Dex (PF1e fix)
