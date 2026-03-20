@@ -170,15 +170,6 @@ module.exports = function (db) {
                 
                 // If found, standardize it on the combatantData payload so it doesn't get overwritten
                 if (foundVal !== undefined) {
-                    // Logic: If saves is an object (common with AI), stringify it
-                    if (stdKey === 'saves' && typeof foundVal === 'object') {
-                        const fort = getCaseInsensitiveProp(foundVal, 'fort') || getCaseInsensitiveProp(foundVal, 'Fortitude') || 0;
-                        const ref = getCaseInsensitiveProp(foundVal, 'ref') || getCaseInsensitiveProp(foundVal, 'Reflex') || 0;
-                        const will = getCaseInsensitiveProp(foundVal, 'will') || getCaseInsensitiveProp(foundVal, 'Will') || 0;
-                        foundVal = `Fort ${fort >= 0 ? '+' : ''}${fort}, Ref ${ref >= 0 ? '+' : ''}${ref}, Will ${will >= 0 ? '+' : ''}${will}`;
-                        console.log(`[Combat Manager] Standardized Saves Object to String: ${foundVal}`);
-                    }
-
                     combatantData.baseStats[stdKey] = foundVal;
                     combatantData[stdKey] = foundVal;
                     console.log(`[Combat Manager] Payload Alias resolved: "${matchedAlias}" -> "${stdKey}" =`, foundVal);
@@ -199,7 +190,7 @@ module.exports = function (db) {
 
                 combatantData.name = combatantData.name || entity.name;
 
-                // Merge baseStats carefully: Do not overwrite payload stats with DB stats
+                // Merge baseStats carefully: AI Payload takes precedence
                 console.log(`[Combat Manager] Merging baseStats...`);
                 combatantData.baseStats = {
                     ...(entity.baseStats || {}),
@@ -219,10 +210,13 @@ module.exports = function (db) {
 
                 console.log(`[Combat Manager] Phase 3: Field Transfer Loop...`);
                 fieldsToTransfer.forEach(field => {
-                    // Ignore the frontend "10" fallback for HP
-                    const isDefaultHp = (field === 'hp' || field === 'maxHp') && combatantData[field] === 10;
+                    // Logic: Treat 0, 1, and 10 as "missing" for critical stats 
+                    // This allows DB or Synthesis to override dummy frontend defaults
+                    const isDefaultValue = 
+                        (field === 'hp' || field === 'maxHp' || field === 'ac') && (combatantData[field] === 10 || combatantData[field] === '10') ||
+                        (field === 'bab' && (combatantData[field] === 1 || combatantData[field] === 0 || combatantData[field] === '1' || combatantData[field] === '0'));
                     
-                    if (combatantData[field] === undefined || isDefaultHp) {
+                    if (combatantData[field] === undefined || isDefaultValue) {
                         const currentBaseStats = combatantData.baseStats || {};
                         const fromBase = getCaseInsensitiveProp(currentBaseStats, field);
 
@@ -248,13 +242,16 @@ module.exports = function (db) {
                     }
                 });
 
-                // Synthesize arrays and missing values
+                // --- POST-MERGE REFINEMENTS ---
+
+                // Array Normalization
                 ['equipment', 'magicItems', 'specialAbilities', 'specialAttacks', 'vulnerabilities', 'rules', 'activeFeats'].forEach(arrField => {
                     if (typeof combatantData[arrField] === 'string') {
                         combatantData[arrField] = combatantData[arrField].split(',').map(s => s.trim()).filter(Boolean);
                     }
                 });
 
+                // Class Synthesis
                 if (!combatantData.classes || combatantData.classes.length === 0) {
                     const cls = getCaseInsensitiveProp(combatantData.baseStats, 'class') || getCaseInsensitiveProp(combatantData, 'class');
                     const lvl = getCaseInsensitiveProp(combatantData.baseStats, 'level') || getCaseInsensitiveProp(combatantData, 'level') || 1;
@@ -264,11 +261,24 @@ module.exports = function (db) {
                     }
                 }
 
-                if ((combatantData.bab === undefined || combatantData.bab === null) && combatantData.classes && combatantData.classes.length > 0) {
-                    const stats = getClassBaseStats(combatantData.classes);
-                    combatantData.bab = stats.bab;
-                    console.log(`[Combat Manager] Synthesized BAB from classes: ${combatantData.bab}`);
+                // BAB Priority Synthesis (Override 0/1 defaults)
+                const calculatedStats = getClassBaseStats(combatantData.classes);
+                if (calculatedStats.bab > 0 && (!combatantData.bab || combatantData.bab === 1 || combatantData.bab === '1')) {
+                    combatantData.bab = calculatedStats.bab;
+                    console.log(`[Combat Manager] Overrode default BAB with synthesis: ${combatantData.bab}`);
                 }
+
+                // Saves Normalization (Capture Object and convert to string)
+                let finalSaves = combatantData.saves || combatantData.Saves;
+                if (typeof finalSaves === 'object' && finalSaves !== null) {
+                    const fort = getCaseInsensitiveProp(finalSaves, 'fort') || getCaseInsensitiveProp(finalSaves, 'fortitude') || 0;
+                    const ref = getCaseInsensitiveProp(finalSaves, 'ref') || getCaseInsensitiveProp(finalSaves, 'reflex') || 0;
+                    const will = getCaseInsensitiveProp(finalSaves, 'will') || 0;
+                    finalSaves = `Fort ${fort >= 0 ? '+' : ''}${fort}, Ref ${ref >= 0 ? '+' : ''}${ref}, Will ${will >= 0 ? '+' : ''}${will}`;
+                    console.log(`[Combat Manager] Saves Normalized to: ${finalSaves}`);
+                }
+                combatantData.saves = finalSaves;
+                combatantData.Saves = finalSaves;
 
                 // STRICT HP PARSING
                 let rawHp = combatantData.hp;
@@ -283,7 +293,7 @@ module.exports = function (db) {
                     }
                 }
 
-                if (combatantData.hp === undefined || combatantData.hp === null || combatantData.hp === 10 || isNaN(combatantData.hp)) {
+                if (!combatantData.hp || combatantData.hp === 10 || isNaN(combatantData.hp)) {
                     const hpString = getCaseInsensitiveProp(combatantData.baseStats, 'hp') || getCaseInsensitiveProp(combatantData.baseStats, 'HP') || '1d8';
                     combatantData.hp = calculateAverageHp(String(hpString));
                     console.log(`[Combat Manager] HP Redundant Fallback: ${combatantData.hp}`);
