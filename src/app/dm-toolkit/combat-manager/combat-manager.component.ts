@@ -10,7 +10,7 @@ import {
   CONSTRUCT_HP_BONUS, calculateSkillBonus, CalculateStatsOptions,
   getArmorMaxDex, getArmorCheckPenalty, classifyNaturalAttack, isLightWeapon, LIGHT_WEAPONS,
   calculateLoad, calculateTotalWeight, LOAD_PENALTIES,
-  ARMOR_DATA, SHIELD_DATA
+  ARMOR_DATA, SHIELD_DATA, getClassBaseStats
 } from '../dm-toolkit.utils';
 import { ModalService } from '../../shared/services/modal.service';
 
@@ -814,6 +814,17 @@ export class CombatManagerComponent {
         resSaves.Will = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
       }
       baseStats.SavesObject = resSaves;
+
+      // Baseline Enforcement: Ensure saves never drop below Class Base + Ability Mod 
+      // This fix addresses "Captain Orion Thorne" and other cases where AI import misses base bonuses.
+      const classBase = getClassBaseStats(targetEntity.classes || c.classes || []);
+      const conModBase = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Con'));
+      const dexModBase = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Dex'));
+      const wisModBase = getAbilityModifierAsNumber(getCaseInsensitiveProp(baseStats, 'Wis'));
+      
+      baseStats.SavesObject.Fort = Math.max(baseStats.SavesObject.Fort, classBase.fort + conModBase);
+      baseStats.SavesObject.Ref = Math.max(baseStats.SavesObject.Ref, classBase.ref + dexModBase);
+      baseStats.SavesObject.Will = Math.max(baseStats.SavesObject.Will, classBase.will + wisModBase);
 
       const allFeats = (targetEntity.rules || []).map((id: string) => ({ id, ...this.rulesCache().get(id) })).filter((f: any) => f.name) || [];
 
