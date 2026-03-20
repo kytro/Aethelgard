@@ -84,15 +84,18 @@ module.exports = function (db) {
                 type: req.body.type || 'npc',
 
                 // Ensure arrays and root stats are captured from payload
-                equipment: req.body.equipment || [],
-                magicItems: req.body.magicItems || [],
-                classes: req.body.classes || [],
-                saves: req.body.saves || req.body.Saves,
-                class: req.body.class || req.body.Class,
-                level: req.body.level || req.body.Level,
-                cr: req.body.cr || req.body.CR,
-                ac: req.body.ac || req.body.AC,
-                bab: req.body.bab || req.body.BAB
+                // --- UPDATE: Only capture if length > 0 so DB transfer can overwrite empty ones ---
+                equipment: req.body.equipment?.length > 0 ? req.body.equipment : undefined,
+                magicItems: req.body.magicItems?.length > 0 ? req.body.magicItems : undefined,
+                classes: req.body.classes?.length > 0 ? req.body.classes : undefined,
+                rules: req.body.rules?.length > 0 ? req.body.rules : undefined,
+                saves: req.body.saves || req.body.Saves || undefined,
+                class: req.body.class || req.body.Class || undefined,
+                level: req.body.level || req.body.Level || undefined,
+                cr: req.body.cr || req.body.CR || undefined,
+                ac: req.body.ac || req.body.AC || undefined,
+                bab: req.body.bab || req.body.BAB || undefined
+                // ---------------------------------------------------------------------------------
             };
 
             // If an entityId is provided, fetch the source entity to get its baseStats.
@@ -130,7 +133,9 @@ module.exports = function (db) {
                     'equipment', 'magicItems', 'inventory', 'classes', 'rules', 'spells',
                     'saves', 'Saves', 'class', 'Class', 'level', 'Level', 'cr', 'CR', 
                     'feats', 'special_abilities', 'specialAttacks',
-                    'rules', 'resist', 'immune', 'dr', 'sr'
+                    'rules', 'resist', 'immune', 'dr', 'sr',
+                    // --- ADD THESE MISSING FIELDS ---
+                    'ac', 'AC', 'bab', 'BAB'
                 ];
 
                 fieldsToTransfer.forEach(field => {
@@ -198,6 +203,13 @@ module.exports = function (db) {
             combatantData.fightId = fightId;
             combatantData.effects = combatantData.effects || [];
             combatantData.tempMods = combatantData.tempMods || {};
+
+            // --- ADD THESE FALLBACKS HERE ---
+            combatantData.classes = combatantData.classes || [];
+            combatantData.equipment = combatantData.equipment || [];
+            combatantData.magicItems = combatantData.magicItems || [];
+            combatantData.rules = combatantData.rules || [];
+            // --------------------------------
 
             console.log(`[Combat Manager] Final combatantData to insert:`, {
                 name: combatantData.name,
