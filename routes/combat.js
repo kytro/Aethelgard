@@ -116,35 +116,7 @@ function getAbilityModifier(score) {
     return Math.floor((numScore - 10) / 2);
 }
 
-/**
- * Helper to get property case-insensitively (matching frontend utility)
- */
-function getCaseInsensitiveProp(obj, key) {
-    if (!obj || typeof obj !== 'object' || !key) return undefined;
-    const objKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
-    return objKey ? obj[objKey] : undefined;
-}
 
-/**
- * Calculates BAB from level and class type
- */
-function calculateBAB(level, classType = 'average') {
-    if (classType === 'full') return level;
-    if (classType === 'medium') return Math.floor(level * 0.75);
-    return Math.floor(level / 2);
-}
-
-/**
- * Calculates saves based on level and ability modifiers
- */
-function calculateSaves(level, con, dex, wis, classType = 'balanced') {
-    const safeLevel = Math.max(0, Math.min(level - 1, GOOD_SAVES.length - 1));
-    return {
-        fort: (classType === 'fort' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + con,
-        ref: (classType === 'ref' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + dex,
-        will: (classType === 'will' ? GOOD_SAVES[safeLevel] : POOR_SAVES[safeLevel]) + wis
-    };
-}
 
 module.exports = function (db) {
     if (!db) throw new Error('[Combat Routes] Database not provided');
@@ -153,6 +125,8 @@ module.exports = function (db) {
     router.post('/fights/:fightId/combatants', async (req, res) => {
         try {
             const { fightId } = req.params;
+            console.log(`[Combat Manager] --- NEW COMBATANT ADDITION START ---`);
+            console.log(`[Combat Manager] Initial Request Body Keys:`, Object.keys(req.body));
             
             // 1. Initialize payload
             let combatantData = {
@@ -181,34 +155,52 @@ module.exports = function (db) {
                 cr: ['cr', 'CR', 'Challenge Rating']
             };
 
+            console.log(`[Combat Manager] Phase 1: Payload Alias Resolution...`);
             Object.entries(aliases).forEach(([stdKey, aliasList]) => {
                 let foundVal;
+                let matchedAlias;
                 // Check baseStats first, then root level
                 for (const alias of aliasList) {
                     foundVal = getCaseInsensitiveProp(combatantData.baseStats, alias) || getCaseInsensitiveProp(combatantData, alias);
-                    if (foundVal !== undefined) break;
+                    if (foundVal !== undefined) {
+                        matchedAlias = alias;
+                        break;
+                    }
                 }
                 
                 // If found, standardize it on the combatantData payload so it doesn't get overwritten
                 if (foundVal !== undefined) {
+                    // Logic: If saves is an object (common with AI), stringify it
+                    if (stdKey === 'saves' && typeof foundVal === 'object') {
+                        const fort = getCaseInsensitiveProp(foundVal, 'fort') || getCaseInsensitiveProp(foundVal, 'Fortitude') || 0;
+                        const ref = getCaseInsensitiveProp(foundVal, 'ref') || getCaseInsensitiveProp(foundVal, 'Reflex') || 0;
+                        const will = getCaseInsensitiveProp(foundVal, 'will') || getCaseInsensitiveProp(foundVal, 'Will') || 0;
+                        foundVal = `Fort ${fort >= 0 ? '+' : ''}${fort}, Ref ${ref >= 0 ? '+' : ''}${ref}, Will ${will >= 0 ? '+' : ''}${will}`;
+                        console.log(`[Combat Manager] Standardized Saves Object to String: ${foundVal}`);
+                    }
+
                     combatantData.baseStats[stdKey] = foundVal;
                     combatantData[stdKey] = foundVal;
-                    console.log(`[Combat Manager] Payload Alias resolved: "${stdKey}" =`, foundVal);
+                    console.log(`[Combat Manager] Payload Alias resolved: "${matchedAlias}" -> "${stdKey}" =`, foundVal);
                 }
             });
 
             // 3. Entity Database Fallback Merge
             if (combatantData.entityId) {
+                console.log(`[Combat Manager] Phase 2: DB Lookup for entityId: ${combatantData.entityId}`);
                 const query = { _id: toObjectId(combatantData.entityId) };
                 const entity = await db.collection('entities_pf1e').findOne(query);
 
                 if (!entity) {
+                    console.error(`[Combat Manager] Entity NOT found in DB.`);
                     return res.status(404).json({ message: `Entity with ID ${combatantData.entityId} not found.` });
                 }
+                console.log(`[Combat Manager] Entity found: "${entity.name}"`);
 
                 combatantData.name = combatantData.name || entity.name;
 
                 // Merge baseStats carefully: Do not overwrite payload stats with DB stats
+                console.log(`[Combat Manager] Merging baseStats...`);
                 combatantData.baseStats = {
                     ...(entity.baseStats || {}),
                     ...combatantData.baseStats // AI Payload takes precedence
@@ -225,6 +217,7 @@ module.exports = function (db) {
                     'resist', 'immune', 'dr', 'sr', 'ac', 'bab'
                 ];
 
+                console.log(`[Combat Manager] Phase 3: Field Transfer Loop...`);
                 fieldsToTransfer.forEach(field => {
                     // Ignore the frontend "10" fallback for HP
                     const isDefaultHp = (field === 'hp' || field === 'maxHp') && combatantData[field] === 10;
@@ -235,6 +228,7 @@ module.exports = function (db) {
 
                         if (fromBase !== undefined) {
                             combatantData[field] = fromBase;
+                            console.log(`[Combat Manager] Field "${field}" transferred from current baseStats:`, fromBase);
                             return;
                         }
 
@@ -242,8 +236,15 @@ module.exports = function (db) {
                         const entityBaseStats = entity.baseStats || {};
                         const baseValue = getCaseInsensitiveProp(entityBaseStats, field);
 
-                        if (value !== undefined) combatantData[field] = value;
-                        else if (baseValue !== undefined) combatantData[field] = baseValue;
+                        if (value !== undefined) {
+                            combatantData[field] = value;
+                            console.log(`[Combat Manager] Field "${field}" transferred from DB entity root:`, value);
+                        } else if (baseValue !== undefined) {
+                            combatantData[field] = baseValue;
+                            console.log(`[Combat Manager] Field "${field}" transferred from DB entity baseStats:`, baseValue);
+                        }
+                    } else {
+                        console.log(`[Combat Manager] Field "${field}" already present in payload, SKIP transfer:`, combatantData[field]);
                     }
                 });
 
@@ -259,19 +260,14 @@ module.exports = function (db) {
                     const lvl = getCaseInsensitiveProp(combatantData.baseStats, 'level') || getCaseInsensitiveProp(combatantData, 'level') || 1;
                     if (cls) {
                         combatantData.classes = [{ className: String(cls), level: parseInt(String(lvl), 10) || 1 }];
+                        console.log(`[Combat Manager] Synthesized Classes Array:`, combatantData.classes);
                     }
                 }
 
                 if ((combatantData.bab === undefined || combatantData.bab === null) && combatantData.classes && combatantData.classes.length > 0) {
-                    let totalBab = 0;
-                    combatantData.classes.forEach(c => {
-                        const lowerCls = c.className.toLowerCase();
-                        let type = 'medium';
-                        if (['fighter', 'barbarian', 'paladin', 'ranger', 'cavalier', 'gunslinger', 'brawler', 'bloodrager', 'slayer', 'swashbuckler'].includes(lowerCls)) type = 'full';
-                        else if (['wizard', 'sorcerer', 'witch', 'arcanist'].includes(lowerCls)) type = 'half';
-                        totalBab += calculateBAB(c.level, type);
-                    });
-                    combatantData.bab = totalBab;
+                    const stats = getClassBaseStats(combatantData.classes);
+                    combatantData.bab = stats.bab;
+                    console.log(`[Combat Manager] Synthesized BAB from classes: ${combatantData.bab}`);
                 }
 
                 // STRICT HP PARSING
@@ -280,14 +276,17 @@ module.exports = function (db) {
                     const leadingNumMatch = rawHp.match(/^(\d+)/);
                     if (leadingNumMatch) {
                         combatantData.hp = parseInt(leadingNumMatch[1], 10);
+                        console.log(`[Combat Manager] Parsed HP String "${rawHp}" to Int: ${combatantData.hp}`);
                     } else {
                         combatantData.hp = calculateAverageHp(rawHp);
+                        console.log(`[Combat Manager] Calculated Avg HP from "${rawHp}": ${combatantData.hp}`);
                     }
                 }
 
                 if (combatantData.hp === undefined || combatantData.hp === null || combatantData.hp === 10 || isNaN(combatantData.hp)) {
                     const hpString = getCaseInsensitiveProp(combatantData.baseStats, 'hp') || getCaseInsensitiveProp(combatantData.baseStats, 'HP') || '1d8';
                     combatantData.hp = calculateAverageHp(String(hpString));
+                    console.log(`[Combat Manager] HP Redundant Fallback: ${combatantData.hp}`);
                 }
 
                 let rawMaxHp = combatantData.maxHp;
@@ -295,8 +294,10 @@ module.exports = function (db) {
                     const maxLeadingMatch = rawMaxHp.match(/^(\d+)/);
                     if (maxLeadingMatch) {
                         rawMaxHp = parseInt(maxLeadingMatch[1], 10);
+                        console.log(`[Combat Manager] Parsed MaxHP String to Int: ${rawMaxHp}`);
                     } else {
                         rawMaxHp = calculateAverageHp(rawMaxHp);
+                        console.log(`[Combat Manager] Calculated Avg MaxHP: ${rawMaxHp}`);
                     }
                 }
                 
@@ -305,6 +306,8 @@ module.exports = function (db) {
                 } else {
                     combatantData.maxHp = rawMaxHp;
                 }
+            } else {
+                console.log(`[Combat Manager] No EntityId, skipping DB merge.`);
             }
 
             // Final fallback cleanups
@@ -320,7 +323,8 @@ module.exports = function (db) {
             combatantData.magicItems = combatantData.magicItems || [];
             combatantData.rules = combatantData.rules || [];
 
-            console.log(`[Combat Manager] Final insertion. HP: ${combatantData.hp}, AC: ${combatantData.ac}, Saves: ${combatantData.saves}`);
+            console.log(`[Combat Manager] Final insertion check. HP: ${combatantData.hp}, AC: ${combatantData.ac}, Saves: ${combatantData.saves}`);
+            console.log(`[Combat Manager] --- NEW COMBATANT ADDITION END ---`);
 
             const result = await db.collection('dm_toolkit_combatants').insertOne(combatantData);
             const newCombatant = await db.collection('dm_toolkit_combatants').findOne({ _id: result.insertedId });
