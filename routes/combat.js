@@ -87,6 +87,14 @@ module.exports = function (db) {
                     ...(entity.baseStats || {}),
                     ...(combatantData.baseStats || {})
                 };
+
+                // --- ADD THIS BLOCK: Force top-level stats into baseStats ---
+                ['saves', 'Saves', 'ac', 'AC', 'bab', 'BAB'].forEach(key => {
+                    if (entity[key] && !combatantData.baseStats[key]) {
+                        combatantData.baseStats[key] = entity[key];
+                    }
+                });
+                // ------------------------------------------------------------
                 combatantData.name = entity.name;
 
                 // Transfer all relevant entity fields to combatant
@@ -96,7 +104,7 @@ module.exports = function (db) {
                     'preparedSpells', 'castSpells', 'spellSlots',
                     'specialAbilities', 'specialAttacks', 'vulnerabilities',
                     'equipment', 'magicItems', 'inventory', 'classes', 'rules', 'spells',
-                    'saves', 'Saves',
+                    'saves', 'Saves', 'class', 'Class', 'level', 'Level', 'cr', 'CR', 
                     'feats', 'special_abilities', 'specialAttacks',
                     'rules', 'resist', 'immune', 'dr', 'sr'
                 ];

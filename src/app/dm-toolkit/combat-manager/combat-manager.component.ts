@@ -336,6 +336,7 @@ export class CombatManagerComponent {
           if (cached) {
             baseStats = cached.baseStats || {};
             rules = cached.rules || [];
+            resolvedNode = cached; // <--- ADD THIS LINE
           }
         } else {
           const templateKey = this.selectedTemplate();
@@ -789,12 +790,26 @@ export class CombatManagerComponent {
       const actualEntityId = c.entity_id || c.entityId;
       const entity = actualEntityId ? this.entitiesCache().find(e => e.id === actualEntityId) : null;
       const targetEntity = entity || c as any;
-      const baseStats = calculateCompleteBaseStats(c.baseStats, {
+
+      // --- ADD THIS BLOCK ---
+      // Merge top-level saves from backend transfer to prevent auto-generation overwrite
+      const preppedBaseStats = {
+          ...(c.baseStats || {}),
+          Saves: (c as any).Saves || (c as any).saves || c.baseStats?.Saves || c.baseStats?.saves,
+          Fort: (c as any).Fort || (c as any).fort || c.baseStats?.Fort || c.baseStats?.fort,
+          Ref: (c as any).Ref || (c as any).ref || c.baseStats?.Ref || c.baseStats?.ref,
+          Will: (c as any).Will || (c as any).will || c.baseStats?.Will || c.baseStats?.will,
+      };
+      // ----------------------
+
+      // --- UPDATE the first argument from c.baseStats to preppedBaseStats ---
+      const baseStats = calculateCompleteBaseStats(preppedBaseStats, {
         classes: c.classes,
         type: c.type,
         specialAbilities: c.specialAbilities,
         level: (targetEntity as any)?.level || (targetEntity as any)?.Level,
         cr: (targetEntity as any)?.cr || (targetEntity as any)?.CR,
+        // Ensure the class string is caught if transferred to the top level
         classString: (targetEntity as any)?.class || (targetEntity as any)?.Class || (targetEntity as any)?.type || (targetEntity as any)?.Type
       });
       // Saves parsing
