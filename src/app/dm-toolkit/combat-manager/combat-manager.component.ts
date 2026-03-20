@@ -15,7 +15,7 @@ import {
 import { ModalService } from '../../shared/services/modal.service';
 
 interface Fight { _id: string; name: string; createdAt: any; combatStartTime?: any; roundCounter?: number; currentTurnIndex?: number; log?: string[]; }
-interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; initiativeMod?: number; hp: number; maxHp: number; tempHp?: number; nonLethalDamage?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entity_id?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; specialAbilities?: string[]; specialAttacks?: string[]; vulnerabilities?: string[]; equipment?: any[]; magicItems?: any[]; inventory?: any[]; classes?: any[]; rules?: any[]; spells?: any; saves?: any; Saves?: any; class?: string; level?: number; cr?: string; senses?: string; }
+interface Combatant { _id: string; fightId: string; name: string; initiative: number | null; initiativeMod?: number; hp: number; maxHp: number; tempHp?: number; nonLethalDamage?: number; baseStats: any; effects: CombatantEffect[]; tempMods: { [key: string]: number }; activeFeats?: string[]; type?: string; entity_id?: string; entityId?: string; preparedSpells?: any[]; castSpells?: any[]; spellSlots?: { [level: string]: number }; specialAbilities?: string[]; specialAttacks?: string[]; vulnerabilities?: string[]; equipment?: any[]; magicItems?: any[]; inventory?: any[]; classes?: any[]; rules?: any[]; spells?: any; saves?: any; Saves?: any; class?: string; level?: number; cr?: string; senses?: string; ac?: any; bab?: any; }
 interface CombatantEffect { name: string; duration: number; unit: 'rounds' | 'minutes' | 'permanent' | 'hours' | 'days'; startRound: number; remainingRounds: number; }
 interface ParsedAttack { name: string; bonus: string; damage: string; }
 interface Spell { id: string; name: string; level: number; school: string; castingTime: string; range: string; duration: string; savingThrow: string; spellResistance: string; description: string; }
@@ -436,20 +436,17 @@ export class CombatManagerComponent {
           level: (resolvedNode as any)?.level ?? (resolvedNode as any)?.Level ?? (baseStats as any)?.level ?? (baseStats as any)?.Level,
           cr: (resolvedNode as any)?.cr ?? (resolvedNode as any)?.CR ?? (baseStats as any)?.cr ?? (baseStats as any)?.CR,
           // -------------------------------------------------------------------
-          // classes: Handled above
-          // Robust equipment lookup (check items, gear, inventory, baseStats too)
-          equipment: (resolvedNode as any)?.equipment
-            ?? (resolvedNode as any)?.Equipment
-            ?? (resolvedNode as any)?.items
-            ?? (resolvedNode as any)?.Items
-            ?? (resolvedNode as any)?.gear
-            ?? (resolvedNode as any)?.Gear
-            ?? (resolvedNode as any)?.inventory
-            ?? (resolvedNode as any)?.Inventory
-            ?? (baseStats as any)?.equipment
-            ?? (baseStats as any)?.items
-            ?? [],
-          magicItems: (resolvedNode as any)?.magicItems || [],
+          // --- EXPAND THIS BLOCK TO INCLUDE ARRAYS AND AC/BAB ---
+          equipment: (resolvedNode as any)?.equipment ?? (resolvedNode as any)?.Equipment
+            ?? (resolvedNode as any)?.items ?? (resolvedNode as any)?.Items
+            ?? (resolvedNode as any)?.gear ?? (resolvedNode as any)?.Gear
+            ?? (resolvedNode as any)?.inventory ?? (resolvedNode as any)?.Inventory
+            ?? (baseStats as any)?.equipment ?? (baseStats as any)?.items ?? [],
+          magicItems: (resolvedNode as any)?.magicItems ?? (resolvedNode as any)?.MagicItems ?? [],
+          classes: (resolvedNode as any)?.classes ?? (resolvedNode as any)?.Classes ?? [],
+          ac: finalBaseStats.ac,
+          bab: finalBaseStats.bab,
+          // ------------------------------------------------------
           rules: (resolvedNode as any)?.rules || rules,
           spells: (resolvedNode as any)?.spells || {},
           specialAbilities: (resolvedNode as any)?.specialAbilities || (resolvedNode as any)?.special_abilities || [],

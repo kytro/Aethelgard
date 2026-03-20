@@ -69,7 +69,31 @@ module.exports = function (db) {
     router.post('/fights/:fightId/combatants', async (req, res) => {
         try {
             const { fightId } = req.params;
-            let combatantData = req.body;
+            
+            // Normalize: Explicitly capture critical fields from req.body to prevent "filtering" 
+            // when the database lookup is bypassed (e.g. for AI creatures in cache)
+            let combatantData = {
+                ...req.body,
+                name: req.body.name,
+                hp: req.body.hp || req.body.HP,
+                maxHp: req.body.maxHp || req.body.MaxHP || req.body.hp || req.body.HP,
+                initiative: req.body.initiative,
+                initiativeMod: req.body.initiativeMod || 0,
+                baseStats: req.body.baseStats || {},
+                tempMods: req.body.tempMods || {},
+                type: req.body.type || 'npc',
+
+                // Ensure arrays and root stats are captured from payload
+                equipment: req.body.equipment || [],
+                magicItems: req.body.magicItems || [],
+                classes: req.body.classes || [],
+                saves: req.body.saves || req.body.Saves,
+                class: req.body.class || req.body.Class,
+                level: req.body.level || req.body.Level,
+                cr: req.body.cr || req.body.CR,
+                ac: req.body.ac || req.body.AC,
+                bab: req.body.bab || req.body.BAB
+            };
 
             // If an entityId is provided, fetch the source entity to get its baseStats.
             if (combatantData.entityId) {
