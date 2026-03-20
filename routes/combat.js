@@ -6,6 +6,62 @@ const { toObjectId } = require('../utils/db-helpers');
 const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 15, 16, 16, 17];
 const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
 
+const CLASS_DATA = {
+    'fighter': { bab: 'full', fort: 'good', ref: 'poor', will: 'poor' },
+    'cleric': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
+    'wizard': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
+    'rogue': { bab: 'medium', fort: 'poor', ref: 'good', will: 'poor' },
+    'paladin': { bab: 'full', fort: 'good', ref: 'poor', will: 'good' },
+    'ranger': { bab: 'full', fort: 'good', ref: 'good', will: 'poor' },
+    'bard': { bab: 'medium', fort: 'poor', ref: 'good', will: 'good' },
+    'sorcerer': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
+    'druid': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
+    'monk': { bab: 'medium', fort: 'good', ref: 'good', will: 'good' },
+    'barbarian': { bab: 'full', fort: 'good', ref: 'poor', will: 'poor' },
+    'slayer': { bab: 'full', fort: 'good', ref: 'good', will: 'poor' },
+    'alchemist': { bab: 'medium', fort: 'good', ref: 'good', will: 'poor' },
+    'inquisitor': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
+    'magus': { bab: 'medium', fort: 'good', ref: 'poor', will: 'good' },
+    'oracle': { bab: 'medium', fort: 'poor', ref: 'poor', will: 'good' },
+    'summoner': { bab: 'medium', fort: 'poor', ref: 'poor', will: 'good' },
+    'witch': { bab: 'slow', fort: 'poor', ref: 'poor', will: 'good' },
+    'vigilante': { bab: 'medium', fort: 'poor', ref: 'good', will: 'good' }
+};
+
+/**
+ * Calculate BAB and Base Saves from an array of classes
+ */
+function getClassBaseStats(classes) {
+    let totalBab = 0;
+    let totalFort = 0;
+    let totalRef = 0;
+    let totalWill = 0;
+
+    if (!Array.isArray(classes)) return { bab: 0, fort: 0, ref: 0, will: 0 };
+
+    classes.forEach(c => {
+        const className = (c.className || '').toLowerCase();
+        const level = parseInt(String(c.level), 10);
+        if (isNaN(level) || level <= 0) return;
+
+        const data = CLASS_DATA[className] || CLASS_DATA['fighter']; 
+
+        // BAB
+        if (data.bab === 'full') totalBab += level;
+        else if (data.bab === 'medium') totalBab += Math.floor(level * 0.75);
+        else totalBab += Math.floor(level * 0.5);
+
+        // Saves
+        const good = GOOD_SAVES[level] || 0;
+        const poor = POOR_SAVES[level] || 0;
+        totalFort += data.fort === 'good' ? good : poor;
+        totalRef += data.ref === 'good' ? good : poor;
+        totalWill += data.will === 'good' ? good : poor;
+    });
+
+    return { bab: totalBab, fort: totalFort, ref: totalRef, will: totalWill };
+}
+
 /**
  * Safely get a property from an object regardless of case
  */
@@ -120,7 +176,7 @@ module.exports = function (db) {
                 }
 
                 // --- NEW: AI Alias Resolution ---
-                // Catch common hallucinated keys from Ollama/Gemini
+                console.log(`[Combat Manager] Starting Alias Resolution for "${entity.name}"`);
                 const aliases = {
                     hp: ['hp', 'Hit Points', 'Hit Dice', 'HD'],
                     ac: ['ac', 'Armor Class'],
@@ -132,16 +188,34 @@ module.exports = function (db) {
 
                 Object.entries(aliases).forEach(([stdKey, aliasList]) => {
                     let foundVal;
+                    let sourceAlias;
                     for (const alias of aliasList) {
                         foundVal = getCaseInsensitiveProp(entity.baseStats, alias) || getCaseInsensitiveProp(entity, alias);
-                        if (foundVal !== undefined) break;
+                        if (foundVal !== undefined) {
+                            sourceAlias = alias;
+                            break;
+                        }
                     }
                     if (foundVal !== undefined) {
+                        console.log(`[Combat Manager] Alias match found: "${sourceAlias}" -> mapped to "${stdKey}" with value: ${foundVal}`);
                         if (!entity.baseStats) entity.baseStats = {};
                         entity.baseStats[stdKey] = foundVal;
                         entity[stdKey] = foundVal;
                     }
                 });
+
+                // --- NEW: Classes Array Synthesis (DONE EARLIER so transfer can use it) ---
+                if (!combatantData.classes || combatantData.classes.length === 0) {
+                    const cls = getCaseInsensitiveProp(combatantData.baseStats, 'class') || getCaseInsensitiveProp(combatantData, 'class')
+                        || getCaseInsensitiveProp(entity.baseStats, 'class') || getCaseInsensitiveProp(entity, 'class');
+                    const lvl = getCaseInsensitiveProp(combatantData.baseStats, 'level') || getCaseInsensitiveProp(combatantData, 'level')
+                        || getCaseInsensitiveProp(entity.baseStats, 'level') || getCaseInsensitiveProp(entity, 'level') || 1;
+                    
+                    if (cls) {
+                        combatantData.classes = [{ className: String(cls), level: parseInt(String(lvl), 10) || 1 }];
+                        console.log(`[Combat Manager] Synthesized classes array:`, combatantData.classes);
+                    }
+                }
 
                 // Merge properties: incoming baseStats should override/supplement entity baseStats
                 combatantData.baseStats = {
@@ -170,8 +244,8 @@ module.exports = function (db) {
                     'ac', 'AC', 'bab', 'BAB'
                 ];
 
+                console.log(`[Combat Manager] Transferring fields from DB/Payload...`);
                 fieldsToTransfer.forEach(field => {
-                    // Treat frontend's default '10' for HP as undefined to allow DB/AI override
                     const isDefaultHp = (field === 'hp' || field === 'maxHp') && combatantData[field] === 10;
                     
                     if (combatantData[field] === undefined || isDefaultHp) {
@@ -180,6 +254,7 @@ module.exports = function (db) {
 
                         if (fromBase !== undefined) {
                             combatantData[field] = fromBase;
+                            console.log(`[Combat Manager] Field "${field}" found in baseStats: ${fromBase}`);
                             return;
                         }
 
@@ -187,24 +262,38 @@ module.exports = function (db) {
                         const entityBaseStats = entity.baseStats || {};
                         const baseValue = getCaseInsensitiveProp(entityBaseStats, field);
 
-                        if (value !== undefined) combatantData[field] = value;
-                        else if (baseValue !== undefined) combatantData[field] = baseValue;
+                        if (value !== undefined) {
+                            combatantData[field] = value;
+                            console.log(`[Combat Manager] Field "${field}" found on entity root: ${value}`);
+                        } else if (baseValue !== undefined) {
+                            combatantData[field] = baseValue;
+                            console.log(`[Combat Manager] Field "${field}" found in entity.baseStats: ${baseValue}`);
+                        }
+                    } else {
+                        console.log(`[Combat Manager] Field "${field}" already present in payload: ${combatantData[field]}`);
                     }
                 });
 
-                // --- NEW: Classes Array Synthesis ---
-                // If AI output 'class' and 'level' as strings, build the expected array
-                if (!combatantData.classes || combatantData.classes.length === 0) {
-                    const cls = getCaseInsensitiveProp(combatantData.baseStats, 'class') || getCaseInsensitiveProp(combatantData, 'class');
-                    const lvl = getCaseInsensitiveProp(combatantData.baseStats, 'level') || getCaseInsensitiveProp(combatantData, 'level') || 1;
-                    if (cls) {
-                        combatantData.classes = [{ className: String(cls), level: parseInt(String(lvl), 10) || 1 }];
+                // Final Synthesis for BAB/Saves if missing
+                if (!combatantData.bab || combatantData.bab === 1) { 
+                    const classStats = getClassBaseStats(combatantData.classes);
+                    if (classStats.bab > 0) {
+                        combatantData.bab = classStats.bab;
+                        console.log(`[Combat Manager] Synthesized BAB from classes: ${combatantData.bab}`);
                     }
                 }
 
-                // Log what stats we're transferring for debugging
-                console.log(`[Combat Manager] Adding: ${entity.name}`);
-                console.log(`[Combat Manager] Classes Synthesis:`, combatantData.classes);
+                if (!combatantData.saves && !combatantData.Saves) {
+                    const classStats = getClassBaseStats(combatantData.classes);
+                    if (classStats.fort > 0 || classStats.ref > 0 || classStats.will > 0) {
+                        const formatMod = (mod) => mod >= 0 ? `+${mod}` : String(mod);
+                        // Backend only has class base saves for now (Con/Dex/Wis mods aren't easily available here)
+                        // This is still better than +0/+0/+0
+                        combatantData.Saves = `Fort ${formatMod(classStats.fort)}, Ref ${formatMod(classStats.ref)}, Will ${formatMod(classStats.will)}`;
+                        combatantData.saves = combatantData.Saves;
+                        console.log(`[Combat Manager] Synthesized Saves from classes: ${combatantData.Saves}`);
+                    }
+                }
 
                 // Recalculate HP on the server ONLY if not provided (or if it's the 10 fallback)
                 if (combatantData.hp === undefined || combatantData.hp === null || combatantData.hp === 10) {
