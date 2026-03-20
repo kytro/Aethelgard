@@ -7,6 +7,17 @@ const GOOD_SAVES = [0, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 
 const POOR_SAVES = [0, 0, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, 7, 8, 8, 8, 9, 9, 9, 10, 10, 10];
 
 /**
+ * Safely get a property from an object regardless of case
+ */
+function getCaseInsensitiveProp(obj, propName) {
+    if (!obj || typeof obj !== 'object' || !propName) return undefined;
+    if (obj[propName] !== undefined) return obj[propName];
+    const target = propName.toLowerCase();
+    const key = Object.keys(obj).find(k => k.toLowerCase() === target);
+    return key ? obj[key] : undefined;
+}
+
+/**
  * Calculates average HP from a dice string (e.g., "4d10+8" => 30)
  */
 function calculateAverageHp(hpString) {
@@ -103,11 +114,34 @@ module.exports = function (db) {
                 const query = { _id: toObjectId(combatantData.entityId) };
                 const entity = await db.collection('entities_pf1e').findOne(query);
 
-                // If the entity is not found, it's a critical error. Abort and send an error.
                 if (!entity) {
                     console.error(`[Combat Manager] Could not find source entity for ID: ${combatantData.entityId}`);
                     return res.status(404).json({ message: `Entity with ID ${combatantData.entityId} not found.` });
                 }
+
+                // --- NEW: AI Alias Resolution ---
+                // Catch common hallucinated keys from Ollama/Gemini
+                const aliases = {
+                    hp: ['hp', 'Hit Points', 'Hit Dice', 'HD'],
+                    ac: ['ac', 'Armor Class'],
+                    bab: ['bab', 'Base Atk', 'Base Attack'],
+                    saves: ['saves', 'Saving Throws'],
+                    class: ['class'],
+                    level: ['level']
+                };
+
+                Object.entries(aliases).forEach(([stdKey, aliasList]) => {
+                    let foundVal;
+                    for (const alias of aliasList) {
+                        foundVal = getCaseInsensitiveProp(entity.baseStats, alias) || getCaseInsensitiveProp(entity, alias);
+                        if (foundVal !== undefined) break;
+                    }
+                    if (foundVal !== undefined) {
+                        if (!entity.baseStats) entity.baseStats = {};
+                        entity.baseStats[stdKey] = foundVal;
+                        entity[stdKey] = foundVal;
+                    }
+                });
 
                 // Merge properties: incoming baseStats should override/supplement entity baseStats
                 combatantData.baseStats = {
@@ -115,13 +149,12 @@ module.exports = function (db) {
                     ...(combatantData.baseStats || {})
                 };
 
-                // --- ADD THIS BLOCK: Force top-level stats into baseStats ---
-                ['saves', 'Saves', 'ac', 'AC', 'bab', 'BAB'].forEach(key => {
+                // Force top-level stats into baseStats (Added hp/HP)
+                ['saves', 'Saves', 'ac', 'AC', 'bab', 'BAB', 'hp', 'HP'].forEach(key => {
                     if (entity[key] && !combatantData.baseStats[key]) {
                         combatantData.baseStats[key] = entity[key];
                     }
                 });
-                // ------------------------------------------------------------
                 combatantData.name = entity.name;
 
                 // Transfer all relevant entity fields to combatant
@@ -134,61 +167,49 @@ module.exports = function (db) {
                     'saves', 'Saves', 'class', 'Class', 'level', 'Level', 'cr', 'CR', 
                     'feats', 'special_abilities', 'specialAttacks',
                     'rules', 'resist', 'immune', 'dr', 'sr',
-                    // --- ADD THESE MISSING FIELDS ---
                     'ac', 'AC', 'bab', 'BAB'
                 ];
 
                 fieldsToTransfer.forEach(field => {
-                    // If the field exists on the entity (top-level) and not on combatant, copy it
-                    // We check both lowercase and pascal case for some fields just in case
-                    if (combatantData[field] === undefined) {
-                        // 1. Check if it exists in the *already merged* combatantData.baseStats
-                        // (This catches values calculated by the frontend, e.g. BAB, AC)
+                    // Treat frontend's default '10' for HP as undefined to allow DB/AI override
+                    const isDefaultHp = (field === 'hp' || field === 'maxHp') && combatantData[field] === 10;
+                    
+                    if (combatantData[field] === undefined || isDefaultHp) {
                         const currentBaseStats = combatantData.baseStats || {};
-                        // Check lowercase, PascalCase, and ALL CAPS (common in PF1e like BAB, AC, HP)
-                        const fromBase = currentBaseStats[field]
-                            || currentBaseStats[field.charAt(0).toUpperCase() + field.slice(1)]
-                            || currentBaseStats[field.toUpperCase()];
+                        const fromBase = getCaseInsensitiveProp(currentBaseStats, field);
 
                         if (fromBase !== undefined) {
                             combatantData[field] = fromBase;
                             return;
                         }
 
-                        // 2. Fallback to Source Entity
-                        const value = entity[field] || entity[field.charAt(0).toUpperCase() + field.slice(1)];
-                        // Also check entity.baseStats for these fields as a fallback
+                        const value = getCaseInsensitiveProp(entity, field);
                         const entityBaseStats = entity.baseStats || {};
-                        const baseValue = entityBaseStats[field]
-                            || entityBaseStats[field.charAt(0).toUpperCase() + field.slice(1)]
-                            || entityBaseStats[field.toUpperCase()];
+                        const baseValue = getCaseInsensitiveProp(entityBaseStats, field);
 
                         if (value !== undefined) combatantData[field] = value;
                         else if (baseValue !== undefined) combatantData[field] = baseValue;
                     }
                 });
 
-                const baseStats = combatantData.baseStats;
+                // --- NEW: Classes Array Synthesis ---
+                // If AI output 'class' and 'level' as strings, build the expected array
+                if (!combatantData.classes || combatantData.classes.length === 0) {
+                    const cls = getCaseInsensitiveProp(combatantData.baseStats, 'class') || getCaseInsensitiveProp(combatantData, 'class');
+                    const lvl = getCaseInsensitiveProp(combatantData.baseStats, 'level') || getCaseInsensitiveProp(combatantData, 'level') || 1;
+                    if (cls) {
+                        combatantData.classes = [{ className: String(cls), level: parseInt(String(lvl), 10) || 1 }];
+                    }
+                }
 
                 // Log what stats we're transferring for debugging
                 console.log(`[Combat Manager] Adding: ${entity.name}`);
-                console.log(`[Combat Manager] Ability Scores:`, {
-                    Str: baseStats.Str || baseStats.str,
-                    Dex: baseStats.Dex || baseStats.dex,
-                    Con: baseStats.Con || baseStats.con,
-                    Int: baseStats.Int || baseStats.int,
-                    Wis: baseStats.Wis || baseStats.wis,
-                    Cha: baseStats.Cha || baseStats.cha
-                });
-                console.log(`[Combat Manager] Skills:`, baseStats.Skills || baseStats.skills || {});
-                console.log(`[Combat Manager] Classes:`, combatantData.classes || []);
-                console.log(`[Combat Manager] Equipment:`, (combatantData.equipment || []).length, 'items');
-                console.log(`[Combat Manager] Magic Items:`, (combatantData.magicItems || []).length, 'items');
+                console.log(`[Combat Manager] Classes Synthesis:`, combatantData.classes);
 
-                // Recalculate HP on the server ONLY if not provided by the frontend.
-                // This respects user selections like 'Rolled' or 'Max' HP while providing a fallback.
-                if (combatantData.hp === undefined || combatantData.hp === null) {
-                    const hpValue = calculateAverageHp(baseStats.HP || baseStats.hp || '1d8');
+                // Recalculate HP on the server ONLY if not provided (or if it's the 10 fallback)
+                if (combatantData.hp === undefined || combatantData.hp === null || combatantData.hp === 10) {
+                    const hpString = getCaseInsensitiveProp(combatantData.baseStats, 'hp') || '1d8';
+                    const hpValue = calculateAverageHp(hpString);
                     combatantData.hp = hpValue;
                     combatantData.maxHp = hpValue;
                 }

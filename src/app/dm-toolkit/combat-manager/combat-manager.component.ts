@@ -360,7 +360,7 @@ export class CombatManagerComponent {
             // Robust ID resolution supporting camelCase, snake_case, and nested metadata
             entityId = n.entity_id || n.entityId || n.baseStats?.entity_id || n.baseStats?.entityId || n.id || n._id || n.metadata?.id || n.metadata?.entityId;
 
-            const hpField = getCaseInsensitiveProp(n.baseStats || node, 'hp') || getCaseInsensitiveProp(n.baseStats || node, 'HP');
+            const hpField = getCaseInsensitiveProp(n.baseStats || node, 'hp') || getCaseInsensitiveProp(n.baseStats || node, 'HP') || getCaseInsensitiveProp(n.baseStats || node, 'Hit Points');
             if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
 
             baseStats = n.baseStats || node;
@@ -392,7 +392,7 @@ export class CombatManagerComponent {
               resolvedNode = resolvedEntity;
               rules = resolvedEntity.rules || [];
               if (hpVal === 10) {
-                const hpField = getCaseInsensitiveProp(baseStats, 'hp');
+                const hpField = getCaseInsensitiveProp(baseStats, 'hp') || getCaseInsensitiveProp(baseStats, 'Hit Points');
                 if (hpField) hpVal = this.computeHpFromString(String(hpField), this.monsterHpOption);
               }
             }
@@ -411,13 +411,12 @@ export class CombatManagerComponent {
         // Normalize: Merge top-level stats provided by AI into baseStats
         const finalBaseStats = {
           ...baseStats,
-          // Prefer top-level fields if present (common in AI generations or imports)
-          ac: (resolvedNode as any)?.ac ?? (resolvedNode as any)?.AC ?? (baseStats as any).ac ?? (baseStats as any).AC,
-          bab: (resolvedNode as any)?.bab ?? (resolvedNode as any)?.BAB ?? (baseStats as any).bab ?? (baseStats as any).BAB,
-          hp: (resolvedNode as any)?.hp ?? (resolvedNode as any)?.HP ?? (baseStats as any).hp ?? (baseStats as any).HP,
-          saves: (resolvedNode as any)?.saves ?? (resolvedNode as any)?.Saves ?? (baseStats as any).saves ?? (baseStats as any).Saves,
-          Saves: (resolvedNode as any)?.saves ?? (resolvedNode as any)?.Saves ?? (baseStats as any).saves ?? (baseStats as any).Saves,
-          senses: (resolvedNode as any)?.senses ?? (resolvedNode as any)?.Senses ?? (baseStats as any).senses ?? (baseStats as any).Senses, // Fixed typo here
+          ac: (resolvedNode as any)?.ac ?? (resolvedNode as any)?.AC ?? (baseStats as any).ac ?? (baseStats as any).AC ?? getCaseInsensitiveProp(baseStats, 'Armor Class'),
+          bab: (resolvedNode as any)?.bab ?? (resolvedNode as any)?.BAB ?? (baseStats as any).bab ?? (baseStats as any).BAB ?? getCaseInsensitiveProp(baseStats, 'Base Atk') ?? getCaseInsensitiveProp(baseStats, 'Base Attack'),
+          hp: (resolvedNode as any)?.hp ?? (resolvedNode as any)?.HP ?? (baseStats as any).hp ?? (baseStats as any).HP ?? getCaseInsensitiveProp(baseStats, 'Hit Points'),
+          saves: (resolvedNode as any)?.saves ?? (resolvedNode as any)?.Saves ?? (baseStats as any).saves ?? (baseStats as any).Saves ?? getCaseInsensitiveProp(baseStats, 'Saving Throws'),
+          Saves: (resolvedNode as any)?.saves ?? (resolvedNode as any)?.Saves ?? (baseStats as any).saves ?? (baseStats as any).Saves ?? getCaseInsensitiveProp(baseStats, 'Saving Throws'),
+          senses: (resolvedNode as any)?.senses ?? (resolvedNode as any)?.Senses ?? (baseStats as any).senses ?? (baseStats as any).Senses,
           classes: (resolvedNode as any)?.classes ?? (baseStats as any).classes ?? []
         };
 
